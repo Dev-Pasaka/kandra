@@ -1,61 +1,39 @@
 plugins {
-    `maven-publish`
-    signing
+    id("com.vanniktech.maven.publish")
 }
 
-// Sources JAR (required by Maven Central)
-val sourcesJar by tasks.registering(Jar::class) {
-    archiveClassifier.set("sources")
-    from(project.extensions.getByType<SourceSetContainer>()["main"].allSource)
-}
+mavenPublishing {
+    // false = stops after upload/validation; a human clicks "Release" in central.sonatype.com.
+    // Flip to true once the pipeline has proven itself on a real release.
+    publishToMavenCentral(automaticRelease = false)
+    signAllPublications()
 
-publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
-            artifact(sourcesJar)
-            pom {
-                name.set(project.name)
-                description.set("Kotlin-first ScyllaDB ORM as a Ktor plugin")
-                url.set("https://github.com/pasakamutuku/kandra")
-                licenses {
-                    license {
-                        name.set("Apache-2.0")
-                        url.set("https://www.apache.org/licenses/LICENSE-2.0")
-                    }
-                }
-                developers {
-                    developer {
-                        id.set("pasakamutuku")
-                        name.set("Pasaka Mutuku")
-                        email.set("dev.pasaka@gmail.com")
-                    }
-                }
-                scm {
-                    url.set("https://github.com/pasakamutuku/kandra")
-                    connection.set("scm:git:git://github.com/pasakamutuku/kandra.git")
-                }
+    pom {
+        name.set(project.name)
+        description.set("Kotlin-first ScyllaDB ORM as a Ktor plugin")
+        inceptionYear.set("2024")
+        url.set("https://github.com/Dev-Pasaka/kandra")
+
+        licenses {
+            license {
+                name.set("The Apache License, Version 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                distribution.set("repo")
             }
         }
-    }
-    repositories {
-        maven {
-            name = "sonatype"
-            url = uri(
-                if (version.toString().endsWith("SNAPSHOT"))
-                    "https://s01.oss.sonatype.org/content/repositories/snapshots/"
-                else
-                    "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
-            )
-            credentials {
-                username = providers.gradleProperty("sonatypeUsername").orNull
-                password = providers.gradleProperty("sonatypePassword").orNull
+
+        developers {
+            developer {
+                id.set("pasakamutuku")
+                name.set("Pasaka Mutuku")
+                email.set("dev.pasaka@gmail.com")
             }
         }
-    }
-}
 
-signing {
-    useGpgCmd()
-    sign(publishing.publications["maven"])
+        scm {
+            url.set("https://github.com/Dev-Pasaka/kandra")
+            connection.set("scm:git:git://github.com/Dev-Pasaka/kandra.git")
+            developerConnection.set("scm:git:ssh://git@github.com/Dev-Pasaka/kandra.git")
+        }
+    }
 }

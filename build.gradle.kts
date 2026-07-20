@@ -1,5 +1,7 @@
 plugins {
-    kotlin("jvm") version "2.1.21" apply false
+    // Kotlin JVM version is pinned via buildSrc's plugin-marker dependency (see
+    // buildSrc/build.gradle.kts) so the publish convention plugin can see its classes —
+    // declaring it again here with a version conflicts with that.
     id("com.google.devtools.ksp") version "2.1.21-2.0.1" apply false
 }
 
@@ -14,7 +16,6 @@ subprojects {
 
     if (name !in nonKotlinModules) {
         apply(plugin = "org.jetbrains.kotlin.jvm")
-        apply(plugin = "maven-publish")
 
         configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
             jvmToolchain(21)
@@ -23,34 +24,7 @@ subprojects {
         tasks.withType<Test> {
             useJUnitPlatform()
         }
-
-        afterEvaluate {
-            configure<PublishingExtension> {
-                publications {
-                    create<MavenPublication>("mavenLocal") {
-                        from(components["java"])
-                        groupId    = project.group.toString()
-                        artifactId = project.name
-                        version    = project.version.toString()
-                    }
-                }
-            }
-        }
     }
 
-    if (name == "kandra-bom") {
-        apply(plugin = "maven-publish")
-        afterEvaluate {
-            configure<PublishingExtension> {
-                publications {
-                    create<MavenPublication>("mavenLocal") {
-                        from(components["javaPlatform"])
-                        groupId    = project.group.toString()
-                        artifactId = project.name
-                        version    = project.version.toString()
-                    }
-                }
-            }
-        }
-    }
+    apply(plugin = "publish")
 }

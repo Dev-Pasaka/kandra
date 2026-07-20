@@ -76,16 +76,16 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("io.kandra:kandra-bom:0.4.0-SNAPSHOT"))
-    implementation("io.kandra:kandra-ktor")       // Ktor plugin (required)
-    implementation("io.kandra:kandra-runtime")    // repositories and batch engine
-    implementation("io.kandra:kandra-core")       // annotations and schema model
+    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.0-SNAPSHOT"))
+    implementation("ke.co.coinx.kandra:kandra-ktor")       // Ktor plugin (required)
+    implementation("ke.co.coinx.kandra:kandra-runtime")    // repositories and batch engine
+    implementation("ke.co.coinx.kandra:kandra-core")       // annotations and schema model
 
     // Optional modules
-    implementation("io.kandra:kandra-kodein")     // Kodein DI
-    implementation("io.kandra:kandra-koin")       // Koin DI
-    implementation("io.kandra:kandra-migrate")    // schema migration runner
-    testImplementation("io.kandra:kandra-test")   // testing utilities
+    implementation("ke.co.coinx.kandra:kandra-kodein")     // Kodein DI
+    implementation("ke.co.coinx.kandra:kandra-koin")       // Koin DI
+    implementation("ke.co.coinx.kandra:kandra-migrate")    // schema migration runner
+    testImplementation("ke.co.coinx.kandra:kandra-test")   // testing utilities
 }
 ```
 
@@ -1158,7 +1158,7 @@ class UserRepositoryTest {
 Add the dependency:
 
 ```kotlin
-testImplementation("io.kandra:kandra-test")
+testImplementation("ke.co.coinx.kandra:kandra-test")
 testImplementation("org.testcontainers:cassandra:1.19.8")
 testImplementation("org.testcontainers:junit-jupiter:1.19.8")
 ```
