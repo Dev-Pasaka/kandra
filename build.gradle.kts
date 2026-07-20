@@ -1,10 +1,11 @@
 plugins {
-    // Kotlin JVM version is pinned via buildSrc's plugin-marker dependency (see
-    // buildSrc/build.gradle.kts) so the publish convention plugin can see its classes —
-    // declaring it again here with a version conflicts with that.
+    // Kotlin JVM and Dokka versions are pinned via buildSrc's plugin-marker dependencies
+    // (see buildSrc/build.gradle.kts) so the publish convention plugin can see their
+    // classes — declaring versions again here conflicts with that.
     id("com.google.devtools.ksp") version "2.1.21-2.0.1" apply false
-    alias(libs.plugins.dokka)
 }
+
+apply(plugin = "org.jetbrains.dokka")
 
 allprojects {
     repositories {

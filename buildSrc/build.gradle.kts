@@ -17,4 +17,10 @@ dependencies {
     // with it — the publish plugin needs Kotlin JVM plugin classes on buildSrc's classloader
     // to detect it at runtime.
     implementation("org.jetbrains.kotlin.jvm:org.jetbrains.kotlin.jvm.gradle.plugin:2.1.21")
+
+    // Same reason: the publish plugin auto-detects Dokka and wires dokkaHtml into the
+    // javadoc jar when the Dokka plugin is applied, so it needs DokkaTask's class on
+    // buildSrc's own classloader too, or configuration fails with a bare
+    // "org.jetbrains.dokka.gradle.DokkaTask" class-loading error.
+    implementation("org.jetbrains.dokka:org.jetbrains.dokka.gradle.plugin:1.9.20")
 }
