@@ -2,13 +2,13 @@
 .gradle/
 build/
 out/
-!gradle/wrapper/gradle-wrapper.jar
 
 # Kotlin / Java
 *.class
 *.jar
 *.war
 *.ear
+!gradle/wrapper/gradle-wrapper.jar
 
 # IDE
 .idea/
