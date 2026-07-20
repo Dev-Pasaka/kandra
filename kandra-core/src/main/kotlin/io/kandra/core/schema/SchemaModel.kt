@@ -1,0 +1,56 @@
+package io.kandra.core.schema
+
+import io.kandra.core.annotations.ClusteringOrder
+import io.kandra.core.annotations.LookupConsistency
+import kotlin.reflect.KClass
+import kotlin.reflect.KType
+
+data class ColumnSchema(
+    val propertyName: String,
+    val cqlName: String,
+    val type: KType,
+    val isPartitionKey: Boolean = false,
+    val clusteringKey: ClusteringKeySchema? = null,
+    val lookupIndex: LookupIndexSchema? = null,
+    val isTransient: Boolean = false,
+    val isCounter: Boolean = false,
+    val isCreatedAt: Boolean = false,
+    val isUpdatedAt: Boolean = false,
+    val isSecondaryIndex: Boolean = false,
+    val isSensitive: Boolean = false,
+    val isVersion: Boolean = false
+)
+
+data class ClusteringKeySchema(val order: ClusteringOrder, val index: Int)
+
+data class LookupIndexSchema(val tableName: String, val consistency: LookupConsistency)
+
+data class TableSchema(
+    val entityClass: KClass<*>,
+    val tableName: String,
+    /** All partition key columns, ordered by @PartitionKey(index). */
+    val partitionKeys: List<ColumnSchema>,
+    val clusteringKeys: List<ColumnSchema>,
+    val columns: List<ColumnSchema>,
+    val lookupTables: List<LookupTableSchema>,
+    val defaultTtl: Int? = null,
+    val isCounterTable: Boolean = false,
+    val createdAtColumn: ColumnSchema? = null,
+    val updatedAtColumn: ColumnSchema? = null,
+    val secondaryIndexes: List<ColumnSchema> = emptyList(),
+    val versionColumn: ColumnSchema? = null,
+    val isSoftDelete: Boolean = false,
+    val softDeleteTtlSeconds: Int? = null,
+    val gcGraceSeconds: Int? = null,
+    val cacheConfig: CacheResultConfig? = null
+)
+
+data class LookupTableSchema(
+    val tableName: String,
+    val indexColumn: ColumnSchema,
+    /** All partition key columns of the primary table — needed to reconstruct the primary key. */
+    val partitionKeyColumns: List<ColumnSchema>,
+    val consistency: LookupConsistency
+)
+
+data class CacheResultConfig(val ttlSeconds: Int, val maxSize: Long)

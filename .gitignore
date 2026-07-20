@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Kotlin / Java
+*.class
+*.jar
+*.war
+*.ear
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# macOS
+.DS_Store
+
+# Environment
+local.properties
+*.env
+.env.local
+
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json
+
+# KSP generated sources (optional — check in if you want reproducible builds)
+**/build/generated/ksp/
