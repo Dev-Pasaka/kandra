@@ -53,19 +53,24 @@ This README covers the common cases end-to-end. For everything else:
 
 ## Using with Claude Code
 
-Kandra ships a [Claude Code](https://claude.com/claude-code) skill at `.claude/skills/kandra/SKILL.md` —
-exact repository/config method signatures, the full annotation reference, and footguns that don't show up
-as compile errors (e.g. `update(old, new)` taking two entities, `@SecondaryIndex` scatter-gather cost).
+Kandra ships [Claude Code](https://claude.com/claude-code) skills at `.claude/skills/` — a project-wide
+overview (`kandra`) plus one exhaustive, module-specific skill per module (`kandra-core`, `kandra-runtime`,
+`kandra-ktor`, `kandra-kodein`, `kandra-koin`, `kandra-codegen`, `kandra-test`, `kandra-multidc`,
+`kandra-migrate`). Each module skill documents every public class, function, and property in that module,
+traced from the actual implementation — including footguns that don't show up as compile errors (e.g.
+`update(old, new)` taking two entities, or which entity annotations `kandra-codegen` actually reads versus
+which are silently ignored).
 
-To get this context in your own project, copy the folder in:
+To get this context in your own project, copy the whole folder in:
 
 ```bash
 mkdir -p .claude/skills
-cp -r /path/to/kandra/.claude/skills/kandra .claude/skills/kandra
+cp -r /path/to/kandra/.claude/skills/. .claude/skills/
 ```
 
-Claude Code picks it up automatically whenever you're defining `@ScyllaTable` entities, calling Kandra
-repositories, or configuring `install(Kandra) { ... }`.
+Claude Code loads the relevant skill automatically based on what you're doing — defining `@ScyllaTable`
+entities, calling repository methods, configuring `install(Kandra) { ... }`, wiring DI, writing tests, or
+authoring a schema migration.
 
 ---
 

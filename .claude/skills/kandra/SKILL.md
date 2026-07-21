@@ -10,6 +10,25 @@ type-safe `*Table` objects via KSP, auto-binds repositories into Kodein or Koin,
 errors at startup rather than at query time. Full docs: `README.md` in the Kandra repo, or wherever this
 skill was copied from — check for a vendored `README.md` alongside this skill first.
 
+This skill is the project-wide overview. For exhaustive, line-traced API coverage of a specific module —
+every public class, function, and property, with gotchas pulled from the actual implementation rather than
+guessed — load the matching module skill instead once you know which module the code touches:
+
+| Skill | Covers |
+|---|---|
+| `kandra-core` | Annotations, schema model, DDL generation, exceptions, auth/consistency/metrics/validator/timestamp types |
+| `kandra-runtime` | `KandraRepository`/`KandraSuspendRepository` (all 18 methods each), `BatchEngine`, `StatementBuilder`, `QueryExecutor`, query DSL, codec, caching |
+| `kandra-ktor` | The `Kandra` plugin, `KandraConfig` and every nested config block, install lifecycle, `SchemaMode` |
+| `kandra-kodein` | `kandraKodein()`, `bindKandraRepository<T>()` |
+| `kandra-koin` | `kandraKoin()` |
+| `kandra-codegen` | The KSP processor — exactly which annotations affect generated `*Table` objects (fewer than you'd expect) |
+| `kandra-test` | `FakeKandraSession`, `KandraTestUtils`, `KandraTestcontainers` — including a known limitation with fake-session repository calls |
+| `kandra-multidc` | `KandraMultiDc.describe()`, plus where the real multi-DC config actually lives (`kandra-ktor`) |
+| `kandra-migrate` | `KandraMigration`, `KandraMigrationRunner`, checksum/versioning semantics |
+
+Each was produced by reading its module's source in full and tracing actual behavior, not inferring from
+names — when in doubt, they say so explicitly rather than guessing.
+
 ## Entity annotations
 
 | Annotation | Target | Notes |
