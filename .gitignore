@@ -27,6 +27,7 @@ local.properties
 
 # Claude Code local settings (machine-specific permissions)
 .claude/settings.local.json
+.claude/worktrees/
 
 # KSP generated sources (optional — check in if you want reproducible builds)
 **/build/generated/ksp/

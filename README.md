@@ -35,6 +35,22 @@ First-class support for denormalized lookup tables, composite partition keys, TT
 
 ---
 
+## Documentation
+
+This README covers the common cases end-to-end. For everything else:
+
+| Doc | Contents |
+|---|---|
+| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | The full reference — every annotation, config option, and repository method in depth |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | What changed in each version |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | Feature-by-feature status across versions |
+| [`docs/ISSUES.md`](docs/ISSUES.md) | Known gaps and open issues, with the reasoning behind each |
+| [`docs/history/`](docs/history/) | The original build specs used to generate each version (0.1.0 → 0.4.0) — historical context, not current docs |
+| [API docs (Dokka)](https://dev-pasaka.github.io/kandra/) | Generated per-release from source, published on tag |
+| [`.claude/skills/`](.claude/skills/) | Per-module Claude Code skills — see [Using with Claude Code](#using-with-claude-code) below |
+
+---
+
 ## Using with Claude Code
 
 Kandra ships a [Claude Code](https://claude.com/claude-code) skill at `.claude/skills/kandra/SKILL.md` —
@@ -791,7 +807,7 @@ sessionRepo.delete(session)
 // ↑ UPDATE ... USING TTL 86400 — sets a TTL on non-key columns instead of DELETE
 ```
 
-`gcGraceSeconds` on `@ScyllaTable` controls how long the tombstoned row's primary key survives before ScyllaDB's compaction reclaims it. There is no built-in `findActive()` — see [ISS-007](ISSUES.md) if you need one; it requires an explicit `is_deleted`/`deleted_at` marker column.
+`gcGraceSeconds` on `@ScyllaTable` controls how long the tombstoned row's primary key survives before ScyllaDB's compaction reclaims it. There is no built-in `findActive()` — see [ISS-007](docs/ISSUES.md) if you need one; it requires an explicit `is_deleted`/`deleted_at` marker column.
 
 ---
 
