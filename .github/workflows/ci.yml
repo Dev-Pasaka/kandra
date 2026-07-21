@@ -96,5 +96,27 @@ jobs:
           publish_dir: ./build/dokka/htmlMultiModule
           destination_dir: ${{ github.ref_name }}
 
-      - name: Record latest version
-        run: echo "${{ github.ref_name }}" > latest_version.txt
+      - name: Generate root redirect to latest version
+        run: |
+          mkdir -p redirect
+          cat > redirect/index.html <<HTML
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Kandra Docs</title>
+            <meta http-equiv="refresh" content="0; url=./${{ github.ref_name }}/">
+            <link rel="canonical" href="./${{ github.ref_name }}/">
+          </head>
+          <body>
+            <p>Redirecting to <a href="./${{ github.ref_name }}/">latest docs (${{ github.ref_name }})</a>&hellip;</p>
+          </body>
+          </html>
+          HTML
+
+      - name: Deploy root redirect to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.KANDRA_TOKEN }}
+          publish_dir: ./redirect
+          keep_files: true
