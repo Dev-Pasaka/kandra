@@ -13,5 +13,6 @@ include(
     "kandra-codegen",
     "kandra-test",
     "kandra-multidc",
-    "kandra-migrate"
+    "kandra-migrate",
+    "kandra-jakarta"
 )

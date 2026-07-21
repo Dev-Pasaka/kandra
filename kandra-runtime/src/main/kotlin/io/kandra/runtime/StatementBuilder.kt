@@ -255,7 +255,8 @@ class StatementBuilder(
         schema: TableSchema,
         partitionKeyValues: List<Any>,
         columnName: String,
-        values: Any
+        values: Any,
+        consistency: KandraConsistency? = null
     ): BoundStatement {
         val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
             .find { it.cqlName == columnName || it.propertyName == columnName }
@@ -266,14 +267,17 @@ class StatementBuilder(
         val encodedPks = schema.partitionKeys.zip(partitionKeyValues).map { (pkCol, v) ->
             codec.encode(v, pkCol.type)
         }
-        return prepared.bind(values, *encodedPks.toTypedArray()).setIdempotent(false)
+        return prepared.bind(values, *encodedPks.toTypedArray())
+            .setIdempotent(false)
+            .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
 
     fun removeFromCollection(
         schema: TableSchema,
         partitionKeyValues: List<Any>,
         columnName: String,
-        values: Any
+        values: Any,
+        consistency: KandraConsistency? = null
     ): BoundStatement {
         val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
             .find { it.cqlName == columnName || it.propertyName == columnName }
@@ -284,14 +288,17 @@ class StatementBuilder(
         val encodedPks = schema.partitionKeys.zip(partitionKeyValues).map { (pkCol, v) ->
             codec.encode(v, pkCol.type)
         }
-        return prepared.bind(values, *encodedPks.toTypedArray()).setIdempotent(false)
+        return prepared.bind(values, *encodedPks.toTypedArray())
+            .setIdempotent(false)
+            .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
 
     fun counterUpdate(
         schema: TableSchema,
         columnName: String,
         partitionKeys: Map<String, Any>,
-        delta: Long
+        delta: Long,
+        consistency: KandraConsistency? = null
     ): BoundStatement {
         val col = schema.columns.find { it.propertyName == columnName || it.cqlName == columnName }
             ?: throw KandraSchemaException("Counter column '$columnName' not found in '${schema.tableName}'")
@@ -303,7 +310,9 @@ class StatementBuilder(
             partitionKeys[pk.propertyName] ?: partitionKeys[pk.cqlName]
                 ?: throw KandraSchemaException("Missing partition key value for '${pk.cqlName}'")
         }
-        return prepared.bind(Math.abs(delta), *pkValues.toTypedArray()).setIdempotent(false)
+        return prepared.bind(Math.abs(delta), *pkValues.toTypedArray())
+            .setIdempotent(false)
+            .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
 
     fun existsQuery(schema: TableSchema, whereCql: String, values: List<Any?>): BoundStatement {

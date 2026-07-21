@@ -193,6 +193,24 @@ object SchemaRegistry {
         val softDeleteAnn = klass.findAnnotation<SoftDelete>()
         val cacheResultAnn = klass.findAnnotation<CacheResult>()
 
+        // ── @SoftDelete marker column validation ──────────────────────────────
+        val softDeleteMarkerColumn = softDeleteAnn?.markerProperty
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { markerProp ->
+                val col = columnSchemas.find { it.propertyName == markerProp }
+                    ?: throw KandraSchemaException(
+                        "@SoftDelete(markerProperty = \"$markerProp\") on '${klass.simpleName}' — " +
+                            "no property named '$markerProp' found."
+                    )
+                val classifier = col.type.classifier as? KClass<*>
+                if (classifier != Boolean::class) {
+                    throw KandraSchemaException(
+                        "@SoftDelete markerProperty '${klass.simpleName}.$markerProp' must be a Boolean field, got: ${col.type}"
+                    )
+                }
+                col
+            }
+
         return TableSchema(
             entityClass = klass,
             tableName = tableName,
@@ -208,6 +226,7 @@ object SchemaRegistry {
             versionColumn = versionColumns.firstOrNull(),
             isSoftDelete = softDeleteAnn != null,
             softDeleteTtlSeconds = softDeleteAnn?.ttlSeconds,
+            softDeleteMarkerColumn = softDeleteMarkerColumn,
             gcGraceSeconds = tableAnnotation.gcGraceSeconds.takeIf { it >= 0 },
             cacheConfig = cacheResultAnn?.let { CacheResultConfig(it.ttlSeconds, it.maxSize) }
         )

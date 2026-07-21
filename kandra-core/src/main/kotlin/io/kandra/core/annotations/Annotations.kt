@@ -95,9 +95,16 @@ annotation class WriteConsistency(val level: io.kandra.core.KandraConsistency)
 annotation class Version
 
 /** When applied, delete() sets a TTL on the row instead of issuing a DELETE. Avoids tombstone accumulation. */
+/**
+ * @param markerProperty Opt-in name of a `Boolean` property on the entity that permanently
+ * records deletion state (`true` = deleted). Required to use `findActive()` — without it there
+ * is no CQL predicate that can distinguish a soft-deleted row from a live one before its TTL
+ * expires. The marker column itself is written without a TTL, so it survives after the other
+ * columns' values are gone.
+ */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
-annotation class SoftDelete(val ttlSeconds: Int = 86400)
+annotation class SoftDelete(val ttlSeconds: Int = 86400, val markerProperty: String = "")
 
 /** Marks a field as sensitive — never logged. */
 @Target(AnnotationTarget.PROPERTY)

@@ -17,5 +17,6 @@ dependencies {
         api("${project.group}:kandra-test:${project.version}")
         api("${project.group}:kandra-multidc:${project.version}")
         api("${project.group}:kandra-migrate:${project.version}")
+        api("${project.group}:kandra-jakarta:${project.version}")
     }
 }

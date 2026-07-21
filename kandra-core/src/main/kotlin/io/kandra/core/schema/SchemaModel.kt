@@ -41,6 +41,8 @@ data class TableSchema(
     val versionColumn: ColumnSchema? = null,
     val isSoftDelete: Boolean = false,
     val softDeleteTtlSeconds: Int? = null,
+    /** The `markerProperty` column from `@SoftDelete`, if configured. Enables `findActive()`. */
+    val softDeleteMarkerColumn: ColumnSchema? = null,
     val gcGraceSeconds: Int? = null,
     val cacheConfig: CacheResultConfig? = null
 )

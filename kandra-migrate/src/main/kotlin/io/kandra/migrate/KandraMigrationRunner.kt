@@ -53,9 +53,23 @@ class KandraMigrationRunner(private val session: CqlSession) {
                 return@forEach
             }
 
+            // Claim the version via LWT before running it, so two runner instances racing
+            // against the same keyspace can't both execute the same migration concurrently.
+            if (!claim(migration)) {
+                logger.info { "Migration v${migration.version} ('${migration.name}') claimed by another instance concurrently — skipping." }
+                return@forEach
+            }
+
             logger.info { "Applying migration v${migration.version}: ${migration.name}" }
-            migration.up(session)
-            recordApplied(migration)
+            try {
+                migration.up(session)
+            } catch (e: Exception) {
+                // Release the claim so a subsequent run can retry this migration.
+                session.execute(
+                    session.prepare("DELETE FROM kandra_migrations WHERE version = ?").bind(migration.version)
+                )
+                throw KandraMigrationException("Migration v${migration.version} ('${migration.name}') failed: ${e.message}", e)
+            }
             logger.info { "Migration v${migration.version} applied successfully." }
         }
     }
@@ -78,12 +92,14 @@ class KandraMigrationRunner(private val session: CqlSession) {
     private fun loadApplied(): Map<Int, MigrationHistory> =
         history().associateBy { it.version }
 
-    private fun recordApplied(migration: KandraMigration) {
+    /** Claims a migration version via LWT. Returns false if another instance already claimed it. */
+    private fun claim(migration: KandraMigration): Boolean {
         val prepared = session.prepare(
-            "INSERT INTO kandra_migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)"
+            "INSERT INTO kandra_migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?) IF NOT EXISTS"
         )
-        session.execute(
+        val rs = session.execute(
             prepared.bind(migration.version, migration.name, Instant.now(), migration.checksum())
         )
+        return rs.wasApplied()
     }
 }

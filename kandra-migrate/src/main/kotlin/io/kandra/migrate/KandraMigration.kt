@@ -18,11 +18,19 @@ abstract class KandraMigration(
 ) {
     abstract fun up(session: CqlSession)
 
-    /** Stable checksum of this migration — computed from [version] and [name] for simplicity. */
+    /**
+     * Checksum of this migration, used to detect edits to an already-applied migration.
+     *
+     * Hashes [version]/[name]/qualified class name plus the migration class's own compiled
+     * bytecode — so a change to the body of [up] (or any anonymous/lambda class it captures
+     * as a top-level member) changes the checksum, while unrelated recompilation of the rest
+     * of the project does not.
+     */
     internal fun checksum(): String {
-        val body = "${version}:${name}:${this::class.qualifiedName}"
-        return java.security.MessageDigest.getInstance("SHA-256")
-            .digest(body.toByteArray())
-            .joinToString("") { "%02x".format(it) }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        digest.update("${version}:${name}:${this::class.qualifiedName}".toByteArray())
+        val resourceName = "/" + this::class.java.name.replace('.', '/') + ".class"
+        this::class.java.getResourceAsStream(resourceName)?.use { digest.update(it.readBytes()) }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

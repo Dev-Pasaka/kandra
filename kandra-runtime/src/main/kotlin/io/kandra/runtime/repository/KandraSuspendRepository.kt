@@ -85,26 +85,30 @@ class KandraSuspendRepository<T : Any>(
     }
 
     suspend fun deleteById(vararg keyValues: Any) {
-        val entity = executor.findById(entityClass, *keyValues)
-        if (entity != null) batchEngine.deleteSuspend(schema, entity)
-        else session.executeSuspend(statementBuilder.deleteById(schema, *keyValues))
+        val entity = executor.findByIdSuspend(entityClass, *keyValues)
+        if (entity != null) {
+            batchEngine.deleteSuspend(schema, entity)
+            cache.invalidate(if (keyValues.size == 1) keyValues[0] else keyValues.toList())
+        } else {
+            session.executeSuspend(statementBuilder.deleteById(schema, *keyValues))
+        }
     }
 
     suspend fun deleteBy(block: QueryContext.() -> Unit) {
-        val entity = executor.find(entityClass, block) ?: return
+        val entity = executor.findSuspend(entityClass, block) ?: return
         batchEngine.deleteSuspend(schema, entity)
     }
 
     suspend fun findById(vararg idValues: Any, consistency: KandraConsistency? = null): T? {
         checkNotShuttingDown()
         val cacheKey: Any = if (idValues.size == 1) idValues[0] else idValues.toList()
-        return cache.getIfPresent(cacheKey) ?: executor.findById(entityClass, *idValues, consistency = consistency)
+        return cache.getIfPresent(cacheKey) ?: executor.findByIdSuspend(entityClass, *idValues, consistency = consistency)
             ?.also { cache.put(cacheKey, it) }
     }
 
     suspend fun find(block: QueryContext.() -> Unit): T? {
         checkNotShuttingDown()
-        return executor.find(entityClass, block)
+        return executor.findSuspend(entityClass, block)
     }
 
     suspend fun findAll(limit: Int? = null, block: QueryContext.() -> Unit): List<T> {
@@ -113,7 +117,7 @@ class KandraSuspendRepository<T : Any>(
             block()
             if (limit != null) limit(limit)
         }
-        return executor.findAll(entityClass, fullBlock)
+        return executor.findAllSuspend(entityClass, fullBlock)
     }
 
     suspend fun findPage(
@@ -122,61 +126,70 @@ class KandraSuspendRepository<T : Any>(
         block: QueryContext.() -> Unit = {}
     ): KandraPage<T> {
         checkNotShuttingDown()
-        return executor.findPage(entityClass, pageSize, pageToken, block)
+        return executor.findPageSuspend(entityClass, pageSize, pageToken, block)
     }
 
     suspend fun exists(block: QueryContext.() -> Unit): Boolean {
         checkNotShuttingDown()
-        return executor.exists(block)
+        return executor.existsSuspend(block)
+    }
+
+    /**
+     * Returns all rows not yet soft-deleted. Requires `@SoftDelete(markerProperty = "...")`
+     * on [T] — throws [KandraSchemaException] otherwise.
+     */
+    suspend fun findActive(): List<T> {
+        checkNotShuttingDown()
+        return executor.findActiveSuspend(entityClass)
     }
 
     suspend fun raw(cql: String, vararg params: Any?): List<Row> {
         checkNotShuttingDown()
-        return executor.raw(cql, *params)
+        return executor.rawSuspend(cql, *params)
     }
 
     suspend fun rawQuery(query: KandraRawQuery): List<Row> {
         checkNotShuttingDown()
-        return executor.rawQuery(query)
+        return executor.rawQuerySuspend(query)
     }
 
-    suspend fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>) {
+    suspend fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
         val pkValues = schema.partitionKeys.map { pk ->
             entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
                 ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
         }
-        session.execute(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, values))
+        session.executeSuspend(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, values, consistency))
     }
 
-    suspend fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>) {
+    suspend fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
         val pkValues = schema.partitionKeys.map { pk ->
             entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
                 ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
         }
-        session.execute(statementBuilder.removeFromCollection(schema, pkValues, col.cqlName, values))
+        session.executeSuspend(statementBuilder.removeFromCollection(schema, pkValues, col.cqlName, values, consistency))
     }
 
-    suspend fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>) {
+    suspend fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
         val pkValues = schema.partitionKeys.map { pk ->
             entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
                 ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
         }
-        session.execute(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, entries))
+        session.executeSuspend(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, entries, consistency))
     }
 
-    suspend fun increment(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L) {
+    suspend fun increment(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {
         if (!schema.isCounterTable) throw KandraSchemaException("increment() is only valid on counter tables.")
-        session.execute(statementBuilder.counterUpdate(schema, field.name, partitionKeys, by))
+        session.executeSuspend(statementBuilder.counterUpdate(schema, field.name, partitionKeys, by, consistency))
     }
 
-    suspend fun decrement(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L) {
+    suspend fun decrement(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {
         if (!schema.isCounterTable) throw KandraSchemaException("decrement() is only valid on counter tables.")
-        session.execute(statementBuilder.counterUpdate(schema, field.name, partitionKeys, -by))
+        session.executeSuspend(statementBuilder.counterUpdate(schema, field.name, partitionKeys, -by, consistency))
     }
 }

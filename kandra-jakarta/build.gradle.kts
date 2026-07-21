@@ -7,16 +7,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
 
 dependencies {
     implementation(project(":kandra-core"))
-    implementation(project(":kandra-runtime"))
-    implementation(libs.datastax.driver)
-    implementation(libs.kotlin.reflect)
-    implementation(libs.coroutines.core)
+    implementation(project(":kandra-ktor"))
+    compileOnly(libs.jakarta.validation.api)
     implementation(libs.kotlin.logging)
-    implementation(libs.slf4j.simple)
-    compileOnly(libs.testcontainers.cassandra)
 
+    testImplementation(libs.jakarta.validation.api)
+    testImplementation(libs.hibernate.validator)
+    testImplementation(libs.jakarta.el)
     testImplementation(libs.junit)
-    testImplementation(libs.testcontainers.cassandra)
-    testImplementation(libs.testcontainers.junit)
     testRuntimeOnly(libs.junit.launcher)
 }

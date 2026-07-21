@@ -81,19 +81,12 @@ class KandraRepository<T : Any>(
     }
 
     fun deleteById(vararg keyValues: Any) {
-        val batch = com.datastax.oss.driver.api.core.cql.BatchStatement
-            .newInstance(com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED)
-            .add(statementBuilder.deleteById(schema, *keyValues))
         val entity = executor.findById(entityClass, *keyValues)
         if (entity != null) {
-            val props = entity::class.memberProperties.associateBy { it.name }
-            val b = schema.lookupTables.fold(batch) { acc, lookup ->
-                val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@fold acc
-                acc.add(statementBuilder.deleteLookup(lookup, indexValue))
-            }
-            session.execute(b)
+            batchEngine.delete(schema, entity)
+            cache.invalidate(if (keyValues.size == 1) keyValues[0] else keyValues.toList())
         } else {
-            session.execute(batch)
+            session.execute(statementBuilder.deleteById(schema, *keyValues))
         }
     }
 
@@ -134,6 +127,15 @@ class KandraRepository<T : Any>(
         return executor.exists(block)
     }
 
+    /**
+     * Returns all rows not yet soft-deleted. Requires `@SoftDelete(markerProperty = "...")`
+     * on [T] — throws [KandraSchemaException] otherwise.
+     */
+    fun findActive(): List<T> {
+        checkNotShuttingDown()
+        return executor.findActive(entityClass)
+    }
+
     fun raw(cql: String, vararg params: Any?): List<Row> {
         checkNotShuttingDown()
         return executor.raw(cql, *params)
@@ -144,43 +146,43 @@ class KandraRepository<T : Any>(
         return executor.rawQuery(query)
     }
 
-    fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>) {
+    fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
         val pkValues = schema.partitionKeys.map { pk ->
             entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
                 ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
         }
-        session.execute(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, values))
+        session.execute(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, values, consistency))
     }
 
-    fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>) {
+    fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
         val pkValues = schema.partitionKeys.map { pk ->
             entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
                 ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
         }
-        session.execute(statementBuilder.removeFromCollection(schema, pkValues, col.cqlName, values))
+        session.execute(statementBuilder.removeFromCollection(schema, pkValues, col.cqlName, values, consistency))
     }
 
-    fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>) {
+    fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
         val pkValues = schema.partitionKeys.map { pk ->
             entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
                 ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
         }
-        session.execute(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, entries))
+        session.execute(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, entries, consistency))
     }
 
-    fun increment(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L) {
+    fun increment(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {
         if (!schema.isCounterTable) throw KandraSchemaException("increment() is only valid on counter tables.")
-        session.execute(statementBuilder.counterUpdate(schema, field.name, partitionKeys, by))
+        session.execute(statementBuilder.counterUpdate(schema, field.name, partitionKeys, by, consistency))
     }
 
-    fun decrement(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L) {
+    fun decrement(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {
         if (!schema.isCounterTable) throw KandraSchemaException("decrement() is only valid on counter tables.")
-        session.execute(statementBuilder.counterUpdate(schema, field.name, partitionKeys, -by))
+        session.execute(statementBuilder.counterUpdate(schema, field.name, partitionKeys, -by, consistency))
     }
 }

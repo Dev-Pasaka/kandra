@@ -17,6 +17,7 @@ dependencies {
 
     testImplementation(project(":kandra-core"))
     testImplementation(project(":kandra-runtime"))
+    testImplementation(project(":kandra-test"))
     testImplementation(libs.ktor.server.test)
     testImplementation(libs.ktor.server.netty)
     testImplementation(libs.junit)

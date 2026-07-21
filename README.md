@@ -31,6 +31,7 @@ First-class support for denormalized lookup tables, composite partition keys, TT
 | `kandra-test` | `FakeKandraSession` + Testcontainers integration helpers |
 | `kandra-multidc` | Multi-datacenter utilities and documentation |
 | `kandra-migrate` | Versioned, checksum-validated schema migration runner |
+| `kandra-jakarta` | Jakarta Bean Validation adapter (`JakartaKandraValidator`) |
 | `kandra-bom` | Bill of Materials for version alignment |
 
 ---
@@ -42,9 +43,9 @@ This README covers the common cases end-to-end. For everything else:
 | Doc | Contents |
 |---|---|
 | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | The full reference — every annotation, config option, and repository method in depth |
-| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | What changed in each version |
-| [`docs/FEATURES.md`](docs/FEATURES.md) | Feature-by-feature status across versions |
-| [`docs/ISSUES.md`](docs/ISSUES.md) | Known gaps and open issues, with the reasoning behind each |
+| [`docs/changelog/`](docs/changelog/README.md) | What changed in each version, one file per version |
+| [`docs/features/`](docs/features/README.md) | Feature-by-feature reference, one file per area |
+| [`docs/issues/`](docs/issues/README.md) | Known gaps and issues — open, fixed, and closed — with the reasoning behind each |
 | [`docs/history/`](docs/history/) | The original build specs used to generate each version (0.1.0 → 0.4.0) — historical context, not current docs |
 | [API docs (Dokka)](https://dev-pasaka.github.io/kandra/) | Generated per-release from source, published on tag |
 | [`.claude/skills/`](.claude/skills/) | Per-module Claude Code skills — see [Using with Claude Code](#using-with-claude-code) below |
@@ -81,7 +82,7 @@ authoring a schema migration.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.0-SNAPSHOT"))
+    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.1-SNAPSHOT"))
     implementation("ke.co.coinx.kandra:kandra-ktor")
     implementation("ke.co.coinx.kandra:kandra-koin")   // or kandra-kodein
     ksp("ke.co.coinx.kandra:kandra-codegen")           // optional — type-safe table objects
@@ -765,7 +766,7 @@ Each test class gets an isolated `kandra_test_{uuid}` keyspace. The shared `Cass
 
 ---
 
-## Optimistic Locking (0.4.0)
+## Optimistic Locking (0.4.1)
 
 ```kotlin
 @ScyllaTable("balances")
@@ -787,7 +788,7 @@ balanceRepo.updateForce(loaded.copy(amountUsd = newAmount))  // bypasses the ver
 
 ---
 
-## UNSET vs NULL (0.4.0)
+## UNSET vs NULL (0.4.1)
 
 Kandra distinguishes "field not provided" from "field explicitly cleared" to avoid accidental tombstones:
 
@@ -801,7 +802,7 @@ userRepo.saveWithNulls(user.copy(middleName = null))
 
 ---
 
-## Tombstone-Aware Soft Delete (0.4.0)
+## Tombstone-Aware Soft Delete (0.4.1)
 
 ```kotlin
 @ScyllaTable("sessions", gcGraceSeconds = 3600)
@@ -812,11 +813,11 @@ sessionRepo.delete(session)
 // ↑ UPDATE ... USING TTL 86400 — sets a TTL on non-key columns instead of DELETE
 ```
 
-`gcGraceSeconds` on `@ScyllaTable` controls how long the tombstoned row's primary key survives before ScyllaDB's compaction reclaims it. There is no built-in `findActive()` — see [ISS-007](docs/ISSUES.md) if you need one; it requires an explicit `is_deleted`/`deleted_at` marker column.
+`gcGraceSeconds` on `@ScyllaTable` controls how long the tombstoned row's primary key survives before ScyllaDB's compaction reclaims it. For a `findActive()` that filters out soft-deleted rows, add `@SoftDelete(ttlSeconds = ..., markerProperty = "isDeleted")` with a `Boolean` field — see [`docs/features/repositories.md`](docs/features/repositories.md#findactive-soft-delete-entities-only) and [ISS-007](docs/issues/ISS-007-find-active-soft-delete.md).
 
 ---
 
-## Batch Size Guard (0.4.0)
+## Batch Size Guard (0.4.1)
 
 ```kotlin
 install(Kandra) {
@@ -831,7 +832,7 @@ walletRepo.saveAll(largeListOfWallets)
 
 ---
 
-## Sensitive Field Masking (0.4.0)
+## Sensitive Field Masking (0.4.1)
 
 ```kotlin
 data class User(
@@ -846,7 +847,7 @@ data class User(
 
 ---
 
-## Validation Hook (0.4.0)
+## Validation Hook (0.4.1)
 
 ```kotlin
 install(Kandra) {
@@ -863,7 +864,7 @@ Runs before every `save()`/`update()`. A non-empty list throws `KandraValidation
 
 ---
 
-## AUTO_MIGRATE Schema Mode (0.4.0)
+## AUTO_MIGRATE Schema Mode (0.4.1)
 
 ```kotlin
 install(Kandra) {
@@ -878,7 +879,7 @@ Safer than `AUTO_CREATE` for evolving schemas in place — it never drops or ren
 
 ---
 
-## Versioned Schema Migrations (`kandra-migrate`, 0.4.0)
+## Versioned Schema Migrations (`kandra-migrate`, 0.4.1)
 
 For changes `AUTO_MIGRATE` can't express (renames, data backfills, index changes):
 
@@ -899,7 +900,7 @@ Call this **before** `install(Kandra)` with `schemaMode = SchemaMode.NONE` for m
 
 ---
 
-## Micrometer Metrics (0.4.0)
+## Micrometer Metrics (0.4.1)
 
 ```kotlin
 install(Kandra) {
@@ -917,7 +918,7 @@ install(Kandra) {
 
 ---
 
-## Health Check & Graceful Shutdown (0.4.0)
+## Health Check & Graceful Shutdown (0.4.1)
 
 ```kotlin
 install(Kandra) {
@@ -934,7 +935,7 @@ On `ApplicationStopping`, Kandra sets `KandraRuntime.isShuttingDown = true` and 
 
 ---
 
-## CQL Injection Guard (0.4.0)
+## CQL Injection Guard (0.4.1)
 
 ```kotlin
 userRepo.raw("SELECT * FROM users WHERE email = '$untrustedInput'")
@@ -947,7 +948,7 @@ userRepo.rawQuery(query)
 
 ---
 
-## Query Caching (0.4.0)
+## Query Caching (0.4.1)
 
 ```kotlin
 @ScyllaTable("products")

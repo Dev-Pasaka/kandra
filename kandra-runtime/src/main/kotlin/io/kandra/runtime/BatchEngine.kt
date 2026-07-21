@@ -531,16 +531,24 @@ class BatchEngine(
         pkValues: List<Any>
     ) {
         val ttl = schema.softDeleteTtlSeconds!!
-        val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter }
+        val marker = schema.softDeleteMarkerColumn
+        val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter && it != marker }
+        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
         if (nonKeyCols.isNotEmpty()) {
             val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
-            val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
             val cql = "UPDATE ${schema.tableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
             val prepared = session.prepare(cql)
             val values = mutableListOf<Any?>()
             nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
             pkValues.forEach { values.add(it) }
             executeWithRetry(prepared.bind(*values.toTypedArray()))
+        }
+        // Marker column is written without TTL — it must outlive the other columns so
+        // findActive() can still tell this row apart from a live one after they expire.
+        if (marker != null) {
+            val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
+            val prepared = session.prepare(cql)
+            executeWithRetry(prepared.bind(true, *pkValues.toTypedArray()))
         }
         schema.lookupTables.forEach { lookup ->
             val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach
@@ -555,10 +563,11 @@ class BatchEngine(
         pkValues: List<Any>
     ) {
         val ttl = schema.softDeleteTtlSeconds!!
-        val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter }
+        val marker = schema.softDeleteMarkerColumn
+        val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter && it != marker }
+        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
         if (nonKeyCols.isNotEmpty()) {
             val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
-            val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
             val cql = "UPDATE ${schema.tableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
             // prepareSuspend avoids blocking the coroutine dispatcher; driver caches the result
             val prepared = session.prepareSuspend(cql)
@@ -566,6 +575,11 @@ class BatchEngine(
             nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
             pkValues.forEach { values.add(it) }
             executeWithRetrySuspend(prepared.bind(*values.toTypedArray()))
+        }
+        if (marker != null) {
+            val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
+            val prepared = session.prepareSuspend(cql)
+            executeWithRetrySuspend(prepared.bind(true, *pkValues.toTypedArray()))
         }
         schema.lookupTables.forEach { lookup ->
             val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach

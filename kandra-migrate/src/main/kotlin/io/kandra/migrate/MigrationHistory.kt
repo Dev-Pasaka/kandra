@@ -8,5 +8,3 @@ data class MigrationHistory(
     val appliedAt: Instant,
     val checksum: String
 )
-
-enum class MigrationStatus { PENDING, APPLIED, CHECKSUM_MISMATCH }
