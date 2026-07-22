@@ -378,7 +378,11 @@ val page2 = txnRepo.findPage(pageSize = 20, pageToken = page1.nextPageToken) {
 
 ---
 
-## LIMIT and ALLOW FILTERING
+## LIMIT and querying a non-key column
+
+Kandra does not support `ALLOW FILTERING` at all — there is no DSL escape hatch for it, by design (see
+[Secondary Index](#secondary-index-030) below). Querying a column that isn't a partition/clustering key
+requires `@SecondaryIndex` on it.
 
 ```kotlin
 // 5 most recent transactions
@@ -386,10 +390,10 @@ val recent = txnRepo.findAll(limit = 5) {
     TransactionTable.userId eq userId
 }
 
-// Internal admin tool — logs a warning when used
+// Requires @SecondaryIndex on `status` (see below) — logs a WARN when used, since it's a
+// scatter-gather query across all nodes, not a partition-scoped one
 val flagged = userRepo.findAll {
     UserTable.status eq AccountStatus.FLAGGED
-    allowFiltering()
 }
 ```
 
