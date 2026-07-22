@@ -1,4 +1,4 @@
-# Kandra 0.4.4 — Feature Reference
+# Kandra 0.4.5 — Feature Reference
 
 One file per feature area. Start here, follow the links.
 

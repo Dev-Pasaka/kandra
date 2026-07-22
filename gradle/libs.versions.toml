@@ -1,5 +1,5 @@
 [versions]
-kandra = "0.4.4"
+kandra = "0.4.5"
 kotlin = "2.1.21"
 ktor = "2.3.13"
 datastax = "4.17.0"
