@@ -395,7 +395,7 @@ class KandraIntegrationTest {
         repo.save(older)
         repo.save(newer)
 
-        val foundByOlderSlug = repo.find { +IntegrationLookupClusteredTable.slug.eq("older-slug") }
+        val foundByOlderSlug = repo.find { IntegrationLookupClusteredTable.slug eq "older-slug" }
         assertNotNull(foundByOlderSlug)
         assertEquals("older content", foundByOlderSlug!!.content)
         // Compare via epoch millis, not raw Instant equality -- CQL TIMESTAMP columns only store
@@ -403,7 +403,7 @@ class KandraIntegrationTest {
         // round-tripped value read back through the lookup, even though it's the same logical row.
         assertEquals(older.createdAt.toEpochMilli(), foundByOlderSlug.createdAt.toEpochMilli())
 
-        val foundByNewerSlug = repo.find { +IntegrationLookupClusteredTable.slug.eq("newer-slug") }
+        val foundByNewerSlug = repo.find { IntegrationLookupClusteredTable.slug eq "newer-slug" }
         assertNotNull(foundByNewerSlug)
         assertEquals("newer content", foundByNewerSlug!!.content)
     }
@@ -417,7 +417,7 @@ class KandraIntegrationTest {
         repo.save(a)
         repo.save(b)
 
-        val page = repo.findPage(20, null) { +IntegrationLookupClusteredTable.slug.eq("page-slug-b") }
+        val page = repo.findPage(20, null) { IntegrationLookupClusteredTable.slug eq "page-slug-b" }
         assertEquals(1, page.items.size)
         assertEquals("content-b", page.items.first().content)
         assertFalse(page.hasMore)
@@ -432,7 +432,7 @@ class KandraIntegrationTest {
         repo.save(keep)
         repo.save(remove)
 
-        repo.deleteBy { +IntegrationLookupClusteredTable.slug.eq("remove-slug") }
+        repo.deleteBy { IntegrationLookupClusteredTable.slug eq "remove-slug" }
 
         assertNotNull(repo.findById(ownerId, keep.createdAt))
         assertNull(repo.findById(ownerId, remove.createdAt))
@@ -449,7 +449,7 @@ class KandraIntegrationTest {
         repo.delete(entity) // soft delete -- ttlSeconds = 60, well past this test's runtime
 
         // The lookup row must still resolve the (soft-deleted) entity, not disappear immediately.
-        val foundViaLookup = repo.find { +IntegrationSoftDeletedLookupTable.slug.eq("keep-findable") }
+        val foundViaLookup = repo.find { IntegrationSoftDeletedLookupTable.slug eq "keep-findable" }
         assertNotNull(foundViaLookup)
         assertTrue(foundViaLookup!!.isDeleted)
     }

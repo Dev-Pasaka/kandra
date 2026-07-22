@@ -14,15 +14,11 @@ sealed class KandraPredicate {
 
 /**
  * Type-safe reference to a CQL column. Produced by `kandra-codegen` or constructed manually.
+ *
+ * Comparison operators (`eq`/`gt`/`gte`/`lt`/`lte`/`isIn`) are declared as [QueryContext] member
+ * extensions, not here — see [QueryContext] for why.
  */
-class KandraColumnRef<T>(val cqlName: String, val isLookup: Boolean = false) {
-    infix fun eq(value: T): KandraPredicate = KandraPredicate.Eq(cqlName, value)
-    infix fun gt(value: T): KandraPredicate = KandraPredicate.Gt(cqlName, value)
-    infix fun gte(value: T): KandraPredicate = KandraPredicate.Gte(cqlName, value)
-    infix fun lt(value: T): KandraPredicate = KandraPredicate.Lt(cqlName, value)
-    infix fun lte(value: T): KandraPredicate = KandraPredicate.Lte(cqlName, value)
-    infix fun isIn(values: List<T>): KandraPredicate = KandraPredicate.In(cqlName, values)
-}
+class KandraColumnRef<T>(val cqlName: String, val isLookup: Boolean = false)
 
 /**
  * DSL receiver for building query predicates and limit.
@@ -33,16 +29,29 @@ class KandraColumnRef<T>(val cqlName: String, val isLookup: Boolean = false) {
  *
  * ```kotlin
  * repository.findAll {
- *     +UserTable.email.eq("alice@example.com")   // via @LookupIndex
+ *     UserTable.email eq "alice@example.com"   // via @LookupIndex
  *     limit(10)
  * }
  * ```
+ *
+ * **Why there's no `+`:** earlier versions required `+UserTable.email.eq(...)`, with `eq()`
+ * returning a plain [KandraPredicate] that `unaryPlus()` then registered. Forgetting the `+` on
+ * one predicate out of several compiled cleanly (Kotlin only warns on an unused expression) and
+ * silently dropped that predicate from the query — a correctness footgun with no way to detect it
+ * from inside `QueryContext`, since the discarded object never reached it. Declaring `eq`/`gt`/etc.
+ * as member extensions here instead means the comparison itself *is* the registration — there is no
+ * intermediate value that can be built and then forgotten.
  */
 class QueryContext {
     internal val predicates = mutableListOf<KandraPredicate>()
     internal var limit: Int? = null
 
-    operator fun KandraPredicate.unaryPlus() { predicates.add(this) }
+    infix fun <T> KandraColumnRef<T>.eq(value: T) { predicates.add(KandraPredicate.Eq(cqlName, value)) }
+    infix fun <T> KandraColumnRef<T>.gt(value: T) { predicates.add(KandraPredicate.Gt(cqlName, value)) }
+    infix fun <T> KandraColumnRef<T>.gte(value: T) { predicates.add(KandraPredicate.Gte(cqlName, value)) }
+    infix fun <T> KandraColumnRef<T>.lt(value: T) { predicates.add(KandraPredicate.Lt(cqlName, value)) }
+    infix fun <T> KandraColumnRef<T>.lte(value: T) { predicates.add(KandraPredicate.Lte(cqlName, value)) }
+    infix fun <T> KandraColumnRef<T>.isIn(values: List<T>) { predicates.add(KandraPredicate.In(cqlName, values)) }
 
     /** Appends `LIMIT n` to the generated CQL. */
     fun limit(n: Int) { limit = n }

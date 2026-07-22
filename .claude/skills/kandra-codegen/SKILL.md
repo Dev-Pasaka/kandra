@@ -1,6 +1,6 @@
 ---
 name: kandra-codegen
-description: Exhaustive reference for kandra-codegen — the KSP processor that generates type-safe *Table objects from @ScyllaTable entities. Load when adding KSP to a build, debugging codegen output, or writing code that uses generated *Table objects (UserTable.email.eq(...) style queries).
+description: Exhaustive reference for kandra-codegen — the KSP processor that generates type-safe *Table objects from @ScyllaTable entities. Load when adding KSP to a build, debugging codegen output, or writing code that uses generated *Table objects (UserTable.email eq "..." style queries).
 ---
 
 # kandra-codegen
@@ -232,10 +232,10 @@ that varies is `isLookup`, and it varies *only* based on `@LookupIndex` presence
 `isLookup = prop.hasAnnotation("io.kandra.core.annotations.LookupIndex")` — a property with `@LookupIndex`
 (any suffix, any consistency level — both arguments ignored by codegen) gets
 `KandraColumnRef<T>("cql_name", isLookup = true)`; everything else defaults `isLookup` to `false` via
-`KandraColumnRef`'s constructor default (see `kandra-runtime/src/main/kotlin/io/kandra/runtime/dsl/QueryDsl.kt`
-line 18: `class KandraColumnRef<T>(val cqlName: String, val isLookup: Boolean = false)`). This flag is
+`KandraColumnRef`'s constructor default (see `kandra-runtime/src/main/kotlin/io/kandra/runtime/dsl/QueryDsl.kt`:
+`class KandraColumnRef<T>(val cqlName: String, val isLookup: Boolean = false)`). This flag is
 presumably what lets `kandra-runtime`'s query-building code (`QueryContext`, repository `findAll { }`, etc.)
-recognize at runtime that `UserTable.email.eq(...)` should route through the denormalized lookup table rather
+recognize at runtime that `UserTable.email eq "..."` should route through the denormalized lookup table rather
 than requiring `email` to be a partition/clustering key — but that routing logic lives in `kandra-runtime`,
 outside this file; codegen's only job is to stamp the boolean.
 
@@ -398,12 +398,12 @@ Downstream usage (from `KandraColumnRef`'s actual API in `kandra-runtime`'s `Que
 
 ```kotlin
 repository.findAll {
-    +UserTable.email.eq("alice@example.com")   // routed via the by_email lookup table (isLookup = true)
+    UserTable.email eq "alice@example.com"   // routed via the by_email lookup table (isLookup = true)
     limit(10)
 }
 
 repository.findAll {
-    +UserTable.userId.eq(someUuid)              // ordinary partition-key predicate — isLookup = false,
+    UserTable.userId eq someUuid              // ordinary partition-key predicate — isLookup = false,
     limit(1)                                     // codegen doesn't know or care it's a partition key
 }
 ```
