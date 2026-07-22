@@ -38,6 +38,7 @@ Docker before relying on them.
 | [ISS-025](ISS-025-clustering-key-where-clause-omitted.md) | Key-based repository operations omitted clustering keys from their WHERE clause |
 | [ISS-026](ISS-026-batch-scope-save-unreachable.md) | `KandraBatchScope`'s `save`/`delete` were structurally unreachable — batches never batched |
 | [ISS-027](ISS-027-batch-scope-save-if-not-exists-guard-unreachable.md) | `KandraBatchScope`'s `saveIfNotExists` guard was also unreachable |
+| [ISS-030](ISS-030-soft-delete-removes-lookup-rows.md) | Soft-delete unconditionally removed lookup-table rows |
 
 ## Closed — not a bug
 
