@@ -45,6 +45,18 @@ Original failure: `DELETE /posts/{postId}` → 500, `InvalidQueryException: Miss
 KEY part created_at`. `Post` combines a clustering key (`createdAt`) with `@SoftDelete` — exactly the
 combination the clustering-key WHERE-clause bug broke.
 
+**Update: this flow has two more layers than originally diagnosed.** `Post`'s routes resolve by
+`postId` — its `@LookupIndex`, not its real primary key (`authorId` + `createdAt`) — so `GET`/`DELETE
+/posts/{postId}` go through lookup resolution first. That path was independently broken by ISS-029
+(fixed in `0.4.4`, see [00-fix-verification.md §00.8](00-fix-verification.md#008--lookupindex-resolution-on-a-clustering-keyed-entity-fix-iss-029))
+and, once that was fixed, exposed ISS-030 (soft-delete removing the very lookup row `GET
+/posts/{postId}` needs, fixed in `0.4.4`, see
+[§00.9](00-fix-verification.md#009--soft-delete-must-not-remove-lookup-rows-fix-iss-030)) — both were
+invisible until ISS-025 (this section's original subject) was fixed enough to even reach them. Treat
+this re-run as re-verifying all three together, not ISS-025 alone; a partial fix (ISS-025 only) would
+still show `DELETE /posts/{postId}` failing at a different, later point (lookup resolution or the
+lookup row survives-soft-delete check) rather than succeeding end to end.
+
 **Re-run**:
 1. `DELETE /posts/{postId}` on an existing post. **Expected**: 200/204, no `InvalidQueryException`.
 2. Confirm the soft-delete semantics actually applied correctly, not just "no exception": `GET

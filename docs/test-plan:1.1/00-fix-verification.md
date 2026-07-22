@@ -1,10 +1,12 @@
 # 00. Fix Verification
 
-Six scenarios, one per bug fixed since the v1.0 run (`docs/report:1.0/SUMMARY.md`). Each has already
-been proven at the direct-repository level (`kandra-test`'s Testcontainers suite, plus a one-off live
-run against the v1.0 cluster — see `docs/test-plan:1.1/README.md`). This file's job is to re-prove
-each one at the **HTTP-route / capstone level**, using the same `KandraTestingPlayground` sample app
-that originally found the bug, per the README's "remove the workarounds first" instructions.
+Nine scenarios: §00.1-§00.6 cover the 6 bugs fixed in `0.4.3` (`docs/report:1.0/SUMMARY.md`); §00.7-
+§00.9 cover 3 more (ISS-028/029/030) found while re-verifying those same 6 beyond the direct-repository
+level and fixed in `0.4.4`. Each has already been proven at the direct-repository level (`kandra-test`'s
+Testcontainers suite, plus a one-off live run against the running docker-compose cluster — see
+`docs/test-plan:1.1/README.md`). This file's job is to re-prove each one at the **HTTP-route / capstone
+level**, using the same `KandraTestingPlayground` sample app that originally found the bug, per the
+README's "remove the workarounds first" instructions.
 
 For every scenario: capture `debug.logQueries`/`debug.logBatches` output and the exact response
 (status code + body, or exception + stack trace). If a scenario doesn't pass exactly as described,
@@ -93,6 +95,14 @@ clustering key `bucketedAt`) — restore the full-key `findById(userId, bucketed
 | `updateForce` | Same entity, force-update path | 200, no `InvalidQueryException` |
 | `increment`/`decrement` on a clustering-keyed counter table | If the sample app has (or file 01 adds) a counter table with a clustering key, confirm the `partitionKeys: Map<String, Any>` argument now also needs a clustering-key entry, and that omitting it throws `KandraSchemaException` naming the missing column rather than crashing at the driver level | Matches the new fail-fast contract |
 
+**Scope gaps found and fixed in `0.4.4` (not present when this section was first written):** this fix
+alone was not sufficient — cache invalidation and `@LookupIndex` resolution both derived a *different*,
+narrower key shape than `findById`'s new full-key contract, so both silently broke for a
+clustering-keyed entity even after this fix shipped. See [§00.7](#007--cache-invalidation-key-shape-fix-iss-028)
+and [§00.8](#008--lookupindex-resolution-on-a-clustering-keyed-entity-iss-029) below — if you're
+verifying `0.4.4` (not `0.4.3`) for the first time, treat §00.4 through §00.8 as one connected story
+about the same underlying "full key, not partition key" contract change, not five independent bugs.
+
 ## 00.5 — `KandraBatchScope` naming fix (`saveInBatch`/`deleteInBatch`)
 
 **Root cause (fixed)**: `save`/`delete` inside `KandraBatchScope` were member-extensions on
@@ -131,3 +141,65 @@ Controlled Batches" section and the `kandra-runtime`/`kandra-codegen` Claude Cod
 fixed behavior — they were updated as part of this fix, but a fresh pair of eyes re-reading them
 against the real running app (not just the source) is worth doing once, the same way file 6 of v1.0
 existed to catch doc/reality drift.
+
+## 00.7 — Cache invalidation key shape (fix: ISS-028)
+
+**Root cause (fixed)**: `KandraRepository`/`KandraSuspendRepository` invalidated the `@CacheResult`
+cache via `partitionKeyOf(entity)` — partition-key-only — while `findById`'s real cache key (since
+ISS-025) is the full key (partition + clustering). For a clustering-keyed entity these are different
+shapes (`userId` vs. `[userId, bucketedAt]`), so invalidation silently missed the real cache entry.
+Fixed by replacing `partitionKeyOf` with `cacheKeyOf`, which reuses the same `keyValuesOf` helper
+`append`/`remove`/`put` already used.
+
+1. Restore `@CacheResult` on `User` if not already restored per §00.2. `User` is clustering-keyed
+   (`bucketedAt`), so this scenario specifically needs a clustering-keyed cached entity — `User`
+   qualifies, `IntegrationCached` (partition-key-only) in `kandra-test` does not exercise this bug.
+2. `POST /users` to create a user, then `GET /users/{id}/{bucketedAt}` (full key) to populate the
+   cache.
+3. `PUT /users/{id}/{bucketedAt}` to update a field.
+4. `GET /users/{id}/{bucketedAt}` again immediately. **Expected**: the fresh, updated value — this used
+   to silently return the stale pre-update value (cache never invalidated) until the TTL expired on its
+   own, with no error anywhere to indicate the write "didn't take."
+
+## 00.8 — `@LookupIndex` resolution on a clustering-keyed entity (fix: ISS-029)
+
+**Root cause (fixed)**: `find`/`findAll`/`findPage`/`exists`/`deleteBy` via a `@LookupIndex` predicate
+reconstruct the primary table's key from the lookup row — but `LookupTableSchema` never stored the
+primary table's clustering-key columns, only its partition key. Once `selectById` started requiring
+the full key (ISS-025), every lookup-based query on a clustering-keyed entity broke with
+`KandraSchemaException`. Fixed by adding `clusteringKeyColumns` to `LookupTableSchema`, flowed through
+the lookup table's own DDL, `insertLookup`, `selectByLookup`, and all four `QueryExecutor`
+lookup-resolution call sites.
+
+**This is a schema/DDL change** — see the README's environment note: use a fresh keyspace, not one
+left over from a `0.4.3` run, or run `AUTO_MIGRATE` against the existing lookup tables first.
+
+1. `GET /users/by-email/{email}` (or equivalent lookup-predicate route) on a clustering-keyed `User`.
+   **Expected**: 200 with the correct user — this used to be an unconditional `KandraSchemaException`.
+2. Capstone-specific: `GET /posts/{postId}` and `DELETE /posts/{postId}` both resolve `Post` via its
+   `@LookupIndex(postId)` — `Post` is also clustering-keyed (`createdAt`). Both routes used to fail
+   identically; confirm both now succeed. This directly unblocks capstone Flow 5 (see
+   [02-capstone-reverification.md](02-capstone-reverification.md), which should be re-read with this
+   fix in mind — Flow 5's original failure was attributed to ISS-025 alone, but ISS-029 was silently
+   blocking the same flow underneath it and wasn't separable until ISS-025's fix was in place).
+3. Create 2+ posts with the same lookup value's owner but different `createdAt` to confirm `findPage`
+   via a lookup predicate resolves the *one* matching row, not every clustering row in that partition
+   (the second bug this same fix addressed).
+
+## 00.9 — Soft-delete must not remove lookup rows (fix: ISS-030)
+
+**Root cause (fixed)**: `BatchEngine`'s soft-delete path unconditionally deleted every `@LookupIndex`
+row for the entity at the end of the sequence, contradicting the documented "soft delete does not
+remove lookup rows" behavior — a soft-deleted row still "exists" (queryable, non-key columns not yet
+TTL'd) until its TTL expires, so it should stay resolvable via its lookup index too, the same as
+`findById` still finds it. This was a pre-existing bug, unrelated to ISS-025/028/029, but only became
+independently observable once ISS-029 made lookup resolution on a clustering-keyed entity work at all
+— `Post` (which combines `@LookupIndex(postId)` with `@SoftDelete`) couldn't reach this code path
+through a lookup-driven request before that.
+
+1. `POST /posts` → `DELETE /posts/{id}` (soft delete, since `Post` has `@SoftDelete`) → `GET /posts/{id}`
+   (resolves via the same `@LookupIndex(postId)` lookup, not a direct key `findById`). **Expected**:
+   200, the post returned with `isDeleted: true` — this used to fail lookup resolution entirely (the
+   lookup row was gone), not return a soft-deleted-but-still-findable post.
+2. This directly completes capstone Flow 5's soft-delete-via-lookup path — cross-reference with
+   [02-capstone-reverification.md](02-capstone-reverification.md).

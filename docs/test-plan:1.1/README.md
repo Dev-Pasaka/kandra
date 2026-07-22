@@ -1,4 +1,4 @@
-# Kandra 0.4.3 — Real-World Test Plan v1.1
+# Kandra 0.4.4 — Real-World Test Plan v1.1
 
 ## What this is, and how it relates to v1.0
 
@@ -27,9 +27,24 @@ each section of [00-fix-verification.md](00-fix-verification.md) for the exact d
 and the doc comments in `KandraBatchScope.kt`/`KandraCache.kt`/`KandraCodec.kt`/`StatementBuilder.kt`
 for the in-source explanation.
 
+**Update — 3 more bugs found and fixed, shipped as `0.4.4`.** Re-verifying the ISS-025 (clustering-key
+WHERE-clause) fix further than the direct-repository level surfaced two scope gaps in that same fix,
+plus one further pre-existing bug that only became reachable once one of those two was fixed:
+
+| # | Bug | File(s) |
+|---|---|---|
+| ISS-028 | Cache invalidation (`save`/`update`/`updateForce`/etc.) used a partition-key-only key that never matched `findById`'s real (full-key) cache key for a clustering-keyed `@CacheResult` entity — writes never invalidated the stale cached row | `KandraRepository.kt`, `KandraSuspendRepository.kt` |
+| ISS-029 | `@LookupIndex` resolution (`find`/`findAll`/`findPage`/`exists`/`deleteBy`) only ever reconstructed the primary table's partition key from the lookup row, never its clustering key — broke entirely once `selectById` started requiring the full key | `SchemaModel.kt`, `SchemaRegistry.kt`, `DdlGenerator.kt`, `StatementBuilder.kt`, `QueryExecutor.kt` |
+| ISS-030 | Soft-delete unconditionally deleted `@LookupIndex` rows, contradicting the documented "soft delete does not remove lookup rows" behavior — pre-existing, only reachable once ISS-029 was fixed | `BatchEngine.kt` |
+
+See `docs/changelog/0.4.4.md` and `docs/issues/ISS-028-*.md`/`ISS-029-*.md`/`ISS-030-*.md` for the
+full writeups. **[00-fix-verification.md](00-fix-verification.md) §00.7-§00.9** cover these three the
+same way §00.1-§00.6 cover the original 6 — this README's findings tables above are now current as of
+`0.4.4`, not `0.4.3`.
+
 **Every fix has already been proven twice** before this plan was written:
 1. Structurally, via new permanent regression tests in `kandra-test/src/test/kotlin/io/kandra/test/KandraIntegrationTest.kt` (Testcontainers-based, same pattern as the pre-existing suite).
-2. Live, via a one-off smoke test connecting directly to the same docker-compose 3-node cluster the v1.0 report used (`docker-compose.scylla.yml`, still running at the time of writing) — all 7 scenarios passed against real ScyllaDB, not a fake session.
+2. Live, via a one-off smoke test connecting directly to the same docker-compose 3-node cluster the v1.0 report used (`docker-compose.scylla.yml`, still running at the time of writing) — all scenarios (7 for the original 6 bugs, 4 more for ISS-028/029/030) passed against real ScyllaDB, not a fake session.
 
 **So why does this plan exist, if the fixes are already proven?** Two reasons:
 
@@ -52,20 +67,22 @@ record what actually happened, capture a minimal repro for every failure, don't 
 library while testing it, and stop-and-ask on anything ambiguous or destructive.
 
 **Rule 1 is different for this round, but less different than it was.** `gradle.properties`' `version`
-is now `0.4.3` and a Maven Central publish has been initiated for it (see `docs/changelog/0.4.3.md`).
-Two cases, depending on where that publish actually landed by the time you run this:
+is now `0.4.4` (superseding `0.4.3`, which had the ISS-028/029/030 scope gaps — see the update above).
+A Maven Central publish for `0.4.4` needs credentials this environment may not have; check
+`~/.gradle/gradle.properties` before assuming it's live. Two cases, depending on where that publish
+actually landed by the time you run this:
 
-- **If `0.4.3` is resolvable from Maven Central** (confirm the same way v1.0 file 1 §1.3 did — a clean
+- **If `0.4.4` is resolvable from Maven Central** (confirm the same way v1.0 file 1 §1.3 did — a clean
   `--gradle-user-home` resolve, don't trust a cached copy): v1.0's original rule 1 applies unchanged —
-  point the sample app at published `0.4.3`, same as any real consumer would get. This is the
+  point the sample app at published `0.4.4`, same as any real consumer would get. This is the
   preferred path; prefer it over `mavenLocal()` whenever it's available, since a local build and a
   published release are not guaranteed identical (packaging, shading, POM metadata can all differ)
   even when the source is.
-- **If `0.4.3` hasn't propagated yet, or the Central Portal release step is still pending a manual
+- **If `0.4.4` hasn't propagated yet, or the Central Portal release step is still pending a manual
   click** (`publishToMavenCentral(automaticRelease = false)` in `buildSrc/.../publish.gradle.kts` means
   a human has to explicitly release it after upload/validation): fall back to a
   **`mavenLocal()`-published** build (`./gradlew publishToMavenLocal` from the repo root) with the
-  sample app's Kandra dependency pinned to `0.4.3`, and note in the report which path was actually
+  sample app's Kandra dependency pinned to `0.4.4`, and note in the report which path was actually
   used — re-run file 00 once more against the real published artifact once it's confirmed resolvable,
   since that's the actual target rule 1 wants restored.
 - Everything else about "don't test the wrong thing" from v1.0 rule 1 still applies: don't hand-copy
@@ -99,12 +116,19 @@ Also switch `PostRoutes.kt`'s create-post flow back to the plan's originally-doc
 about it), then switch to the fixed shape (`batchBlocking { postRepo.saveInBatch(post) }`) and confirm
 that one actually batches.
 
+**One more environment note for ISS-029 (§00.8):** its fix is a schema/DDL change — `LookupTableSchema`
+now carries the primary table's clustering-key columns, which flow into the generated lookup table's
+DDL. Any lookup table created under `AUTO_CREATE` **before** this fix (i.e. any keyspace left over from
+a `0.4.3` or earlier run) will be missing those columns and needs either `AUTO_MIGRATE` to run against
+it or a fresh keyspace — `AUTO_CREATE` never alters existing tables. Use a fresh keyspace for this
+round rather than reusing one from the `0.4.3` re-verification pass.
+
 ## How to use this folder
 
 | # | File | What it covers |
 |---|---|---|
 | — | `README.md` (this file) | Scope, ground-rule changes, environment setup delta from v1.0. |
-| 00 | [00-fix-verification.md](00-fix-verification.md) | Dedicated re-verification of all 6 findings above, at the HTTP-route/capstone level this time, not just direct-repository. This is new content, not in v1.0. |
+| 00 | [00-fix-verification.md](00-fix-verification.md) | Dedicated re-verification of all 9 findings above (§00.1-§00.6 for the original 6, §00.7-§00.9 for ISS-028/029/030), at the HTTP-route/capstone level this time, not just direct-repository. This is new content, not in v1.0. |
 | 01 | [01-remaining-coverage-plan.md](01-remaining-coverage-plan.md) | The priority-ordered resume list for v1.0's ~70 unattempted file-3 rows and 12 unattempted file-4 sections, including the auth-enabled and two-DC cluster variants. References `docs/test-plan/03-*`/`04-*` by row ID rather than re-stating ~100 rows of unchanged table content. |
 | 02 | [02-capstone-reverification.md](02-capstone-reverification.md) | Re-run plan for the two capstone flows that failed in v1.0 (Flow 1: multi-write atomicity, Flow 5: delete a post) plus the two acceptance criteria left "not independently verified." |
 
