@@ -30,8 +30,8 @@ private val logger = KotlinLogging.logger {}
  *
  * ```kotlin
  * application.kandra.batch {
- *     userRepo.save(user)
- *     walletRepo.save(wallet)
+ *     userRepo.saveInBatch(user)
+ *     walletRepo.saveInBatch(wallet)
  * }
  * ```
  */
@@ -47,8 +47,11 @@ class KandraRuntime(
     /**
      * Executes all operations in [block] as a single LOGGED batch.
      *
-     * Only `save()` and `delete()` are allowed in a batch scope.
-     * `findAll` / `findById` and `saveIfNotExists` will throw [KandraQueryException].
+     * Only [KandraBatchScope.saveInBatch] and [KandraBatchScope.deleteInBatch] are collected into
+     * the batch. `saveIfNotExistsInBatch` always throws [KandraQueryException] (LWT cannot share a
+     * LOGGED BATCH with regular statements). Ordinary repository methods (`save`, `findById`, etc.)
+     * are not intercepted by this scope at all — calling them here executes immediately, outside
+     * the batch, not as part of it.
      */
     @ExperimentalKandraApi
     suspend fun batch(block: suspend KandraBatchScope.() -> Unit) {

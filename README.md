@@ -46,6 +46,7 @@ This README covers the common cases end-to-end. For everything else:
 | [`docs/changelog/`](docs/changelog/README.md) | What changed in each version, one file per version |
 | [`docs/features/`](docs/features/README.md) | Feature-by-feature reference, one file per area |
 | [`docs/issues/`](docs/issues/README.md) | Known gaps and issues — open, fixed, and closed — with the reasoning behind each |
+| [`docs/test-plan/`](docs/test-plan/README.md) | Step-by-step plan for building a real Ktor app against the published artifact and a real ScyllaDB cluster, with an exhaustive functional/edge-case coverage matrix and scoring rubric |
 | [`docs/history/`](docs/history/) | The original build specs used to generate each version (0.1.0 → 0.4.0) — historical context, not current docs |
 | [API docs (Dokka)](https://dev-pasaka.github.io/kandra/) | Generated per-release from source, published on tag |
 | [`.claude/skills/`](.claude/skills/) | Per-module Claude Code skills — see [Using with Claude Code](#using-with-claude-code) below |
@@ -82,7 +83,7 @@ authoring a schema migration.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.2"))
+    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.3"))
     implementation("ke.co.coinx.kandra:kandra-ktor")
     implementation("ke.co.coinx.kandra:kandra-koin")   // or kandra-kodein
     ksp("ke.co.coinx.kandra:kandra-codegen")           // optional — type-safe table objects
@@ -660,12 +661,16 @@ Resolution order: **per-call override → class annotation → `ConsistencyConfi
 ```kotlin
 @OptIn(ExperimentalKandraApi::class)
 application.kandra.batch {
-    userRepo.save(user)
-    walletRepo.save(wallet)
-    auditRepo.save(auditEntry)
+    userRepo.saveInBatch(user)
+    walletRepo.saveInBatch(wallet)
+    auditRepo.saveInBatch(auditEntry)
 }
 // ↑ all three execute as one atomic LOGGED BATCH
 ```
+
+`saveInBatch`/`deleteInBatch` (not `save`/`delete`) are deliberate: Kotlin always resolves a
+same-named repository member over an extension, even a member-extension of the batch scope
+itself, so a same-named batch method would silently never be reachable.
 
 Limitations: reads are not available inside a batch; `saveIfNotExists` throws (LWT cannot be mixed with regular statements in a batch).
 

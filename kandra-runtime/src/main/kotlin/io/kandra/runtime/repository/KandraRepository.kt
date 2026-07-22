@@ -146,34 +146,27 @@ class KandraRepository<T : Any>(
         return executor.rawQuery(query)
     }
 
+    private fun keyValuesOf(entity: T): List<Any> = (schema.partitionKeys + schema.clusteringKeys).map { key ->
+        entity::class.memberProperties.find { it.name == key.propertyName }?.call(entity)
+            ?: throw KandraQueryException("Key '${key.propertyName}' is null")
+    }
+
     fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        val pkValues = schema.partitionKeys.map { pk ->
-            entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
-                ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
-        }
-        session.execute(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, values, consistency))
+        session.execute(statementBuilder.appendToCollection(schema, keyValuesOf(entity), col.cqlName, values, consistency))
     }
 
     fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        val pkValues = schema.partitionKeys.map { pk ->
-            entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
-                ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
-        }
-        session.execute(statementBuilder.removeFromCollection(schema, pkValues, col.cqlName, values, consistency))
+        session.execute(statementBuilder.removeFromCollection(schema, keyValuesOf(entity), col.cqlName, values, consistency))
     }
 
     fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        val pkValues = schema.partitionKeys.map { pk ->
-            entity::class.memberProperties.find { it.name == pk.propertyName }?.call(entity)
-                ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null")
-        }
-        session.execute(statementBuilder.appendToCollection(schema, pkValues, col.cqlName, entries, consistency))
+        session.execute(statementBuilder.appendToCollection(schema, keyValuesOf(entity), col.cqlName, entries, consistency))
     }
 
     fun increment(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {

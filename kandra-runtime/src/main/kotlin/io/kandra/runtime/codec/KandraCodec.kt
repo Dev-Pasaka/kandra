@@ -76,17 +76,27 @@ class KandraCodec {
      */
     fun decode(row: Row, column: ColumnSchema): Any? {
         val name = column.cqlName
+        val type = column.type
+        val classifier = type.classifier as? KClass<*>
 
-        if (row.isNull(name)) {
-            if (column.type.isMarkedNullable) return null
+        // Cassandra/CQL cannot represent an empty (non-frozen) List/Set/Map any other way than
+        // NULL at the storage layer — inserting emptySet()/emptyMap() simply stores no value.
+        // The driver's own getList/getSet/getMap accessors are specifically designed to return
+        // an empty collection (never null) for a NULL column for exactly this reason, so a
+        // collection column must never hit the non-nullable NULL check below, regardless of the
+        // Kotlin property's declared nullability — the natural, idiomatic default of an
+        // `emptySet()`-initialized non-nullable property must stay readable after a round-trip.
+        val isCollection = classifier == List::class || classifier == Set::class || classifier == Map::class
+
+        if (!isCollection && row.isNull(name)) {
+            if (type.isMarkedNullable) return null
             throw KandraQueryException(
                 "Column '${column.cqlName}' is NULL in Scylla but property '${column.propertyName}' " +
                 "is non-nullable (${column.type}). Mark the property nullable or ensure the column always has a value."
             )
         }
 
-        val type = column.type
-        val classifier = type.classifier as? KClass<*> ?: return row.getObject(name)
+        if (classifier == null) return row.getObject(name)
 
         customDecoders[classifier]?.let { return it(row, name) }
 

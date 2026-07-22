@@ -76,7 +76,7 @@ private fun processClass(classDecl: KSClassDeclaration) {
         .joinToString("\n    ") { prop ->
             val propName = prop.simpleName.asString()
             val cqlName = resolveCqlName(prop)
-            val typeName = prop.type.resolve().declaration.qualifiedName?.asString() ?: "Any"
+            val typeName = resolveTypeName(prop.type.resolve())
             val isLookup = prop.hasAnnotation("io.kandra.core.annotations.LookupIndex")
             if (isLookup) {
                 "val $propName = io.kandra.runtime.dsl.KandraColumnRef<$typeName>(\"$cqlName\", isLookup = true)"
@@ -147,19 +147,37 @@ property starting with a capital, unusual for `val`s) is trimmed.
 
 ### Type resolution
 
-`typeName = prop.type.resolve().declaration.qualifiedName?.asString() ?: "Any"` — the property's resolved
-type's **fully-qualified** declaration name is spliced directly into the generated source as the
+```kotlin
+private fun resolveTypeName(type: KSType): String {
+    val qualifiedName = type.declaration.qualifiedName?.asString() ?: "kotlin.Any"
+    if (type.arguments.isEmpty()) return qualifiedName
+    val argNames = type.arguments.joinToString(", ") { arg ->
+        arg.type?.resolve()?.let { resolveTypeName(it) } ?: "*"
+    }
+    return "$qualifiedName<$argNames>"
+}
+```
+
+`resolveTypeName` recurses into generic type arguments, not just the raw declaration — the property's
+resolved type's **fully-qualified** name is spliced directly into the generated source as the
 `KandraColumnRef<T>` type argument (e.g. `kotlin.String`, `java.util.UUID`, `java.time.Instant`,
-`kotlin.Long`). Two consequences:
+`kotlin.Long`, or for a generic property, `kotlin.collections.Set<kotlin.String>`,
+`kotlin.collections.Map<kotlin.String, kotlin.String>`). Recursion into `type.arguments` is required —
+Kotlin has no raw-type escape hatch (unlike Java), so a generic column like `Set<String>` or
+`Map<String, String>` **must** get its type arguments spliced in or the generated file (a raw
+`KandraColumnRef<kotlin.collections.Set>` with zero type arguments) fails to compile with "One/Two type
+argument(s) expected" — a hard compile error for the entire module, not a narrow edge case, since any
+entity with a `List`/`Set`/`Map` column hits it. Two other consequences:
 
 - Because the FQN is used, there's no import-management problem in the generated file — every type
   reference is fully qualified, so the generated object never needs an `import` statement, at the cost of
   verbose generated code.
-- If the type declaration can't be resolved (`declaration.qualifiedName` is null — e.g. some synthetic or
-  unresolvable type shapes), the processor falls back to the literal string `"Any"` — i.e. it emits
-  `KandraColumnRef<Any>(...)`, silently erasing the real type rather than failing the build. This is a
-  silent degradation, not a compile error; if a generated column ref is unexpectedly typed `Any`, this is why
-  — go check whether the source type resolves cleanly (it usually means a KSP/classpath issue, not something
+- If a type declaration can't be resolved (`declaration.qualifiedName` is null — e.g. some synthetic or
+  unresolvable type shapes), the processor falls back to the literal string `"kotlin.Any"` for that
+  position — i.e. it emits `KandraColumnRef<kotlin.Any>(...)` (or `Set<kotlin.Any>` for an unresolvable
+  element type), silently erasing the real type rather than failing the build. This is a silent
+  degradation, not a compile error; if a generated column ref is unexpectedly typed `Any`, this is why —
+  go check whether the source type resolves cleanly (it usually means a KSP/classpath issue, not something
   wrong with your annotation usage).
 
 ### `getAllProperties()` — what's included, and the inheritance gotcha

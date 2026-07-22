@@ -10,6 +10,7 @@ import com.google.devtools.ksp.processing.SymbolProcessorProvider
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
+import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.validate
 
 /**
@@ -58,7 +59,7 @@ class KandraProcessor(
             .joinToString("\n    ") { prop ->
                 val propName = prop.simpleName.asString()
                 val cqlName = resolveCqlName(prop)
-                val typeName = prop.type.resolve().declaration.qualifiedName?.asString() ?: "Any"
+                val typeName = resolveTypeName(prop.type.resolve())
                 val isLookup = prop.hasAnnotation("io.kandra.core.annotations.LookupIndex")
                 if (isLookup) {
                     "val $propName = io.kandra.runtime.dsl.KandraColumnRef<$typeName>(\"$cqlName\", isLookup = true)"
@@ -85,6 +86,21 @@ object $objectName : io.kandra.runtime.dsl.KandraTable<$className> {
         file.close()
 
         logger.info("Kandra codegen: generated $objectName for $className")
+    }
+
+    /**
+     * Renders a [KSType] as a fully-qualified Kotlin type string, recursing into generic
+     * arguments (e.g. `Map<String, String>` -> `kotlin.collections.Map<kotlin.String, kotlin.String>`).
+     * A raw qualified name with no arguments is not valid Kotlin for a generic declaration
+     * (unlike Java, Kotlin has no raw-type escape hatch), so every type argument must be resolved.
+     */
+    private fun resolveTypeName(type: KSType): String {
+        val qualifiedName = type.declaration.qualifiedName?.asString() ?: "kotlin.Any"
+        if (type.arguments.isEmpty()) return qualifiedName
+        val argNames = type.arguments.joinToString(", ") { arg ->
+            arg.type?.resolve()?.let { resolveTypeName(it) } ?: "*"
+        }
+        return "$qualifiedName<$argNames>"
     }
 
     private fun resolveCqlName(prop: KSPropertyDeclaration): String {

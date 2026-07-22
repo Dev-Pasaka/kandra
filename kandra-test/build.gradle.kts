@@ -1,3 +1,7 @@
+plugins {
+    alias(libs.plugins.ksp)
+}
+
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     kotlinOptions.freeCompilerArgs += listOf(
         "-opt-in=io.kandra.core.InternalKandraApi",
@@ -18,5 +22,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.testcontainers.cassandra)
     testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.caffeine)
     testRuntimeOnly(libs.junit.launcher)
+    kspTest(project(":kandra-codegen"))
 }

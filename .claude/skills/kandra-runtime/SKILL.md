@@ -182,7 +182,13 @@ fun deleteBy(block: QueryContext.() -> Unit)
   and `gc_grace_seconds`. Then calls `delete()` **once per entity, sequentially** — this is `N`
   separate round trips/batches, not one combined batch.
 
-- **`deleteById(vararg keyValues)`** — **behaves differently between the two repositories**:
+- **`deleteById(vararg keyValues)`** — `keyValues` must cover the **full primary key**: partition
+  key column(s) first, then clustering key column(s), in schema order (`@PartitionKey(index)` /
+  `@ClusteringKey(index)`). Passing fewer values than the full key throws `KandraSchemaException`
+  naming exactly which columns are required — it does not silently scope to a partial key. On a
+  partition-key-only entity this is unchanged (`deleteById(id)`); on a clustering-keyed entity you
+  must pass both, e.g. `deleteById(userId, bucketedAt)`.
+  **Behaves differently between the two repositories**:
   - Blocking `KandraRepository`: always issues `executor.findById(entityClass, *keyValues)` first (a
     real query, bypassing the entity cache), then builds and executes a `LOGGED BATCH` of
     `DELETE FROM <table> WHERE pk=...` plus lookup deletes (if the entity was found) directly via
@@ -224,10 +230,14 @@ All of these first call `checkNotShuttingDown()` (throws `KandraQueryException` 
 inside `BatchEngine.executeWithRetry`.
 
 - **`findById`** — checks `KandraCache` first (key = the single id value if one PK, else
-  `idValues.toList()`); on miss, runs `SELECT * FROM <table> WHERE pk1=? [AND pk2=?...]` via
-  `QueryExecutor.findById` and populates the cache with the decoded entity on a hit. Cache is
+  `idValues.toList()`); on miss, runs `SELECT * FROM <table> WHERE pk1=? [AND pk2=?...] [AND ck1=?...]`
+  via `QueryExecutor.findById` and populates the cache with the decoded entity on a hit. Cache is
   no-op if the entity's class has no `@CacheResult` or Caffeine isn't on the classpath
   (`KandraCache.isEnabled == false`; `getIfPresent` always returns `null`, `put`/`invalidate` are no-ops).
+  Like `deleteById`, `idValues` must cover the full primary key (partition then clustering columns,
+  in schema order) — `KandraSchemaException` if the count doesn't match. On a clustering-keyed entity,
+  `findById(userId)` alone now fails loudly rather than silently returning an arbitrary row from the
+  partition; use `findById(userId, bucketedAt)`.
 
 - **`find(block)`** — `findAll(block).firstOrNull()` under the hood in `QueryExecutor` (i.e. it still
   fetches and decodes **all** matching rows, then takes the first — not a `LIMIT 1` unless you add
@@ -305,20 +315,24 @@ fun increment(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: 
 fun decrement(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L)
 ```
 
-- **`append`** — `UPDATE <table> SET col = col + ? WHERE pk=...`; works for CQL `list`/`set` columns
-  (driver-level `+` append). `col` is resolved by matching `field.name` against `schema.columns`
-  (throws `KandraSchemaException` if not found).
+- **`append`** — `UPDATE <table> SET col = col + ? WHERE pk=... [AND ck=...]`; works for CQL
+  `list`/`set` columns (driver-level `+` append). `col` is resolved by matching `field.name` against
+  `schema.columns` (throws `KandraSchemaException` if not found). Full key values (partition +
+  clustering) are read off `entity` automatically — nothing extra to pass on a clustering-keyed entity.
 - **`remove`** — same shape with `col = col - ?`.
 - **`put`** — despite the name, internally calls `statementBuilder.appendToCollection` with `entries`
   as the bound value (`col = col + ?`) — for a CQL `map` column, driver-level `+` on a map is a
   merge/overwrite-by-key, which is the correct "put" semantics for map columns; there is no
   map-remove-by-key method (only `remove()` for list/set).
 - **`increment`/`decrement`** — only valid when `schema.isCounterTable`; else throws
-  `KandraSchemaException`. Builds `UPDATE <table> SET col = col + ? WHERE pk=...` (or `- ?` — the sign
-  is baked in via `Math.abs(delta)` and a literal `+`/`-` in the CQL depending on the sign passed to
-  `counterUpdate`, so `decrement` internally calls `counterUpdate(..., -by)`). `partitionKeys` is a
-  `Map<String, Any>` keyed by **property name** (falls back to matching CQL name), not an entity
-  instance — you don't need to load the entity to bump a counter.
+  `KandraSchemaException`. Builds `UPDATE <table> SET col = col + ? WHERE pk=... [AND ck=...]` (or
+  `- ?` — the sign is baked in via `Math.abs(delta)` and a literal `+`/`-` in the CQL depending on the
+  sign passed to `counterUpdate`, so `decrement` internally calls `counterUpdate(..., -by)`).
+  `partitionKeys` is a `Map<String, Any>` keyed by **property name** (falls back to matching CQL name),
+  not an entity instance — you don't need to load the entity to bump a counter. On a clustering-keyed
+  counter table, the map must also include an entry for each clustering key column (by property or CQL
+  name) — `counterUpdate` looks them up the same way as partition keys and throws `KandraSchemaException`
+  naming the missing column if one is absent.
 
 **All five of these bypass `BatchEngine` entirely** — they call `session.execute(...)` (note: even in
 `KandraSuspendRepository`, these five methods call the **blocking** `session.execute`, not
@@ -488,7 +502,12 @@ class KandraCodec {
   returns the value as-is (the driver handles `UUID`, `String`, numeric types, `Instant`,
   `LocalDate`, `BigDecimal`, `ByteArray`, `List`/`Set`/`Map` natively via `setEncoded`, which does
   `set(idx, value, value::class.java)`).
-- **`decode(row, column)`**: if the column is NULL in Scylla, returns `null` when the Kotlin type is
+- **`decode(row, column)`**: **`List`/`Set`/`Map` columns are exempt from the NULL check entirely** —
+  Cassandra can't store an empty (non-frozen) collection any other way than NULL, so a NULL collection
+  column always decodes to an empty collection (via `row.getList`/`getSet`/`getMap`, which return empty
+  rather than null for a NULL column), regardless of whether the Kotlin property is declared nullable.
+  This is what makes the idiomatic `tags: Set<String> = emptySet()` default readable after a round-trip.
+  For every other type: if the column is NULL in Scylla, returns `null` when the Kotlin type is
   nullable, else throws `KandraQueryException` naming the column and property — this is the exception
   you'll see if you widen a column's actual nullability in the DB without updating the entity. For
   non-null columns, checks `customDecoders` first, then dispatches by classifier: `UUID`, `String`,
@@ -520,7 +539,10 @@ Reflection-based thin wrapper — resolves `com.github.benmanes.caffeine.cache.C
 `Class.forName` at construction. If `config == null` (no `@CacheResult` on the entity), or the class
 isn't found (Caffeine not on the classpath — logs one WARN), or reflective `Method` resolution fails
 for `getIfPresent`/`put`/`invalidate` (logs one WARN per failed method), the cache silently becomes a
-no-op (`isEnabled == false`, all calls are no-ops). Built with
+no-op (`isEnabled == false`, all calls are no-ops). `getIfPresent`/`put`/`invalidate` are resolved
+against Caffeine's public `Cache` interface (not `inner`'s concrete runtime class, which is
+package-private) — resolving via the interface keeps the `Method`'s declaring class public, so
+`Method.invoke` doesn't need `setAccessible(true)` to avoid `IllegalAccessException`. Built with
 `Caffeine.newBuilder().expireAfterWrite(ttlSeconds, SECONDS).maximumSize(maxSize).build()`. Only
 `findById` reads/writes this cache — `find`, `findAll`, `findPage`, and `exists` never touch it.
 
@@ -555,30 +577,40 @@ class RetryConfig {
 
 ```kotlin
 class KandraBatchScope internal constructor(session: CqlSession, batchEngine: BatchEngine) {
-    fun <T : Any> KandraRepository<T>.save(entity: T, ttlSeconds: Int? = null)
-    fun <T : Any> KandraSuspendRepository<T>.save(entity: T, ttlSeconds: Int? = null)
-    fun <T : Any> KandraRepository<T>.delete(entity: T)
-    fun <T : Any> KandraSuspendRepository<T>.delete(entity: T)
-    fun <T : Any> KandraSuspendRepository<T>.saveIfNotExists(entity: T): Boolean   // always throws
+    fun <T : Any> KandraRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null)
+    fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null)
+    fun <T : Any> KandraRepository<T>.deleteInBatch(entity: T)
+    fun <T : Any> KandraSuspendRepository<T>.deleteInBatch(entity: T)
+    fun <T : Any> KandraSuspendRepository<T>.saveIfNotExistsInBatch(entity: T): Boolean   // always throws
 }
 ```
 
 Only reachable via `KandraRuntime.batch { }` (suspend) / `batchBlocking { }`. Collects statements from
-`save`/`delete` calls (via `BatchEngine.collectSave`/`collectDelete` — same primary-row + `BATCH`-lookup
-statement building as the standalone methods, `EVENTUAL` lookups are **not** included) into one list,
-then on scope exit executes them as a single `LOGGED BATCH` via a plain **blocking**
+`saveInBatch`/`deleteInBatch` calls (via `BatchEngine.collectSave`/`collectDelete` — same primary-row +
+`BATCH`-lookup statement building as the standalone methods, `EVENTUAL` lookups are **not** included)
+into one list, then on scope exit executes them as a single `LOGGED BATCH` via a plain **blocking**
 `session.execute(batch)` — even inside the `suspend fun batch { }` variant, the final commit is not
 `executeSuspend`, so it blocks the calling coroutine's thread. `findAll`/`findById`/any read method is
-not exposed inside the scope (reads can't be batched in CQL). Calling `saveIfNotExists` inside the
-block always throws `KandraQueryException` — LWT can't share a `LOGGED BATCH` with regular statements.
-No cache invalidation happens for entities saved/deleted through a batch scope (batch collection
-bypasses `KandraRepository`'s own `save`/`delete`, which are what call `cache.invalidate`).
+not exposed by this scope (reads can't be batched in CQL) — calling them on a captured repo still
+works, but executes immediately and is not part of the batch. Calling `saveIfNotExistsInBatch` inside
+the block always throws `KandraQueryException` — LWT can't share a `LOGGED BATCH` with regular
+statements. No cache invalidation happens for entities saved/deleted through a batch scope (batch
+collection bypasses `KandraRepository`'s own `save`/`delete`, which are what call `cache.invalidate`).
+
+**Naming is deliberate, not stylistic**: these are named `saveInBatch`/`deleteInBatch`, not `save`/
+`delete`, because Kotlin always resolves a same-named member of the extension receiver over an
+extension function — even a member-extension of an implicit outer receiver, which is exactly what
+these are (declared inside `KandraBatchScope`, extending `KandraRepository`/`KandraSuspendRepository`).
+Since every repository already has its own real `save`/`delete`, a same-named version here would be
+structurally unreachable through any normal call syntax (`repo.save(x)` or `with(repo) { save(x) }`
+both resolve to the repository's own immediately-executing method) — silently defeating the batch with
+no compiler warning. Distinct names route correctly and make the wrong call a compile error instead.
 
 ```kotlin
 runtime.batchBlocking {
-    with(userRepo) { save(user) }
-    with(walletRepo) { save(wallet) }
-    with(auditRepo) { delete(oldAudit) }
+    userRepo.saveInBatch(user)
+    walletRepo.saveInBatch(wallet)
+    auditRepo.deleteInBatch(oldAudit)
 }
 ```
 

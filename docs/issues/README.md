@@ -32,6 +32,12 @@ Docker before relying on them.
 |---|---|
 | [ISS-011](ISS-011-jakarta-bean-validation.md) | Jakarta Bean Validation not auto-detected |
 | [ISS-021](ISS-021-allow-filtering-error-message.md) | Error message referenced a non-existent `allowFiltering()` |
+| [ISS-022](ISS-022-codegen-collection-raw-types.md) | `kandra-codegen` generated invalid Kotlin for any `Set`/`Map` column |
+| [ISS-023](ISS-023-cache-reflection-illegal-access.md) | `KandraCache` crashed with `IllegalAccessException` on every real-Caffeine call |
+| [ISS-024](ISS-024-empty-collection-decode-throws.md) | Non-nullable empty `Set`/`Map` columns were permanently unreadable |
+| [ISS-025](ISS-025-clustering-key-where-clause-omitted.md) | Key-based repository operations omitted clustering keys from their WHERE clause |
+| [ISS-026](ISS-026-batch-scope-save-unreachable.md) | `KandraBatchScope`'s `save`/`delete` were structurally unreachable — batches never batched |
+| [ISS-027](ISS-027-batch-scope-save-if-not-exists-guard-unreachable.md) | `KandraBatchScope`'s `saveIfNotExists` guard was also unreachable |
 
 ## Closed — not a bug
 

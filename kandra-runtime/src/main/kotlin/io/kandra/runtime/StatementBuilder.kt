@@ -72,6 +72,26 @@ class StatementBuilder(
     private fun KandraConsistency.toDriverLevel() =
         DefaultConsistencyLevel.valueOf(this.name)
 
+    /** Full primary key (partition + clustering columns, in that order) — every single-row WHERE clause needs all of it. */
+    private fun TableSchema.primaryKeyColumns(): List<io.kandra.core.schema.ColumnSchema> = partitionKeys + clusteringKeys
+
+    private fun TableSchema.primaryKeyWhereClause(): String =
+        primaryKeyColumns().joinToString(" AND ") { "${it.cqlName} = ?" }
+
+    /**
+     * Guards against silently truncating key values to fewer than the full primary key — e.g. calling
+     * `findById(userId)` on an entity with a clustering key must fail loudly, not silently scope to
+     * the wrong row (or, for deletes, an entire partition) by dropping the missing clustering values.
+     */
+    private fun requireFullKey(schema: TableSchema, keyCols: List<io.kandra.core.schema.ColumnSchema>, providedCount: Int, op: String) {
+        if (providedCount != keyCols.size) {
+            throw KandraSchemaException(
+                "$op on '${schema.tableName}' requires ${keyCols.size} key value(s) " +
+                "(${keyCols.joinToString(", ") { it.cqlName }}) but $providedCount were provided."
+            )
+        }
+    }
+
     fun insertPrimary(
         schema: TableSchema,
         entity: Any,
@@ -204,10 +224,11 @@ class StatementBuilder(
     }
 
     fun selectById(schema: TableSchema, vararg idValues: Any, consistency: KandraConsistency? = null): BoundStatement {
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
-        val cql = "SELECT * FROM ${schema.tableName} WHERE $whereParts"
+        val keyCols = schema.primaryKeyColumns()
+        requireFullKey(schema, keyCols, idValues.size, "selectById")
+        val cql = "SELECT * FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
-        val encodedValues = schema.partitionKeys.zip(idValues.toList()).map { (col, v) ->
+        val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
             codec.encode(v, col.type)
         }
         return prepared.bind(*encodedValues.toTypedArray())
@@ -238,10 +259,11 @@ class StatementBuilder(
     }
 
     fun deleteById(schema: TableSchema, vararg idValues: Any): BoundStatement {
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
-        val cql = "DELETE FROM ${schema.tableName} WHERE $whereParts"
+        val keyCols = schema.primaryKeyColumns()
+        requireFullKey(schema, keyCols, idValues.size, "deleteById")
+        val cql = "DELETE FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
-        val encodedValues = schema.partitionKeys.zip(idValues.toList()).map { (col, v) ->
+        val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
             codec.encode(v, col.type)
         }
         return prepared.bind(*encodedValues.toTypedArray())
@@ -253,7 +275,7 @@ class StatementBuilder(
 
     fun appendToCollection(
         schema: TableSchema,
-        partitionKeyValues: List<Any>,
+        keyValues: List<Any>,
         columnName: String,
         values: Any,
         consistency: KandraConsistency? = null
@@ -261,20 +283,21 @@ class StatementBuilder(
         val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
             .find { it.cqlName == columnName || it.propertyName == columnName }
             ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.tableName}'")
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE $whereParts"
+        val keyCols = schema.primaryKeyColumns()
+        requireFullKey(schema, keyCols, keyValues.size, "append")
+        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
-        val encodedPks = schema.partitionKeys.zip(partitionKeyValues).map { (pkCol, v) ->
-            codec.encode(v, pkCol.type)
+        val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
+            codec.encode(v, keyCol.type)
         }
-        return prepared.bind(values, *encodedPks.toTypedArray())
+        return prepared.bind(values, *encodedKeys.toTypedArray())
             .setIdempotent(false)
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
 
     fun removeFromCollection(
         schema: TableSchema,
-        partitionKeyValues: List<Any>,
+        keyValues: List<Any>,
         columnName: String,
         values: Any,
         consistency: KandraConsistency? = null
@@ -282,13 +305,14 @@ class StatementBuilder(
         val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
             .find { it.cqlName == columnName || it.propertyName == columnName }
             ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.tableName}'")
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE $whereParts"
+        val keyCols = schema.primaryKeyColumns()
+        requireFullKey(schema, keyCols, keyValues.size, "remove")
+        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
-        val encodedPks = schema.partitionKeys.zip(partitionKeyValues).map { (pkCol, v) ->
-            codec.encode(v, pkCol.type)
+        val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
+            codec.encode(v, keyCol.type)
         }
-        return prepared.bind(values, *encodedPks.toTypedArray())
+        return prepared.bind(values, *encodedKeys.toTypedArray())
             .setIdempotent(false)
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
@@ -302,15 +326,15 @@ class StatementBuilder(
     ): BoundStatement {
         val col = schema.columns.find { it.propertyName == columnName || it.cqlName == columnName }
             ?: throw KandraSchemaException("Counter column '$columnName' not found in '${schema.tableName}'")
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
+        val keyCols = schema.primaryKeyColumns()
         val op = if (delta >= 0) "+" else "-"
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE $whereParts"
+        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
-        val pkValues = schema.partitionKeys.map { pk ->
-            partitionKeys[pk.propertyName] ?: partitionKeys[pk.cqlName]
-                ?: throw KandraSchemaException("Missing partition key value for '${pk.cqlName}'")
+        val keyValues = keyCols.map { key ->
+            partitionKeys[key.propertyName] ?: partitionKeys[key.cqlName]
+                ?: throw KandraSchemaException("Missing key value for '${key.cqlName}'")
         }
-        return prepared.bind(Math.abs(delta), *pkValues.toTypedArray())
+        return prepared.bind(Math.abs(delta), *keyValues.toTypedArray())
             .setIdempotent(false)
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }

@@ -35,9 +35,18 @@ internal class KandraCache<K : Any, V : Any>(config: CacheResultConfig?) {
         }
     }
 
+    /**
+     * Resolves [name] against Caffeine's public `Cache` interface, not `target`'s concrete
+     * runtime class — Caffeine's cache implementations are package-private, and a [Method]
+     * obtained via [Class.getMethod] on a non-public declaring class throws [IllegalAccessException]
+     * on [Method.invoke] even though the method itself is public (it's declared on the public
+     * `Cache` interface). Resolving against the interface keeps the declaring class public, so
+     * the JVM's access check passes without needing [Method.setAccessible].
+     */
     private fun resolveMethod(target: Any, name: String, vararg paramTypes: Class<*>): Method? =
         try {
-            target.javaClass.getMethod(name, *paramTypes)
+            val cacheInterface = Class.forName("com.github.benmanes.caffeine.cache.Cache")
+            cacheInterface.getMethod(name, *paramTypes)
         } catch (e: NoSuchMethodException) {
             logger.warn { "Kandra: could not resolve cache method '$name' — caching disabled for this operation." }
             null

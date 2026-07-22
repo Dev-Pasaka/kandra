@@ -264,15 +264,15 @@ class BatchEngine(
 
     fun delete(schema: TableSchema, entity: Any) {
         val props = entity::class.memberProperties.associateBy { it.name }
-        val pkValues = schema.partitionKeys.map { pk ->
-            props[pk.propertyName]?.call(entity) ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null on delete")
+        val keyValues = (schema.partitionKeys + schema.clusteringKeys).map { key ->
+            props[key.propertyName]?.call(entity) ?: throw KandraQueryException("Key '${key.propertyName}' is null on delete")
         }
         if (schema.isSoftDelete && schema.softDeleteTtlSeconds != null) {
-            softDeleteBlocking(schema, entity, props, pkValues)
+            softDeleteBlocking(schema, entity, props, keyValues)
             return
         }
         val batch = schema.lookupTables.fold(
-            BatchStatement.newInstance(DefaultBatchType.LOGGED).add(statementBuilder.deleteById(schema, *pkValues.toTypedArray()))
+            BatchStatement.newInstance(DefaultBatchType.LOGGED).add(statementBuilder.deleteById(schema, *keyValues.toTypedArray()))
         ) { acc, lookup ->
             val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@fold acc
             acc.add(statementBuilder.deleteLookup(lookup, indexValue))
@@ -346,11 +346,11 @@ class BatchEngine(
 
     internal fun collectDelete(schema: TableSchema, entity: Any): List<BatchableStatement<*>> {
         val props = entity::class.memberProperties.associateBy { it.name }
-        val pkValues = schema.partitionKeys.map { pk ->
-            props[pk.propertyName]?.call(entity) ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null on delete")
+        val keyValues = (schema.partitionKeys + schema.clusteringKeys).map { key ->
+            props[key.propertyName]?.call(entity) ?: throw KandraQueryException("Key '${key.propertyName}' is null on delete")
         }
         return buildList {
-            add(statementBuilder.deleteById(schema, *pkValues.toTypedArray()))
+            add(statementBuilder.deleteById(schema, *keyValues.toTypedArray()))
             schema.lookupTables.forEach { lookup ->
                 val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach
                 add(statementBuilder.deleteLookup(lookup, indexValue))
@@ -456,15 +456,15 @@ class BatchEngine(
 
     suspend fun deleteSuspend(schema: TableSchema, entity: Any) {
         val props = entity::class.memberProperties.associateBy { it.name }
-        val pkValues = schema.partitionKeys.map { pk ->
-            props[pk.propertyName]?.call(entity) ?: throw KandraQueryException("Partition key '${pk.propertyName}' is null on delete")
+        val keyValues = (schema.partitionKeys + schema.clusteringKeys).map { key ->
+            props[key.propertyName]?.call(entity) ?: throw KandraQueryException("Key '${key.propertyName}' is null on delete")
         }
         if (schema.isSoftDelete && schema.softDeleteTtlSeconds != null) {
-            softDeleteSuspend(schema, entity, props, pkValues)
+            softDeleteSuspend(schema, entity, props, keyValues)
             return
         }
         val batch = schema.lookupTables.fold(
-            BatchStatement.newInstance(DefaultBatchType.LOGGED).add(statementBuilder.deleteById(schema, *pkValues.toTypedArray()))
+            BatchStatement.newInstance(DefaultBatchType.LOGGED).add(statementBuilder.deleteById(schema, *keyValues.toTypedArray()))
         ) { acc, lookup ->
             val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@fold acc
             acc.add(statementBuilder.deleteLookup(lookup, indexValue))
@@ -528,19 +528,19 @@ class BatchEngine(
         schema: TableSchema,
         entity: Any,
         props: Map<String, kotlin.reflect.KProperty1<out Any, *>>,
-        pkValues: List<Any>
+        keyValues: List<Any>
     ) {
         val ttl = schema.softDeleteTtlSeconds!!
         val marker = schema.softDeleteMarkerColumn
         val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter && it != marker }
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
+        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
         if (nonKeyCols.isNotEmpty()) {
             val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
             val cql = "UPDATE ${schema.tableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
             val prepared = session.prepare(cql)
             val values = mutableListOf<Any?>()
             nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
-            pkValues.forEach { values.add(it) }
+            keyValues.forEach { values.add(it) }
             executeWithRetry(prepared.bind(*values.toTypedArray()))
         }
         // Marker column is written without TTL — it must outlive the other columns so
@@ -548,7 +548,7 @@ class BatchEngine(
         if (marker != null) {
             val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
             val prepared = session.prepare(cql)
-            executeWithRetry(prepared.bind(true, *pkValues.toTypedArray()))
+            executeWithRetry(prepared.bind(true, *keyValues.toTypedArray()))
         }
         schema.lookupTables.forEach { lookup ->
             val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach
@@ -560,12 +560,12 @@ class BatchEngine(
         schema: TableSchema,
         entity: Any,
         props: Map<String, kotlin.reflect.KProperty1<out Any, *>>,
-        pkValues: List<Any>
+        keyValues: List<Any>
     ) {
         val ttl = schema.softDeleteTtlSeconds!!
         val marker = schema.softDeleteMarkerColumn
         val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter && it != marker }
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
+        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
         if (nonKeyCols.isNotEmpty()) {
             val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
             val cql = "UPDATE ${schema.tableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
@@ -573,13 +573,13 @@ class BatchEngine(
             val prepared = session.prepareSuspend(cql)
             val values = mutableListOf<Any?>()
             nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
-            pkValues.forEach { values.add(it) }
+            keyValues.forEach { values.add(it) }
             executeWithRetrySuspend(prepared.bind(*values.toTypedArray()))
         }
         if (marker != null) {
             val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
             val prepared = session.prepareSuspend(cql)
-            executeWithRetrySuspend(prepared.bind(true, *pkValues.toTypedArray()))
+            executeWithRetrySuspend(prepared.bind(true, *keyValues.toTypedArray()))
         }
         schema.lookupTables.forEach { lookup ->
             val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach
@@ -605,7 +605,7 @@ class BatchEngine(
         }.distinctBy { it.cqlName }.filter { !it.isTransient }
 
         val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
+        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
         val cql = "UPDATE ${schema.tableName} SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
         val prepared = session.prepareSuspend(cql)   // truly async prepare
 
@@ -615,8 +615,8 @@ class BatchEngine(
             val encoded = codec.encode(entityProps[col.propertyName]?.call(stampedWithVersion), col.type)
             values.add(if (encoded === KandraUnset) null else encoded)
         }
-        schema.partitionKeys.forEach { pk ->
-            val encoded = codec.encode(entityProps[pk.propertyName]?.call(stampedWithVersion), pk.type)
+        (schema.partitionKeys + schema.clusteringKeys).forEach { key ->
+            val encoded = codec.encode(entityProps[key.propertyName]?.call(stampedWithVersion), key.type)
             values.add(if (encoded === KandraUnset) null else encoded)
         }
         val encodedOldVersion = codec.encode(oldVersion, versionCol.type)
@@ -643,7 +643,7 @@ class BatchEngine(
         }.distinctBy { it.cqlName }.filter { !it.isTransient }
 
         val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
-        val whereParts = schema.partitionKeys.joinToString(" AND ") { "${it.cqlName} = ?" }
+        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
         val cql = "UPDATE ${schema.tableName} SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
         val prepared = session.prepare(cql)
 
@@ -653,8 +653,8 @@ class BatchEngine(
             val encoded = codec.encode(entityProps[col.propertyName]?.call(stampedWithVersion), col.type)
             values.add(if (encoded === KandraUnset) null else encoded)
         }
-        schema.partitionKeys.forEach { pk ->
-            val encoded = codec.encode(entityProps[pk.propertyName]?.call(stampedWithVersion), pk.type)
+        (schema.partitionKeys + schema.clusteringKeys).forEach { key ->
+            val encoded = codec.encode(entityProps[key.propertyName]?.call(stampedWithVersion), key.type)
             values.add(if (encoded === KandraUnset) null else encoded)
         }
         val encodedOldVersion = codec.encode(oldVersion, versionCol.type)
