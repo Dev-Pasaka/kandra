@@ -1,0 +1,333 @@
+<!doctype html>
+<html class="no-js">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <title>KandraConsistency</title>
+<link href="../../../images/logo-icon.svg" rel="icon" type="image/svg">    <script>var pathToRoot = "../../../";</script>
+    <script>document.documentElement.classList.replace("no-js","js");</script>
+    <script>const storage = localStorage.getItem("dokka-dark-mode")
+    if (storage == null) {
+        const osDarkSchemePreferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (osDarkSchemePreferred === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    } else {
+        const savedDarkMode = JSON.parse(storage)
+        if(savedDarkMode === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    }
+    </script>
+<script type="text/javascript" src="https://unpkg.com/kotlin-playground@1/dist/playground.min.js" async></script>
+<script type="text/javascript" src="../../../scripts/sourceset_dependencies.js" async></script>
+<link href="../../../styles/style.css" rel="Stylesheet">
+<link href="../../../styles/main.css" rel="Stylesheet">
+<link href="../../../styles/prism.css" rel="Stylesheet">
+<link href="../../../styles/logo-styles.css" rel="Stylesheet">
+<link href="../../../styles/font-jb-sans-auto.css" rel="Stylesheet">
+<script type="text/javascript" src="../../../scripts/clipboard.js" async></script>
+<script type="text/javascript" src="../../../scripts/navigation-loader.js" async></script>
+<script type="text/javascript" src="../../../scripts/platform-content-handler.js" async></script>
+<script type="text/javascript" src="../../../scripts/main.js" defer></script>
+<script type="text/javascript" src="../../../scripts/prism.js" async></script>
+<script type="text/javascript" src="../../../scripts/symbol-parameters-wrapper_deferred.js" defer></script></head>
+<body>
+    <div class="root">
+<nav class="navigation" id="navigation-wrapper">
+    <div class="navigation--inner">
+        <div class="navigation-title">
+            <button class="menu-toggle" id="menu-toggle" type="button">toggle menu</button>
+            <div class="library-name">
+<a class="library-name--link" href="../../../index.html">
+                            kandra
+                    </a>            </div>
+            <div class="library-version">0.4.3
+            </div>
+        </div>
+        <div class="filter-section" id="filter-section">
+                <button class="platform-tag platform-selector jvm-like" data-active="" data-filter=":kandra-core:dokkaHtmlPartial/main">jvm</button>
+        </div>
+    </div>
+    <div class="navigation-controls">
+        <button class="navigation-controls--btn navigation-controls--theme" id="theme-toggle-button" type="button">switch theme</button>
+        <div class="navigation-controls--btn navigation-controls--search" id="searchBar" role="button">search in API</div>
+    </div>
+</nav>
+        <div id="container">
+            <div class="sidebar" id="leftColumn">
+                <div class="sidebar--inner" id="sideMenu"></div>
+            </div>
+            <div id="main">
+<div class="main-content" data-page-type="classlike" id="content" pageids="kandra-core::io.kandra.core/KandraConsistency///PointingToDeclaration//1661689033">
+  <div class="breadcrumbs"><a href="../../index.html">kandra-core</a><span class="delimiter">/</span><a href="../index.html">io.kandra.core</a><span class="delimiter">/</span><span class="current">KandraConsistency</span></div>
+  <div class="cover ">
+    <h1 class="cover"><span>Kandra</span><wbr><span><span>Consistency</span></span></h1>
+    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">enum </span><a href="index.html">KandraConsistency</a> : <a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-enum/index.html">Enum</a><span class="token operator">&lt;</span><a href="index.html">KandraConsistency</a><span class="token operator">&gt; </span></div><p class="paragraph">Consistency levels for ScyllaDB/Cassandra operations.</p><h2 class="">Write consistency</h2><p class="paragraph">Default: <a href="-l-o-c-a-l_-q-u-o-r-u-m/index.html">LOCAL_QUORUM</a> — majority of replicas in the local DC must acknowledge.</p><h2 class="">Read consistency</h2><p class="paragraph">Default: <a href="-l-o-c-a-l_-o-n-e/index.html">LOCAL_ONE</a> — single replica in the local DC, fastest possible read.</p><h2 class="">LWT serial consistency (for saveIfNotExists)</h2><p class="paragraph">Use <a href="-l-o-c-a-l_-s-e-r-i-a-l/index.html">LOCAL_SERIAL</a> (default) for Paxos within the local DC only. Use <a href="-s-e-r-i-a-l/index.html">SERIAL</a> for globally unique constraints (e.g. a username unique across ALL DCs).</p><h2 class="">Consistency resolution order (highest priority first)</h2><ol><li><p class="paragraph">Per-operation parameter on the repository method</p></li><li><p class="paragraph"><code class="lang-kotlin">@ReadConsistency</code> / <code class="lang-kotlin">@WriteConsistency</code> annotation on the entity class</p></li><li><p class="paragraph"><code class="lang-kotlin">KandraConfig.consistency.defaultRead</code> / <code class="lang-kotlin">defaultWrite</code></p></li></ol></div></div>
+  </div>
+  <div class="tabbedcontent">
+    <div class="tabs-section" tabs-section="tabs-section"><button class="section-tab" data-active="" data-togglable="CONSTRUCTOR,TYPE,PROPERTY,FUNCTION">Members</button><button class="section-tab" data-togglable="ENTRY">Entries</button></div>
+    <div class="tabs-section-body">
+      <div data-togglable="ENTRY">
+        <h2 class="">Entries</h2>
+        <div class="table"><a data-name="-928425340%2FClasslikes%2F1661689033" anchor-label="ONE" id="-928425340%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-o-n-e/index.html">ONE</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-928425340%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-o-n-e/index.html">ONE</a></div></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="487378922%2FClasslikes%2F1661689033" anchor-label="TWO" id="487378922%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-t-w-o/index.html">TWO</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="487378922%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-t-w-o/index.html">TWO</a></div></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1667980996%2FClasslikes%2F1661689033" anchor-label="THREE" id="-1667980996%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-t-h-r-e-e/index.html">THREE</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1667980996%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-t-h-r-e-e/index.html">THREE</a></div></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="998867913%2FClasslikes%2F1661689033" anchor-label="QUORUM" id="998867913%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-q-u-o-r-u-m/index.html">QUORUM</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="998867913%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-q-u-o-r-u-m/index.html">QUORUM</a></div></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1670510465%2FClasslikes%2F1661689033" anchor-label="ALL" id="-1670510465%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-a-l-l/index.html">ALL</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1670510465%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-a-l-l/index.html">ALL</a></div></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-171286768%2FClasslikes%2F1661689033" anchor-label="LOCAL_ONE" id="-171286768%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-l-o-c-a-l_-o-n-e/index.html">LOCAL_ONE</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-171286768%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-l-o-c-a-l_-o-n-e/index.html">LOCAL_ONE</a></div></div><div class="brief "><p class="paragraph">Single replica in the local DC — fastest read, weakest guarantee.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-254172227%2FClasslikes%2F1661689033" anchor-label="LOCAL_QUORUM" id="-254172227%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-l-o-c-a-l_-q-u-o-r-u-m/index.html">LOCAL_QUORUM</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-254172227%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-l-o-c-a-l_-q-u-o-r-u-m/index.html">LOCAL_QUORUM</a></div></div><div class="brief "><p class="paragraph">Majority of replicas in the local DC — default write.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1253210075%2FClasslikes%2F1661689033" anchor-label="EACH_QUORUM" id="1253210075%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-e-a-c-h_-q-u-o-r-u-m/index.html">EACH_QUORUM</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1253210075%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-e-a-c-h_-q-u-o-r-u-m/index.html">EACH_QUORUM</a></div></div><div class="brief "><p class="paragraph">Write to majority in EVERY DC — strongest multi-DC write guarantee.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1442298094%2FClasslikes%2F1661689033" anchor-label="LOCAL_SERIAL" id="-1442298094%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-l-o-c-a-l_-s-e-r-i-a-l/index.html">LOCAL_SERIAL</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1442298094%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-l-o-c-a-l_-s-e-r-i-a-l/index.html">LOCAL_SERIAL</a></div></div><div class="brief "><p class="paragraph">Paxos serial consistency in local DC only — default for LWT.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-189257954%2FClasslikes%2F1661689033" anchor-label="SERIAL" id="-189257954%2FClasslikes%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="ENTRY" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-s-e-r-i-a-l/index.html">SERIAL</a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-189257954%2FClasslikes%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><a href="-s-e-r-i-a-l/index.html">SERIAL</a></div></div><div class="brief "><p class="paragraph">Global Paxos across all DCs — required for globally unique constraints.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="PROPERTY">
+        <h2 class="">Properties</h2>
+        <div class="table"><a data-name="-95835964%2FProperties%2F1661689033" anchor-label="entries" id="-95835964%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="entries.html"><span><span>entries</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-95835964%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="entries.html">entries</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.enums/-enum-entries/index.html">EnumEntries</a><span class="token operator">&lt;</span><a href="index.html">KandraConsistency</a><span class="token operator">&gt;</span></div><div class="brief "><p class="paragraph">Returns a representation of an immutable list of all enum entries, in the order they're declared.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1270943480%2FProperties%2F1661689033" anchor-label="isSerial" id="-1270943480%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="is-serial.html"><span>is</span><wbr><span><span>Serial</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1270943480%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="is-serial.html">isSerial</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-372974862%2FProperties%2F1661689033" anchor-label="name" id="-372974862%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="../../io.kandra.core.annotations/-lookup-consistency/-e-v-e-n-t-u-a-l/index.html#-372974862%2FProperties%2F1661689033"><span><span>name</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-372974862%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="../../io.kandra.core.annotations/-lookup-consistency/-e-v-e-n-t-u-a-l/index.html#-372974862%2FProperties%2F1661689033">name</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-739389684%2FProperties%2F1661689033" anchor-label="ordinal" id="-739389684%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="../../io.kandra.core.annotations/-lookup-consistency/-e-v-e-n-t-u-a-l/index.html#-739389684%2FProperties%2F1661689033"><span><span>ordinal</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-739389684%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="../../io.kandra.core.annotations/-lookup-consistency/-e-v-e-n-t-u-a-l/index.html#-739389684%2FProperties%2F1661689033">ordinal</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="FUNCTION">
+        <h2 class="">Functions</h2>
+        <div class="table"><a data-name="1010930520%2FFunctions%2F1661689033" anchor-label="valueOf" id="1010930520%2FFunctions%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="value-of.html"><span>value</span><wbr><span><span>Of</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1010930520%2FFunctions%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="value-of.html"><span class="token function">valueOf</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">value<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="index.html">KandraConsistency</a></div><div class="brief "><p class="paragraph">Returns the enum constant of this type with the specified name. The string must match exactly an identifier used to declare an enum constant in this type. (Extraneous whitespace characters are not permitted.)</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-2018665884%2FFunctions%2F1661689033" anchor-label="values" id="-2018665884%2FFunctions%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="values.html"><span><span>values</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-2018665884%2FFunctions%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="values.html"><span class="token function">values</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-array/index.html">Array</a><span class="token operator">&lt;</span><a href="index.html">KandraConsistency</a><span class="token operator">&gt;</span></div><div class="brief "><p class="paragraph">Returns an array containing the constants of this enum type, in the order they're declared.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      <div class="footer">
+        <span class="go-to-top-icon"><a href="#content" id="go-to-top-link"></a></span><span>© 2026 Copyright</span><span class="pull-right"><span>Generated by </span><a href="https://github.com/Kotlin/dokka"><span>dokka</span><span class="padded-icon"></span></a></span>
+      </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
