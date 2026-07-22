@@ -72,6 +72,19 @@ data class IntegrationBatchPrimary(@PartitionKey val id: UUID, val name: String)
 data class IntegrationBatchSecondary(@PartitionKey val id: UUID, val primaryId: UUID)
 
 /**
+ * Regression coverage for ISS-028 — cache invalidation on save/update/etc. used a partition-key-only
+ * cache key (`partitionKeyOf`) that never matched `findById`'s real cache key (full key: partition +
+ * clustering) for any clustering-keyed cached entity, so invalidation always silently missed.
+ */
+@ScyllaTable("integration_cached_clustered")
+@CacheResult(ttlSeconds = 60, maxSize = 100)
+data class IntegrationCachedClustered(
+    @PartitionKey val id: UUID,
+    @ClusteringKey(order = ClusteringOrder.DESC) val createdAt: Instant,
+    val value: String
+)
+
+/**
  * Regression coverage for ISS-029 — `@LookupIndex` resolution (`find`/`findAll`/`findPage`/`exists`/
  * `deleteBy` via a lookup predicate) only ever reconstructed the primary table's partition key from the
  * lookup row, never its clustering key, so it broke entirely for any entity combining both a
@@ -102,6 +115,7 @@ class KandraIntegrationTest {
         IntegrationCached::class,
         IntegrationBatchPrimary::class,
         IntegrationBatchSecondary::class,
+        IntegrationCachedClustered::class,
         IntegrationLookupClustered::class
     )
 
@@ -293,6 +307,43 @@ class KandraIntegrationTest {
                 }
             }
         }
+    }
+
+    // ── ISS-028 regression: cache invalidation used a partition-key-only key, never matching
+    // findById's real (full-key) cache key for a clustering-keyed cached entity ──────────────────
+
+    @Test
+    fun `update invalidates the cache for a clustering-keyed cached entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationCachedClustered>()
+        val entity = IntegrationCachedClustered(UUID.randomUUID(), Instant.now(), "original")
+        repo.save(entity)
+
+        // Use the round-tripped entity (from findById) for every subsequent key reference, not the raw
+        // pre-save Instant.now() -- CQL TIMESTAMP columns only store millisecond precision, so the raw
+        // sub-millisecond-precision Instant and the round-tripped one are never .equals(). A real caller
+        // always operates on the round-tripped value from here on, so this test does too.
+        val first = repo.findById(entity.id, entity.createdAt) // populates the cache under the full key
+        assertEquals("original", first?.value)
+
+        repo.update(first!!, first.copy(value = "updated"))
+
+        val second = repo.findById(first.id, first.createdAt) // must be a fresh read, not a stale cache hit
+        assertEquals("updated", second?.value)
+    }
+
+    @Test
+    fun `updateForce and delete also invalidate the cache for a clustering-keyed cached entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationCachedClustered>()
+        val entity = IntegrationCachedClustered(UUID.randomUUID(), Instant.now(), "v1")
+        repo.save(entity)
+        repo.findById(entity.id, entity.createdAt) // populate cache
+
+        repo.updateForce(entity.copy(value = "v2"))
+        assertEquals("v2", repo.findById(entity.id, entity.createdAt)?.value)
+
+        repo.findById(entity.id, entity.createdAt) // repopulate cache
+        repo.delete(entity.copy(value = "v2"))
+        assertNull(repo.findById(entity.id, entity.createdAt))
     }
 
     // ── ISS-029 regression: @LookupIndex resolution broke entirely for clustering-keyed entities ──
