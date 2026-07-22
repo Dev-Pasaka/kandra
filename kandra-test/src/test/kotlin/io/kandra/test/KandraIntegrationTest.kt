@@ -72,6 +72,20 @@ data class IntegrationBatchPrimary(@PartitionKey val id: UUID, val name: String)
 data class IntegrationBatchSecondary(@PartitionKey val id: UUID, val primaryId: UUID)
 
 /**
+ * Regression coverage for ISS-028 — cache invalidation on save/update/etc. used a partition-key-only
+ * cache key (`partitionKeyOf`) that never matched `findById`'s real cache key (full key: partition +
+ * clustering) for any clustering-keyed cached entity, so invalidation always silently missed.
+ */
+@ScyllaTable("integration_cached_clustered")
+@CacheResult(ttlSeconds = 60, maxSize = 100)
+data class IntegrationCachedClustered(
+    @PartitionKey val id: UUID,
+    @ClusteringKey(order = ClusteringOrder.DESC) val createdAt: Instant,
+    val value: String
+)
+
+
+/**
  * Real ScyllaDB/Cassandra integration tests via Testcontainers — no fakes involved.
  *
  * Exercises paths `FakeKandraSession` structurally can't verify: real CQL parameter binding,
@@ -87,7 +101,8 @@ class KandraIntegrationTest {
         IntegrationCollections::class,
         IntegrationCached::class,
         IntegrationBatchPrimary::class,
-        IntegrationBatchSecondary::class
+        IntegrationBatchSecondary::class,
+        IntegrationCachedClustered::class
     )
 
     @AfterEach
@@ -279,4 +294,38 @@ class KandraIntegrationTest {
             }
         }
     }
+
+    // ── ISS-028 regression: cache invalidation used a partition-key-only key, never matching
+    // findById's real (full-key) cache key for a clustering-keyed cached entity ──────────────────
+
+    @Test
+    fun `update invalidates the cache for a clustering-keyed cached entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationCachedClustered>()
+        val entity = IntegrationCachedClustered(UUID.randomUUID(), Instant.now(), "original")
+        repo.save(entity)
+
+        val first = repo.findById(entity.id, entity.createdAt) // populates the cache under the full key
+        assertEquals("original", first?.value)
+
+        repo.update(first!!, first.copy(value = "updated"))
+
+        val second = repo.findById(entity.id, entity.createdAt) // must be a fresh read, not a stale cache hit
+        assertEquals("updated", second?.value)
+    }
+
+    @Test
+    fun `updateForce and delete also invalidate the cache for a clustering-keyed cached entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationCachedClustered>()
+        val entity = IntegrationCachedClustered(UUID.randomUUID(), Instant.now(), "v1")
+        repo.save(entity)
+        repo.findById(entity.id, entity.createdAt) // populate cache
+
+        repo.updateForce(entity.copy(value = "v2"))
+        assertEquals("v2", repo.findById(entity.id, entity.createdAt)?.value)
+
+        repo.findById(entity.id, entity.createdAt) // repopulate cache
+        repo.delete(entity.copy(value = "v2"))
+        assertNull(repo.findById(entity.id, entity.createdAt))
+    }
+
 }
