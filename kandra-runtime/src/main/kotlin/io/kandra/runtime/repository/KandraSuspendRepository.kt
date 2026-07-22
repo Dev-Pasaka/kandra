@@ -40,48 +40,54 @@ class KandraSuspendRepository<T : Any>(
         if (batchEngine.isShuttingDown.get()) throw KandraQueryException("Kandra is shutting down — new queries are rejected")
     }
 
-    private fun partitionKeyOf(entity: T): Any {
-        val props = entity::class.memberProperties.associateBy { it.name }
-        val keys = schema.partitionKeys.map { pk -> props[pk.propertyName]?.call(entity) ?: pk.propertyName }
-        return if (keys.size == 1) keys[0]!! else keys
+    /**
+     * Cache key for [entity], covering the **full** primary key (partition + clustering columns),
+     * in the same shape [findById]'s cache key uses (a bare single value when the key is one column
+     * total, otherwise an ordered [List]). Must stay in lockstep with `findById`'s key derivation —
+     * see ISS-028: this used to be partition-key-only (`partitionKeyOf`), which silently never matched
+     * `findById`'s real cache key for any clustering-keyed entity, so invalidation always missed.
+     */
+    private fun cacheKeyOf(entity: T): Any {
+        val keys = keyValuesOf(entity)
+        return if (keys.size == 1) keys[0] else keys
     }
 
     suspend fun save(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null) {
         batchEngine.saveSuspend(schema, entity, ttlSeconds, timestampMicros, consistency)
-        cache.invalidate(partitionKeyOf(entity))
+        cache.invalidate(cacheKeyOf(entity))
     }
 
     suspend fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean =
-        batchEngine.saveIfNotExistsSuspend(schema, entity, serialConsistency).also { if (it) cache.invalidate(partitionKeyOf(entity)) }
+        batchEngine.saveIfNotExistsSuspend(schema, entity, serialConsistency).also { if (it) cache.invalidate(cacheKeyOf(entity)) }
 
     suspend fun saveAll(entities: List<T>, useBatch: Boolean = true) {
         batchEngine.saveAllSuspend(schema, entities, useBatch = useBatch)
-        entities.forEach { cache.invalidate(partitionKeyOf(it)) }
+        entities.forEach { cache.invalidate(cacheKeyOf(it)) }
     }
 
     suspend fun update(old: T, new: T) {
         batchEngine.updateSuspend(schema, old, new)
-        cache.invalidate(partitionKeyOf(new))
+        cache.invalidate(cacheKeyOf(new))
     }
 
     suspend fun updateForce(entity: T) {
         batchEngine.updateForceSuspend(schema, entity)
-        cache.invalidate(partitionKeyOf(entity))
+        cache.invalidate(cacheKeyOf(entity))
     }
 
     suspend fun saveWithNulls(entity: T, ttlSeconds: Int? = null) {
         batchEngine.saveWithNullsSuspend(schema, entity, ttlSeconds)
-        cache.invalidate(partitionKeyOf(entity))
+        cache.invalidate(cacheKeyOf(entity))
     }
 
     suspend fun delete(entity: T) {
         batchEngine.deleteSuspend(schema, entity)
-        cache.invalidate(partitionKeyOf(entity))
+        cache.invalidate(cacheKeyOf(entity))
     }
 
     suspend fun deleteAll(entities: List<T>) {
         batchEngine.deleteAllSuspend(schema, entities)
-        entities.forEach { cache.invalidate(partitionKeyOf(it)) }
+        entities.forEach { cache.invalidate(cacheKeyOf(it)) }
     }
 
     suspend fun deleteById(vararg keyValues: Any) {

@@ -86,6 +86,33 @@ data class IntegrationBatchPrimary(@PartitionKey val id: UUID, val name: String)
 data class IntegrationBatchSecondary(@PartitionKey val id: UUID, val primaryId: UUID)
 
 /**
+ * Regression coverage for ISS-028 — cache invalidation on save/update/etc. used a partition-key-only
+ * cache key (`partitionKeyOf`) that never matched `findById`'s real cache key (full key: partition +
+ * clustering) for any clustering-keyed cached entity, so invalidation always silently missed.
+ */
+@ScyllaTable("integration_cached_clustered")
+@CacheResult(ttlSeconds = 60, maxSize = 100)
+data class IntegrationCachedClustered(
+    @PartitionKey val id: UUID,
+    @ClusteringKey(order = ClusteringOrder.DESC) val createdAt: Instant,
+    val value: String
+)
+
+/**
+ * Regression coverage for ISS-029 — `@LookupIndex` resolution (`find`/`findAll`/`findPage`/`exists`/
+ * `deleteBy` via a lookup predicate) only ever reconstructed the primary table's partition key from the
+ * lookup row, never its clustering key, so it broke entirely for any entity combining both a
+ * `@LookupIndex` and a clustering key once `selectById` started requiring the full key (ISS-025).
+ */
+@ScyllaTable("integration_lookup_clustered")
+data class IntegrationLookupClustered(
+    @PartitionKey val ownerId: UUID,
+    @ClusteringKey(order = ClusteringOrder.DESC) val createdAt: Instant,
+    @io.kandra.core.annotations.LookupIndex(tableSuffix = "by_slug") val slug: String,
+    val content: String
+)
+
+/**
  * Real ScyllaDB/Cassandra integration tests via Testcontainers — no fakes involved.
  *
  * Exercises paths `FakeKandraSession` structurally can't verify: real CQL parameter binding,
@@ -102,6 +129,8 @@ class KandraIntegrationTest {
         IntegrationCached::class,
         IntegrationBatchPrimary::class,
         IntegrationBatchSecondary::class,
+        IntegrationCachedClustered::class,
+        IntegrationLookupClustered::class,
         IntegrationSoftDeletedLookup::class
     )
 
@@ -293,6 +322,97 @@ class KandraIntegrationTest {
                 }
             }
         }
+    }
+
+    // ── ISS-028 regression: cache invalidation used a partition-key-only key, never matching
+    // findById's real (full-key) cache key for a clustering-keyed cached entity ──────────────────
+
+    @Test
+    fun `update invalidates the cache for a clustering-keyed cached entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationCachedClustered>()
+        val entity = IntegrationCachedClustered(UUID.randomUUID(), Instant.now(), "original")
+        repo.save(entity)
+
+        // Use the round-tripped entity (from findById) for every subsequent key reference, not the raw
+        // pre-save Instant.now() -- CQL TIMESTAMP columns only store millisecond precision, so the raw
+        // sub-millisecond-precision Instant and the round-tripped one are never .equals(). A real caller
+        // always operates on the round-tripped value from here on, so this test does too.
+        val first = repo.findById(entity.id, entity.createdAt) // populates the cache under the full key
+        assertEquals("original", first?.value)
+
+        repo.update(first!!, first.copy(value = "updated"))
+
+        val second = repo.findById(first.id, first.createdAt) // must be a fresh read, not a stale cache hit
+        assertEquals("updated", second?.value)
+    }
+
+    @Test
+    fun `updateForce and delete also invalidate the cache for a clustering-keyed cached entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationCachedClustered>()
+        val entity = IntegrationCachedClustered(UUID.randomUUID(), Instant.now(), "v1")
+        repo.save(entity)
+        repo.findById(entity.id, entity.createdAt) // populate cache
+
+        repo.updateForce(entity.copy(value = "v2"))
+        assertEquals("v2", repo.findById(entity.id, entity.createdAt)?.value)
+
+        repo.findById(entity.id, entity.createdAt) // repopulate cache
+        repo.delete(entity.copy(value = "v2"))
+        assertNull(repo.findById(entity.id, entity.createdAt))
+    }
+
+    // ── ISS-029 regression: @LookupIndex resolution broke entirely for clustering-keyed entities ──
+
+    @Test
+    fun `find via LookupIndex works on an entity that also has a clustering key`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationLookupClustered>()
+        val ownerId = UUID.randomUUID()
+        val older = IntegrationLookupClustered(ownerId, Instant.now().minusSeconds(60), "older-slug", "older content")
+        val newer = IntegrationLookupClustered(ownerId, Instant.now(), "newer-slug", "newer content")
+        repo.save(older)
+        repo.save(newer)
+
+        val foundByOlderSlug = repo.find { +IntegrationLookupClusteredTable.slug.eq("older-slug") }
+        assertNotNull(foundByOlderSlug)
+        assertEquals("older content", foundByOlderSlug!!.content)
+        // Compare via epoch millis, not raw Instant equality -- CQL TIMESTAMP columns only store
+        // millisecond precision, so the pre-save Instant.now() (sub-millisecond) never .equals() the
+        // round-tripped value read back through the lookup, even though it's the same logical row.
+        assertEquals(older.createdAt.toEpochMilli(), foundByOlderSlug.createdAt.toEpochMilli())
+
+        val foundByNewerSlug = repo.find { +IntegrationLookupClusteredTable.slug.eq("newer-slug") }
+        assertNotNull(foundByNewerSlug)
+        assertEquals("newer content", foundByNewerSlug!!.content)
+    }
+
+    @Test
+    fun `findPage via LookupIndex resolves exactly the one matching row on a clustering-keyed entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationLookupClustered>()
+        val ownerId = UUID.randomUUID()
+        val a = IntegrationLookupClustered(ownerId, Instant.now().minusSeconds(120), "page-slug-a", "content-a")
+        val b = IntegrationLookupClustered(ownerId, Instant.now().minusSeconds(60), "page-slug-b", "content-b")
+        repo.save(a)
+        repo.save(b)
+
+        val page = repo.findPage(20, null) { +IntegrationLookupClusteredTable.slug.eq("page-slug-b") }
+        assertEquals(1, page.items.size)
+        assertEquals("content-b", page.items.first().content)
+        assertFalse(page.hasMore)
+    }
+
+    @Test
+    fun `deleteBy via LookupIndex deletes only the matching row on a clustering-keyed entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationLookupClustered>()
+        val ownerId = UUID.randomUUID()
+        val keep = IntegrationLookupClustered(ownerId, Instant.now().minusSeconds(60), "keep-slug", "keep")
+        val remove = IntegrationLookupClustered(ownerId, Instant.now(), "remove-slug", "remove")
+        repo.save(keep)
+        repo.save(remove)
+
+        repo.deleteBy { +IntegrationLookupClusteredTable.slug.eq("remove-slug") }
+
+        assertNotNull(repo.findById(ownerId, keep.createdAt))
+        assertNull(repo.findById(ownerId, remove.createdAt))
     }
 
     // ── ISS-030 regression: soft-delete unconditionally deleted lookup-table rows ──────────────

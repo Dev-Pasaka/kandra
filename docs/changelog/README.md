@@ -4,7 +4,7 @@ All notable changes to Kandra, one file per version — newest first.
 
 | Version | Highlights |
 |---|---|
-| [0.4.4](0.4.4.md) | Unreleased — fixes regressions surfaced while re-verifying 0.4.3's fixes (soft-delete removing lookup rows so far) |
+| [0.4.4](0.4.4.md) | Fixes 3 regressions/gaps surfaced while re-verifying 0.4.3's fixes end-to-end: cache-invalidation key mismatch, `@LookupIndex` + clustering key, soft-delete removing lookup rows |
 | [0.4.3](0.4.3.md) | Fixes all 5 Critical/High bugs found by the first real-cluster test plan: codegen `Set`/`Map` codegen, cache reflection crash, empty-collection decode, clustering-key WHERE-clause omission, `KandraBatchScope` non-atomicity |
 | [0.4.2](0.4.2.md) | Async read path, `findActive()`, `kandra-jakarta`, real-cluster integration tests, migration locking/checksum fixes |
 | [0.3.0-SNAPSHOT](0.3.0.md) | Retry policy, `kandra-multidc`, auth/SSL, idempotency, secondary indexes |
