@@ -304,12 +304,16 @@ class KandraIntegrationTest {
         val entity = IntegrationCachedClustered(UUID.randomUUID(), Instant.now(), "original")
         repo.save(entity)
 
+        // Use the round-tripped entity (from findById) for every subsequent key reference, not the raw
+        // pre-save Instant.now() -- CQL TIMESTAMP columns only store millisecond precision, so the raw
+        // sub-millisecond-precision Instant and the round-tripped one are never .equals(). A real caller
+        // always operates on the round-tripped value from here on, so this test does too.
         val first = repo.findById(entity.id, entity.createdAt) // populates the cache under the full key
         assertEquals("original", first?.value)
 
         repo.update(first!!, first.copy(value = "updated"))
 
-        val second = repo.findById(entity.id, entity.createdAt) // must be a fresh read, not a stale cache hit
+        val second = repo.findById(first.id, first.createdAt) // must be a fresh read, not a stale cache hit
         assertEquals("updated", second?.value)
     }
 
