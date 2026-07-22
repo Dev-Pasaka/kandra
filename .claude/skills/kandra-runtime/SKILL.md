@@ -210,7 +210,7 @@ fun deleteBy(block: QueryContext.() -> Unit)
 userRepo.delete(user)                 // hard delete unless @SoftDelete
 userRepo.deleteAll(inactiveUsers)     // N sequential deletes, warns above 1000 rows
 userRepo.deleteById(userId)           // ⚠ blocking repo: ignores @SoftDelete, no retry, no cache invalidation
-userRepo.deleteBy { +UserTable.email.eq("x@example.com") }
+userRepo.deleteBy { UserTable.email eq "x@example.com" }
 ```
 
 ### Read family
@@ -298,10 +298,10 @@ inside `BatchEngine.executeWithRetry`.
 
 ```kotlin
 val u = userRepo.findById(userId)                              // cached if @CacheResult
-val one = userRepo.find { +UserTable.email.eq("a@b.com") }      // fetches all matches, takes first
-val page = userRepo.findPage(pageSize = 50, pageToken = null) { +UserTable.status.eq("ACTIVE") }
-val next = userRepo.findPage(pageSize = 50, pageToken = page.nextPageToken) { +UserTable.status.eq("ACTIVE") }
-val yes = userRepo.exists { +UserTable.email.eq("a@b.com") }    // full-row fetch if `email` is a @LookupIndex!
+val one = userRepo.find { UserTable.email eq "a@b.com" }      // fetches all matches, takes first
+val page = userRepo.findPage(pageSize = 50, pageToken = null) { UserTable.status eq "ACTIVE" }
+val next = userRepo.findPage(pageSize = 50, pageToken = page.nextPageToken) { UserTable.status eq "ACTIVE" }
+val yes = userRepo.exists { UserTable.email eq "a@b.com" }    // full-row fetch if `email` is a @LookupIndex!
 val rows = userRepo.rawQuery(KandraRawQuery.cql("SELECT count(*) FROM users WHERE status = ?").bind("ACTIVE").build())
 ```
 
@@ -360,17 +360,16 @@ sealed class KandraPredicate {
     data class In(val column: String, val values: List<Any?>) : KandraPredicate()
 }
 
-class KandraColumnRef<T>(val cqlName: String, val isLookup: Boolean = false) {
-    infix fun eq(value: T): KandraPredicate
-    infix fun gt(value: T): KandraPredicate
-    infix fun gte(value: T): KandraPredicate
-    infix fun lt(value: T): KandraPredicate
-    infix fun lte(value: T): KandraPredicate
-    infix fun isIn(values: List<T>): KandraPredicate
-}
+class KandraColumnRef<T>(val cqlName: String, val isLookup: Boolean = false)
+// eq/gt/gte/lt/lte/isIn are declared on QueryContext below, not here — see the note underneath.
 
 class QueryContext {
-    operator fun KandraPredicate.unaryPlus()   // adds the predicate — `+Table.col.eq(x)`
+    infix fun <T> KandraColumnRef<T>.eq(value: T)              // registers an Eq predicate
+    infix fun <T> KandraColumnRef<T>.gt(value: T)               // registers a Gt predicate
+    infix fun <T> KandraColumnRef<T>.gte(value: T)              // registers a Gte predicate
+    infix fun <T> KandraColumnRef<T>.lt(value: T)                // registers an Lt predicate
+    infix fun <T> KandraColumnRef<T>.lte(value: T)               // registers an Lte predicate
+    infix fun <T> KandraColumnRef<T>.isIn(values: List<T>)      // registers an In predicate
     fun limit(n: Int)                          // appends LIMIT n to the generated CQL
 }
 
@@ -393,9 +392,17 @@ KSP-generated `*Table` objects expose per column (e.g. `UserTable.email`); `isLo
 — it doesn't change how the predicate is built, `QueryExecutor` figures out the lookup-vs-direct
 routing from `schema.lookupTables` at execution time regardless of this flag.
 
+**Gotcha (fixed, historical)**: earlier versions required a leading `+` — `+UserTable.email.eq(...)`
+— because `eq`/etc. lived on `KandraColumnRef` and returned a plain `KandraPredicate` that
+`QueryContext.unaryPlus()` then registered. Forgetting the `+` on one predicate out of several
+compiled cleanly (Kotlin only warns on an unused expression) and silently dropped that predicate from
+the query, with no way to detect it at runtime since the discarded predicate never reached
+`QueryContext`. `eq`/`gt`/`gte`/`lt`/`lte`/`isIn` are now `QueryContext` member extensions instead —
+the comparison itself performs the registration, so there's no intermediate value left to forget.
+
 ```kotlin
 repository.findAll {
-    +UserTable.status.eq("ACTIVE")
+    UserTable.status eq "ACTIVE"
     limit(20)
 }
 ```
