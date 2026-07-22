@@ -184,7 +184,8 @@ object SchemaRegistry {
                 tableName = col.lookupIndex!!.tableName,
                 indexColumn = col,
                 partitionKeyColumns = partitionKeys,
-                consistency = col.lookupIndex.consistency
+                consistency = col.lookupIndex.consistency,
+                clusteringKeyColumns = clusteringKeys
             )
         }
 

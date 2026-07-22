@@ -72,6 +72,20 @@ data class IntegrationBatchPrimary(@PartitionKey val id: UUID, val name: String)
 data class IntegrationBatchSecondary(@PartitionKey val id: UUID, val primaryId: UUID)
 
 /**
+ * Regression coverage for ISS-029 — `@LookupIndex` resolution (`find`/`findAll`/`findPage`/`exists`/
+ * `deleteBy` via a lookup predicate) only ever reconstructed the primary table's partition key from the
+ * lookup row, never its clustering key, so it broke entirely for any entity combining both a
+ * `@LookupIndex` and a clustering key once `selectById` started requiring the full key (ISS-025).
+ */
+@ScyllaTable("integration_lookup_clustered")
+data class IntegrationLookupClustered(
+    @PartitionKey val ownerId: UUID,
+    @ClusteringKey(order = ClusteringOrder.DESC) val createdAt: Instant,
+    @io.kandra.core.annotations.LookupIndex(tableSuffix = "by_slug") val slug: String,
+    val content: String
+)
+
+/**
  * Real ScyllaDB/Cassandra integration tests via Testcontainers — no fakes involved.
  *
  * Exercises paths `FakeKandraSession` structurally can't verify: real CQL parameter binding,
@@ -87,7 +101,8 @@ class KandraIntegrationTest {
         IntegrationCollections::class,
         IntegrationCached::class,
         IntegrationBatchPrimary::class,
-        IntegrationBatchSecondary::class
+        IntegrationBatchSecondary::class,
+        IntegrationLookupClustered::class
     )
 
     @AfterEach
@@ -278,5 +293,56 @@ class KandraIntegrationTest {
                 }
             }
         }
+    }
+
+    // ── ISS-029 regression: @LookupIndex resolution broke entirely for clustering-keyed entities ──
+
+    @Test
+    fun `find via LookupIndex works on an entity that also has a clustering key`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationLookupClustered>()
+        val ownerId = UUID.randomUUID()
+        val older = IntegrationLookupClustered(ownerId, Instant.now().minusSeconds(60), "older-slug", "older content")
+        val newer = IntegrationLookupClustered(ownerId, Instant.now(), "newer-slug", "newer content")
+        repo.save(older)
+        repo.save(newer)
+
+        val foundByOlderSlug = repo.find { +IntegrationLookupClusteredTable.slug.eq("older-slug") }
+        assertNotNull(foundByOlderSlug)
+        assertEquals("older content", foundByOlderSlug!!.content)
+        assertEquals(older.createdAt, foundByOlderSlug.createdAt)
+
+        val foundByNewerSlug = repo.find { +IntegrationLookupClusteredTable.slug.eq("newer-slug") }
+        assertNotNull(foundByNewerSlug)
+        assertEquals("newer content", foundByNewerSlug!!.content)
+    }
+
+    @Test
+    fun `findPage via LookupIndex resolves exactly the one matching row on a clustering-keyed entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationLookupClustered>()
+        val ownerId = UUID.randomUUID()
+        val a = IntegrationLookupClustered(ownerId, Instant.now().minusSeconds(120), "page-slug-a", "content-a")
+        val b = IntegrationLookupClustered(ownerId, Instant.now().minusSeconds(60), "page-slug-b", "content-b")
+        repo.save(a)
+        repo.save(b)
+
+        val page = repo.findPage(20, null) { +IntegrationLookupClusteredTable.slug.eq("page-slug-b") }
+        assertEquals(1, page.items.size)
+        assertEquals("content-b", page.items.first().content)
+        assertFalse(page.hasMore)
+    }
+
+    @Test
+    fun `deleteBy via LookupIndex deletes only the matching row on a clustering-keyed entity`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationLookupClustered>()
+        val ownerId = UUID.randomUUID()
+        val keep = IntegrationLookupClustered(ownerId, Instant.now().minusSeconds(60), "keep-slug", "keep")
+        val remove = IntegrationLookupClustered(ownerId, Instant.now(), "remove-slug", "remove")
+        repo.save(keep)
+        repo.save(remove)
+
+        repo.deleteBy { +IntegrationLookupClusteredTable.slug.eq("remove-slug") }
+
+        assertNotNull(repo.findById(ownerId, keep.createdAt))
+        assertNull(repo.findById(ownerId, remove.createdAt))
     }
 }

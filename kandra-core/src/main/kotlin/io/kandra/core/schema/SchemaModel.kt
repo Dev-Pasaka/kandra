@@ -52,7 +52,16 @@ data class LookupTableSchema(
     val indexColumn: ColumnSchema,
     /** All partition key columns of the primary table — needed to reconstruct the primary key. */
     val partitionKeyColumns: List<ColumnSchema>,
-    val consistency: LookupConsistency
+    val consistency: LookupConsistency,
+    /**
+     * All clustering key columns of the primary table, stored alongside the partition key columns
+     * so a lookup resolution can reconstruct the primary table's **full** key (partition +
+     * clustering), not just its partition key. Empty for a primary table with no clustering key.
+     * See ISS-029: before this field existed, lookup resolution could only ever supply
+     * `selectById` with the partition key, which stopped being sufficient once ISS-025 made
+     * `selectById` require the full key on any clustering-keyed entity.
+     */
+    val clusteringKeyColumns: List<ColumnSchema> = emptyList()
 )
 
 data class CacheResultConfig(val ttlSeconds: Int, val maxSize: Long)
