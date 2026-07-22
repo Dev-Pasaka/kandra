@@ -73,6 +73,9 @@ object DdlGenerator {
             lookup.partitionKeyColumns.forEach { pk ->
                 add("${pk.cqlName} ${kotlinTypeToCql(pk.type)}")
             }
+            lookup.clusteringKeyColumns.forEach { ck ->
+                add("${ck.cqlName} ${kotlinTypeToCql(ck.type)}")
+            }
         }
         val colDefs = cols.joinToString(",\n    ")
         return "CREATE TABLE IF NOT EXISTS ${lookup.tableName} (\n    $colDefs,\n    PRIMARY KEY (${lookup.indexColumn.cqlName})\n);"

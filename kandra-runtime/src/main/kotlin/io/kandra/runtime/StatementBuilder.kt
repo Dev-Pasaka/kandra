@@ -198,7 +198,7 @@ class StatementBuilder(
     }
 
     fun insertLookup(lookup: LookupTableSchema, entity: Any): BoundStatement {
-        val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns
+        val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns + lookup.clusteringKeyColumns
         val colNames = cols.joinToString(", ") { it.cqlName }
         val placeholders = cols.joinToString(", ") { "?" }
         val cql = "INSERT INTO ${lookup.tableName} ($colNames) VALUES ($placeholders)"
@@ -237,8 +237,11 @@ class StatementBuilder(
     }
 
     fun selectByLookup(lookup: LookupTableSchema, value: Any, consistency: KandraConsistency? = null): BoundStatement {
-        val pkCols = lookup.partitionKeyColumns.joinToString(", ") { it.cqlName }
-        val cql = "SELECT $pkCols FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        // Select both partition AND clustering key columns of the primary table -- a lookup row must
+        // be able to reconstruct the primary table's FULL key, not just its partition key, since
+        // selectById requires the full key (see ISS-029).
+        val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlName }
+        val cql = "SELECT $keyCols FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
         val prepared = prepare(cql)
         return prepared.bind(codec.encode(value, lookup.indexColumn.type))
             .setIdempotent(true)

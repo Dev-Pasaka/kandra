@@ -26,8 +26,8 @@ private val logger = KotlinLogging.logger {}
  * Translates [QueryContext] predicates into CQL SELECT statements and decodes results.
  *
  * Lookup predicates trigger a two-step query:
- * 1. Query the lookup table for the partition key values.
- * 2. Query the primary table by those partition keys.
+ * 1. Query the lookup table for the primary table's full key (partition + clustering columns).
+ * 2. Query the primary table by that full key.
  *
  * `@SecondaryIndex` predicates query the primary table directly (no two-step needed).
  * A WARN is logged each time a secondary index query executes.
@@ -78,8 +78,11 @@ class QueryExecutor(
             val lookupRow = session.execute(statementBuilder.selectByLookup(lookup, lookupValue!!))
                 .one() ?: return KandraPage(emptyList(), null, false)
 
-            lookup.partitionKeyColumns.map { pkCol ->
-                KandraPredicate.Eq(pkCol.cqlName, lookupRow.getObject(pkCol.cqlName))
+            // Full key (partition + clustering), not partition-only -- a lookup value maps to exactly
+            // one primary-table row, but a partition-only WHERE would scatter across every clustering
+            // row in that partition on a clustering-keyed entity (see ISS-029).
+            (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).map { keyCol ->
+                KandraPredicate.Eq(keyCol.cqlName, lookupRow.getObject(keyCol.cqlName))
             }
         } else {
             ctx.predicates
@@ -184,8 +187,11 @@ class QueryExecutor(
             val lookupRow = session.executeSuspend(statementBuilder.selectByLookup(lookup, lookupValue!!))
                 .one() ?: return KandraPage(emptyList(), null, false)
 
-            lookup.partitionKeyColumns.map { pkCol ->
-                KandraPredicate.Eq(pkCol.cqlName, lookupRow.getObject(pkCol.cqlName))
+            // Full key (partition + clustering), not partition-only -- a lookup value maps to exactly
+            // one primary-table row, but a partition-only WHERE would scatter across every clustering
+            // row in that partition on a clustering-keyed entity (see ISS-029).
+            (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).map { keyCol ->
+                KandraPredicate.Eq(keyCol.cqlName, lookupRow.getObject(keyCol.cqlName))
             }
         } else {
             ctx.predicates
@@ -334,11 +340,12 @@ class QueryExecutor(
             val lookupRow = session.execute(statementBuilder.selectByLookup(lookup, lookupValue))
                 .one() ?: return emptyList()
 
-            val pkValues = lookup.partitionKeyColumns.map { pkCol ->
-                lookupRow.getObject(pkCol.cqlName)
-                    ?: throw KandraQueryException("Null partition key '${pkCol.cqlName}' from lookup table")
+            // Full key (partition + clustering) -- selectById requires all of it (see ISS-029).
+            val keyValues = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).map { keyCol ->
+                lookupRow.getObject(keyCol.cqlName)
+                    ?: throw KandraQueryException("Null key column '${keyCol.cqlName}' from lookup table")
             }
-            val primaryRs = session.execute(statementBuilder.selectById(schema, *pkValues.toTypedArray()))
+            val primaryRs = session.execute(statementBuilder.selectById(schema, *keyValues.toTypedArray()))
             return primaryRs.all()
         }
 
@@ -412,11 +419,12 @@ class QueryExecutor(
             val lookupRow = session.executeSuspend(statementBuilder.selectByLookup(lookup, lookupValue))
                 .one() ?: return emptyList()
 
-            val pkValues = lookup.partitionKeyColumns.map { pkCol ->
-                lookupRow.getObject(pkCol.cqlName)
-                    ?: throw KandraQueryException("Null partition key '${pkCol.cqlName}' from lookup table")
+            // Full key (partition + clustering) -- selectById requires all of it (see ISS-029).
+            val keyValues = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).map { keyCol ->
+                lookupRow.getObject(keyCol.cqlName)
+                    ?: throw KandraQueryException("Null key column '${keyCol.cqlName}' from lookup table")
             }
-            return session.executeSuspendAll(statementBuilder.selectById(schema, *pkValues.toTypedArray()))
+            return session.executeSuspendAll(statementBuilder.selectById(schema, *keyValues.toTypedArray()))
         }
 
         // ── @SecondaryIndex predicate ─────────────────────────────────────────
