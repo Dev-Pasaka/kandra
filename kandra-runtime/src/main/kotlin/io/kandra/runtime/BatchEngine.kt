@@ -550,10 +550,10 @@ class BatchEngine(
             val prepared = session.prepare(cql)
             executeWithRetry(prepared.bind(true, *keyValues.toTypedArray()))
         }
-        schema.lookupTables.forEach { lookup ->
-            val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach
-            session.execute(statementBuilder.deleteLookup(lookup, indexValue))
-        }
+        // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
+        // until its TTL expires, so it must remain resolvable via its @LookupIndex too, exactly like
+        // a direct findById/findActive would still see it. Hard delete (the branch this function is
+        // NOT called from) is the only path that should ever remove lookup rows.
     }
 
     private suspend fun softDeleteSuspend(
@@ -581,10 +581,10 @@ class BatchEngine(
             val prepared = session.prepareSuspend(cql)
             executeWithRetrySuspend(prepared.bind(true, *keyValues.toTypedArray()))
         }
-        schema.lookupTables.forEach { lookup ->
-            val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach
-            session.executeSuspend(statementBuilder.deleteLookup(lookup, indexValue))
-        }
+        // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
+        // until its TTL expires, so it must remain resolvable via its @LookupIndex too, exactly like
+        // a direct findById/findActive would still see it. Hard delete (the branch this function is
+        // NOT called from) is the only path that should ever remove lookup rows.
     }
 
     // ── Version helpers ───────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.annotations.CacheResult
 import io.kandra.core.annotations.ClusteringKey
 import io.kandra.core.annotations.ClusteringOrder
+import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.annotations.SoftDelete
@@ -35,6 +36,19 @@ data class IntegrationUser(
 data class IntegrationWidget(
     @PartitionKey val id: UUID,
     val name: String,
+    val isDeleted: Boolean = false
+)
+
+/**
+ * Regression coverage for ISS-030 — `BatchEngine`'s soft-delete unconditionally deleted lookup-table
+ * rows, contradicting the documented "soft delete does not remove lookup rows" behavior. A soft-deleted
+ * row still "exists" until its TTL expires, so it must remain resolvable via its `@LookupIndex` too.
+ */
+@ScyllaTable("integration_soft_deleted_lookup")
+@SoftDelete(ttlSeconds = 60, markerProperty = "isDeleted")
+data class IntegrationSoftDeletedLookup(
+    @PartitionKey val id: UUID,
+    @LookupIndex(tableSuffix = "by_slug") val slug: String,
     val isDeleted: Boolean = false
 )
 
@@ -116,7 +130,8 @@ class KandraIntegrationTest {
         IntegrationBatchPrimary::class,
         IntegrationBatchSecondary::class,
         IntegrationCachedClustered::class,
-        IntegrationLookupClustered::class
+        IntegrationLookupClustered::class,
+        IntegrationSoftDeletedLookup::class
     )
 
     @AfterEach
@@ -398,5 +413,21 @@ class KandraIntegrationTest {
 
         assertNotNull(repo.findById(ownerId, keep.createdAt))
         assertNull(repo.findById(ownerId, remove.createdAt))
+    }
+
+    // ── ISS-030 regression: soft-delete unconditionally deleted lookup-table rows ──────────────
+
+    @Test
+    fun `soft-deleting a row does not remove its LookupIndex row`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationSoftDeletedLookup>()
+        val entity = IntegrationSoftDeletedLookup(UUID.randomUUID(), "keep-findable")
+        repo.save(entity)
+
+        repo.delete(entity) // soft delete -- ttlSeconds = 60, well past this test's runtime
+
+        // The lookup row must still resolve the (soft-deleted) entity, not disappear immediately.
+        val foundViaLookup = repo.find { +IntegrationSoftDeletedLookupTable.slug.eq("keep-findable") }
+        assertNotNull(foundViaLookup)
+        assertTrue(foundViaLookup!!.isDeleted)
     }
 }
