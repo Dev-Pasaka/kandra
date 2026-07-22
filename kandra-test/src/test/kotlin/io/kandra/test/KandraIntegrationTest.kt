@@ -13,7 +13,7 @@ import io.kandra.core.exception.KandraOptimisticLockException
 import io.kandra.core.exception.KandraQueryException
 import io.kandra.core.exception.KandraSchemaException
 import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestInstance
 import java.time.Instant
 import java.util.UUID
 
@@ -119,8 +120,20 @@ data class IntegrationLookupClustered(
  * LWT applied/not-applied semantics, and TTL-based soft delete. Each test gets its own isolated
  * keyspace via [KandraTestcontainers.freshKeyspace].
  */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class KandraIntegrationTest {
 
+    /**
+     * One keyspace + DDL registration for every test in this class, not one per `@Test` method.
+     * `@TestInstance(PER_CLASS)` makes JUnit construct this class exactly once, so this expensive
+     * `freshKeyspace()` call (a keyspace CREATE plus CREATE TABLE for every registered entity/lookup
+     * table) runs once instead of once per test method. With 10 entities now registered, running it
+     * per-method (the JUnit default) meant ~17 keyspace-and-DDL setups per suite run — enough CQL churn
+     * against a single shared Testcontainers container to trip `DriverTimeoutException` under CI's more
+     * constrained resources. Tests share this keyspace; use random UUIDs / unique literal values per
+     * test (already the existing convention here) to avoid cross-test collisions, since there's no
+     * per-test isolation anymore.
+     */
     private val db = KandraTestcontainers.freshKeyspace(
         IntegrationUser::class,
         IntegrationWidget::class,
@@ -134,7 +147,7 @@ class KandraIntegrationTest {
         IntegrationSoftDeletedLookup::class
     )
 
-    @AfterEach
+    @AfterAll
     fun cleanup() = db.close()
 
     @Test
@@ -201,14 +214,24 @@ class KandraIntegrationTest {
 
     @Test
     fun `graceful shutdown rejects new queries once isShuttingDown is set`() = runBlocking {
-        val repo = db.suspendRepository<IntegrationUser>()
-        val user = IntegrationUser(UUID.randomUUID(), "dana@example.com")
-        repo.save(user)
-        assertEquals(0, db.runtime.inFlightCount.get())
+        // Uses its own isolated keyspace/runtime, not the shared `db` -- this test permanently flips
+        // isShuttingDown on the runtime it uses, with no way to reset it, which would otherwise poison
+        // every other test sharing `db` under the class's PER_CLASS instance lifecycle (JUnit doesn't
+        // guarantee method execution order, so this could fail arbitrary other tests depending on when
+        // it happens to run).
+        val shutdownDb = KandraTestcontainers.freshKeyspace(IntegrationUser::class)
+        try {
+            val repo = shutdownDb.suspendRepository<IntegrationUser>()
+            val user = IntegrationUser(UUID.randomUUID(), "dana@example.com")
+            repo.save(user)
+            assertEquals(0, shutdownDb.runtime.inFlightCount.get())
 
-        db.runtime.isShuttingDown.set(true)
-        assertThrows(KandraQueryException::class.java) {
-            runBlocking { repo.findById(user.id) }
+            shutdownDb.runtime.isShuttingDown.set(true)
+            assertThrows(KandraQueryException::class.java) {
+                runBlocking { repo.findById(user.id) }
+            }
+        } finally {
+            shutdownDb.close()
         }
     }
 
