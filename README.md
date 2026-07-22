@@ -82,7 +82,7 @@ authoring a schema migration.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.1"))
+    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.2"))
     implementation("ke.co.coinx.kandra:kandra-ktor")
     implementation("ke.co.coinx.kandra:kandra-koin")   // or kandra-kodein
     ksp("ke.co.coinx.kandra:kandra-codegen")           // optional — type-safe table objects
@@ -766,7 +766,7 @@ Each test class gets an isolated `kandra_test_{uuid}` keyspace. The shared `Cass
 
 ---
 
-## Optimistic Locking (0.4.1)
+## Optimistic Locking (0.4.2)
 
 ```kotlin
 @ScyllaTable("balances")
@@ -788,7 +788,7 @@ balanceRepo.updateForce(loaded.copy(amountUsd = newAmount))  // bypasses the ver
 
 ---
 
-## UNSET vs NULL (0.4.1)
+## UNSET vs NULL (0.4.2)
 
 Kandra distinguishes "field not provided" from "field explicitly cleared" to avoid accidental tombstones:
 
@@ -802,7 +802,7 @@ userRepo.saveWithNulls(user.copy(middleName = null))
 
 ---
 
-## Tombstone-Aware Soft Delete (0.4.1)
+## Tombstone-Aware Soft Delete (0.4.2)
 
 ```kotlin
 @ScyllaTable("sessions", gcGraceSeconds = 3600)
@@ -817,7 +817,7 @@ sessionRepo.delete(session)
 
 ---
 
-## Batch Size Guard (0.4.1)
+## Batch Size Guard (0.4.2)
 
 ```kotlin
 install(Kandra) {
@@ -832,7 +832,7 @@ walletRepo.saveAll(largeListOfWallets)
 
 ---
 
-## Sensitive Field Masking (0.4.1)
+## Sensitive Field Masking (0.4.2)
 
 ```kotlin
 data class User(
@@ -847,7 +847,7 @@ data class User(
 
 ---
 
-## Validation Hook (0.4.1)
+## Validation Hook (0.4.2)
 
 ```kotlin
 install(Kandra) {
@@ -864,7 +864,7 @@ Runs before every `save()`/`update()`. A non-empty list throws `KandraValidation
 
 ---
 
-## AUTO_MIGRATE Schema Mode (0.4.1)
+## AUTO_MIGRATE Schema Mode (0.4.2)
 
 ```kotlin
 install(Kandra) {
@@ -879,7 +879,7 @@ Safer than `AUTO_CREATE` for evolving schemas in place — it never drops or ren
 
 ---
 
-## Versioned Schema Migrations (`kandra-migrate`, 0.4.1)
+## Versioned Schema Migrations (`kandra-migrate`, 0.4.2)
 
 For changes `AUTO_MIGRATE` can't express (renames, data backfills, index changes):
 
@@ -900,7 +900,7 @@ Call this **before** `install(Kandra)` with `schemaMode = SchemaMode.NONE` for m
 
 ---
 
-## Micrometer Metrics (0.4.1)
+## Micrometer Metrics (0.4.2)
 
 ```kotlin
 install(Kandra) {
@@ -918,7 +918,7 @@ install(Kandra) {
 
 ---
 
-## Health Check & Graceful Shutdown (0.4.1)
+## Health Check & Graceful Shutdown (0.4.2)
 
 ```kotlin
 install(Kandra) {
@@ -935,7 +935,7 @@ On `ApplicationStopping`, Kandra sets `KandraRuntime.isShuttingDown = true` and 
 
 ---
 
-## CQL Injection Guard (0.4.1)
+## CQL Injection Guard (0.4.2)
 
 ```kotlin
 userRepo.raw("SELECT * FROM users WHERE email = '$untrustedInput'")
@@ -948,7 +948,7 @@ userRepo.rawQuery(query)
 
 ---
 
-## Query Caching (0.4.1)
+## Query Caching (0.4.2)
 
 ```kotlin
 @ScyllaTable("products")
