@@ -309,7 +309,10 @@ class KandraIntegrationTest {
         val foundByOlderSlug = repo.find { +IntegrationLookupClusteredTable.slug.eq("older-slug") }
         assertNotNull(foundByOlderSlug)
         assertEquals("older content", foundByOlderSlug!!.content)
-        assertEquals(older.createdAt, foundByOlderSlug.createdAt)
+        // Compare via epoch millis, not raw Instant equality -- CQL TIMESTAMP columns only store
+        // millisecond precision, so the pre-save Instant.now() (sub-millisecond) never .equals() the
+        // round-tripped value read back through the lookup, even though it's the same logical row.
+        assertEquals(older.createdAt.toEpochMilli(), foundByOlderSlug.createdAt.toEpochMilli())
 
         val foundByNewerSlug = repo.find { +IntegrationLookupClusteredTable.slug.eq("newer-slug") }
         assertNotNull(foundByNewerSlug)
