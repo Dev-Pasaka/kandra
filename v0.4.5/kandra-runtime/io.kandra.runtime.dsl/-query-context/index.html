@@ -1,0 +1,209 @@
+<!doctype html>
+<html class="no-js">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <title>QueryContext</title>
+<link href="../../../images/logo-icon.svg" rel="icon" type="image/svg">    <script>var pathToRoot = "../../../";</script>
+    <script>document.documentElement.classList.replace("no-js","js");</script>
+    <script>const storage = localStorage.getItem("dokka-dark-mode")
+    if (storage == null) {
+        const osDarkSchemePreferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (osDarkSchemePreferred === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    } else {
+        const savedDarkMode = JSON.parse(storage)
+        if(savedDarkMode === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    }
+    </script>
+<script type="text/javascript" src="https://unpkg.com/kotlin-playground@1/dist/playground.min.js" async></script>
+<script type="text/javascript" src="../../../scripts/sourceset_dependencies.js" async></script>
+<link href="../../../styles/style.css" rel="Stylesheet">
+<link href="../../../styles/main.css" rel="Stylesheet">
+<link href="../../../styles/prism.css" rel="Stylesheet">
+<link href="../../../styles/logo-styles.css" rel="Stylesheet">
+<link href="../../../styles/font-jb-sans-auto.css" rel="Stylesheet">
+<script type="text/javascript" src="../../../scripts/clipboard.js" async></script>
+<script type="text/javascript" src="../../../scripts/navigation-loader.js" async></script>
+<script type="text/javascript" src="../../../scripts/platform-content-handler.js" async></script>
+<script type="text/javascript" src="../../../scripts/main.js" defer></script>
+<script type="text/javascript" src="../../../scripts/prism.js" async></script>
+<script type="text/javascript" src="../../../scripts/symbol-parameters-wrapper_deferred.js" defer></script></head>
+<body>
+    <div class="root">
+<nav class="navigation" id="navigation-wrapper">
+    <div class="navigation--inner">
+        <div class="navigation-title">
+            <button class="menu-toggle" id="menu-toggle" type="button">toggle menu</button>
+            <div class="library-name">
+<a class="library-name--link" href="../../../index.html">
+                            kandra
+                    </a>            </div>
+            <div class="library-version">0.4.5
+            </div>
+        </div>
+        <div class="filter-section" id="filter-section">
+                <button class="platform-tag platform-selector jvm-like" data-active="" data-filter=":kandra-runtime:dokkaHtmlPartial/main">jvm</button>
+        </div>
+    </div>
+    <div class="navigation-controls">
+        <button class="navigation-controls--btn navigation-controls--theme" id="theme-toggle-button" type="button">switch theme</button>
+        <div class="navigation-controls--btn navigation-controls--search" id="searchBar" role="button">search in API</div>
+    </div>
+</nav>
+        <div id="container">
+            <div class="sidebar" id="leftColumn">
+                <div class="sidebar--inner" id="sideMenu"></div>
+            </div>
+            <div id="main">
+<div class="main-content" data-page-type="classlike" id="content" pageids="kandra-runtime::io.kandra.runtime.dsl/QueryContext///PointingToDeclaration//851772994">
+  <div class="breadcrumbs"><a href="../../index.html">kandra-runtime</a><span class="delimiter">/</span><a href="../index.html">io.kandra.runtime.dsl</a><span class="delimiter">/</span><span class="current">QueryContext</span></div>
+  <div class="cover ">
+    <h1 class="cover"><span>Query</span><wbr><span><span>Context</span></span></h1>
+    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">class </span><a href="index.html">QueryContext</a></div><p class="paragraph">DSL receiver for building query predicates and limit.</p><p class="paragraph">Every predicate must resolve to a partition key, clustering key, or lookup-table column. Kandra does not support <code class="lang-kotlin">ALLOW FILTERING</code> — queries that cannot be served from a partition key will throw at query time.</p><div class="sample-container"><pre><code class="block lang-kotlin" theme="idea">repository.findAll {<br>    UserTable.email eq "alice@example.com"   // via @LookupIndex<br>    limit(10)<br>}</code></pre><span class="top-right-position"><span class="copy-icon"></span><div class="copy-popup-wrapper popup-to-left"><span class="copy-popup-icon"></span><span>Content copied to clipboard</span></div></span></div><p class="paragraph"><strong>Why there's no </strong><code class="strong lang-kotlin"><strong>+</strong></code><strong>:</strong> earlier versions required <code class="lang-kotlin">+UserTable.email.eq(...)</code>, with <code class="lang-kotlin">eq()</code> returning a plain <a href="../-kandra-predicate/index.html">KandraPredicate</a> that <code class="lang-kotlin">unaryPlus()</code> then registered. Forgetting the <code class="lang-kotlin">+</code> on one predicate out of several compiled cleanly (Kotlin only warns on an unused expression) and silently dropped that predicate from the query — a correctness footgun with no way to detect it from inside <code class="lang-kotlin">QueryContext</code>, since the discarded object never reached it. Declaring <code class="lang-kotlin">eq</code>/<code class="lang-kotlin">gt</code>/etc. as member extensions here instead means the comparison itself <i>is</i> the registration — there is no intermediate value that can be built and then forgotten.</p></div></div>
+  </div>
+  <div class="tabbedcontent">
+    <div class="tabs-section" tabs-section="tabs-section"><button class="section-tab" data-active="" data-togglable="CONSTRUCTOR,TYPE,PROPERTY,FUNCTION">Members</button></div>
+    <div class="tabs-section-body">
+      <div data-togglable="CONSTRUCTOR">
+        <h2 class="">Constructors</h2>
+        <div class="table"><a data-name="-2016452927%2FConstructors%2F851772994" anchor-label="QueryContext" id="-2016452927%2FConstructors%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="CONSTRUCTOR" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-query-context.html"><span>Query</span><wbr><span><span>Context</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-2016452927%2FConstructors%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">constructor</span><span class="token punctuation">(</span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="FUNCTION">
+        <h2 class="">Functions</h2>
+        <div class="table"><a data-name="-988942786%2FFunctions%2F851772994" anchor-label="eq" id="-988942786%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="eq.html"><span><span>eq</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-988942786%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">infix </span><span class="token keyword">fun </span><span class="token operator">&lt;</span><a href="eq.html">T</a><span class="token operator">&gt; </span><a href="../-kandra-column-ref/index.html">KandraColumnRef</a><span class="token operator">&lt;</span><a href="eq.html">T</a><span class="token operator">&gt;</span><span class="token punctuation">.</span><a href="eq.html"><span class="token function">eq</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">value<span class="token operator">: </span><a href="eq.html">T</a></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-77989185%2FFunctions%2F851772994" anchor-label="gt" id="-77989185%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="gt.html"><span><span>gt</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-77989185%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">infix </span><span class="token keyword">fun </span><span class="token operator">&lt;</span><a href="gt.html">T</a><span class="token operator">&gt; </span><a href="../-kandra-column-ref/index.html">KandraColumnRef</a><span class="token operator">&lt;</span><a href="gt.html">T</a><span class="token operator">&gt;</span><span class="token punctuation">.</span><a href="gt.html"><span class="token function">gt</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">value<span class="token operator">: </span><a href="gt.html">T</a></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-2085703648%2FFunctions%2F851772994" anchor-label="gte" id="-2085703648%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="gte.html"><span><span>gte</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-2085703648%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">infix </span><span class="token keyword">fun </span><span class="token operator">&lt;</span><a href="gte.html">T</a><span class="token operator">&gt; </span><a href="../-kandra-column-ref/index.html">KandraColumnRef</a><span class="token operator">&lt;</span><a href="gte.html">T</a><span class="token operator">&gt;</span><span class="token punctuation">.</span><a href="gte.html"><span class="token function">gte</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">value<span class="token operator">: </span><a href="gte.html">T</a></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1897724973%2FFunctions%2F851772994" anchor-label="isIn" id="1897724973%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="is-in.html"><span>is</span><wbr><span><span>In</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1897724973%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">infix </span><span class="token keyword">fun </span><span class="token operator">&lt;</span><a href="is-in.html">T</a><span class="token operator">&gt; </span><a href="../-kandra-column-ref/index.html">KandraColumnRef</a><span class="token operator">&lt;</span><a href="is-in.html">T</a><span class="token operator">&gt;</span><span class="token punctuation">.</span><a href="is-in.html"><span class="token function">isIn</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">values<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="is-in.html">T</a><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1041647253%2FFunctions%2F851772994" anchor-label="limit" id="1041647253%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="limit.html"><span><span>limit</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1041647253%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="limit.html"><span class="token function">limit</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">n<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a></span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Appends <code class="lang-kotlin">LIMIT n</code> to the generated CQL.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1539918310%2FFunctions%2F851772994" anchor-label="lt" id="-1539918310%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="lt.html"><span><span>lt</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1539918310%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">infix </span><span class="token keyword">fun </span><span class="token operator">&lt;</span><a href="lt.html">T</a><span class="token operator">&gt; </span><a href="../-kandra-column-ref/index.html">KandraColumnRef</a><span class="token operator">&lt;</span><a href="lt.html">T</a><span class="token operator">&gt;</span><span class="token punctuation">.</span><a href="lt.html"><span class="token function">lt</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">value<span class="token operator">: </span><a href="lt.html">T</a></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-160866267%2FFunctions%2F851772994" anchor-label="lte" id="-160866267%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="lte.html"><span><span>lte</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-160866267%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">infix </span><span class="token keyword">fun </span><span class="token operator">&lt;</span><a href="lte.html">T</a><span class="token operator">&gt; </span><a href="../-kandra-column-ref/index.html">KandraColumnRef</a><span class="token operator">&lt;</span><a href="lte.html">T</a><span class="token operator">&gt;</span><span class="token punctuation">.</span><a href="lte.html"><span class="token function">lte</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">value<span class="token operator">: </span><a href="lte.html">T</a></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      <div class="footer">
+        <span class="go-to-top-icon"><a href="#content" id="go-to-top-link"></a></span><span>© 2026 Copyright</span><span class="pull-right"><span>Generated by </span><a href="https://github.com/Kotlin/dokka"><span>dokka</span><span class="padded-icon"></span></a></span>
+      </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

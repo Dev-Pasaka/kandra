@@ -1,0 +1,179 @@
+<!doctype html>
+<html class="no-js">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <title>LookupTableSchema</title>
+<link href="../../../images/logo-icon.svg" rel="icon" type="image/svg">    <script>var pathToRoot = "../../../";</script>
+    <script>document.documentElement.classList.replace("no-js","js");</script>
+    <script>const storage = localStorage.getItem("dokka-dark-mode")
+    if (storage == null) {
+        const osDarkSchemePreferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (osDarkSchemePreferred === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    } else {
+        const savedDarkMode = JSON.parse(storage)
+        if(savedDarkMode === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    }
+    </script>
+<script type="text/javascript" src="https://unpkg.com/kotlin-playground@1/dist/playground.min.js" async></script>
+<script type="text/javascript" src="../../../scripts/sourceset_dependencies.js" async></script>
+<link href="../../../styles/style.css" rel="Stylesheet">
+<link href="../../../styles/main.css" rel="Stylesheet">
+<link href="../../../styles/prism.css" rel="Stylesheet">
+<link href="../../../styles/logo-styles.css" rel="Stylesheet">
+<link href="../../../styles/font-jb-sans-auto.css" rel="Stylesheet">
+<script type="text/javascript" src="../../../scripts/clipboard.js" async></script>
+<script type="text/javascript" src="../../../scripts/navigation-loader.js" async></script>
+<script type="text/javascript" src="../../../scripts/platform-content-handler.js" async></script>
+<script type="text/javascript" src="../../../scripts/main.js" defer></script>
+<script type="text/javascript" src="../../../scripts/prism.js" async></script>
+<script type="text/javascript" src="../../../scripts/symbol-parameters-wrapper_deferred.js" defer></script></head>
+<body>
+    <div class="root">
+<nav class="navigation" id="navigation-wrapper">
+    <div class="navigation--inner">
+        <div class="navigation-title">
+            <button class="menu-toggle" id="menu-toggle" type="button">toggle menu</button>
+            <div class="library-name">
+<a class="library-name--link" href="../../../index.html">
+                            kandra
+                    </a>            </div>
+            <div class="library-version">0.4.5
+            </div>
+        </div>
+        <div class="filter-section" id="filter-section">
+                <button class="platform-tag platform-selector jvm-like" data-active="" data-filter=":kandra-core:dokkaHtmlPartial/main">jvm</button>
+        </div>
+    </div>
+    <div class="navigation-controls">
+        <button class="navigation-controls--btn navigation-controls--theme" id="theme-toggle-button" type="button">switch theme</button>
+        <div class="navigation-controls--btn navigation-controls--search" id="searchBar" role="button">search in API</div>
+    </div>
+</nav>
+        <div id="container">
+            <div class="sidebar" id="leftColumn">
+                <div class="sidebar--inner" id="sideMenu"></div>
+            </div>
+            <div id="main">
+<div class="main-content" data-page-type="classlike" id="content" pageids="kandra-core::io.kandra.core.schema/LookupTableSchema///PointingToDeclaration//1661689033">
+  <div class="breadcrumbs"><a href="../../index.html">kandra-core</a><span class="delimiter">/</span><a href="../index.html">io.kandra.core.schema</a><span class="delimiter">/</span><span class="current">LookupTableSchema</span></div>
+  <div class="cover ">
+    <h1 class="cover"><span>Lookup</span><wbr><span>Table</span><wbr><span><span>Schema</span></span></h1>
+    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">data </span><span class="token keyword">class </span><a href="index.html">LookupTableSchema</a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span class="token keyword">val </span>tableName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>indexColumn<span class="token operator">: </span><a href="../-column-schema/index.html">ColumnSchema</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>partitionKeyColumns<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="../-column-schema/index.html">ColumnSchema</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>consistency<span class="token operator">: </span><a href="../../io.kandra.core.annotations/-lookup-consistency/index.html">LookupConsistency</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">val </span>clusteringKeyColumns<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="../-column-schema/index.html">ColumnSchema</a><span class="token operator">&gt;</span><span class="token operator"> = </span>emptyList()</span></span><span class="token punctuation">)</span></div></div></div>
+  </div>
+  <div class="tabbedcontent">
+    <div class="tabs-section" tabs-section="tabs-section"><button class="section-tab" data-active="" data-togglable="CONSTRUCTOR,TYPE,PROPERTY,FUNCTION">Members</button></div>
+    <div class="tabs-section-body">
+      <div data-togglable="CONSTRUCTOR">
+        <h2 class="">Constructors</h2>
+        <div class="table"><a data-name="-676938712%2FConstructors%2F1661689033" anchor-label="LookupTableSchema" id="-676938712%2FConstructors%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="CONSTRUCTOR" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-lookup-table-schema.html"><span>Lookup</span><wbr><span>Table</span><wbr><span><span>Schema</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-676938712%2FConstructors%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">constructor</span><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">tableName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">indexColumn<span class="token operator">: </span><a href="../-column-schema/index.html">ColumnSchema</a><span class="token punctuation">, </span></span><span class="parameter ">partitionKeyColumns<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="../-column-schema/index.html">ColumnSchema</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../io.kandra.core.annotations/-lookup-consistency/index.html">LookupConsistency</a><span class="token punctuation">, </span></span><span class="parameter ">clusteringKeyColumns<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="../-column-schema/index.html">ColumnSchema</a><span class="token operator">&gt;</span><span class="token operator"> = </span>emptyList()</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="PROPERTY">
+        <h2 class="">Properties</h2>
+        <div class="table"><a data-name="-1353635181%2FProperties%2F1661689033" anchor-label="clusteringKeyColumns" id="-1353635181%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="clustering-key-columns.html"><span>clustering</span><wbr><span>Key</span><wbr><span><span>Columns</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1353635181%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="clustering-key-columns.html">clusteringKeyColumns</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="../-column-schema/index.html">ColumnSchema</a><span class="token operator">&gt;</span></div><div class="brief "><p class="paragraph">All clustering key columns of the primary table, stored alongside the partition key columns so a lookup resolution can reconstruct the primary table's <strong>full</strong> key (partition + clustering), not just its partition key. Empty for a primary table with no clustering key. See ISS-029: before this field existed, lookup resolution could only ever supply <code class="lang-kotlin">selectById</code> with the partition key, which stopped being sufficient once ISS-025 made <code class="lang-kotlin">selectById</code> require the full key on any clustering-keyed entity.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-22184247%2FProperties%2F1661689033" anchor-label="consistency" id="-22184247%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="consistency.html"><span><span>consistency</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-22184247%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="consistency.html">consistency</a><span class="token operator">: </span><a href="../../io.kandra.core.annotations/-lookup-consistency/index.html">LookupConsistency</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-137396199%2FProperties%2F1661689033" anchor-label="indexColumn" id="-137396199%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index-column.html"><span>index</span><wbr><span><span>Column</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-137396199%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="index-column.html">indexColumn</a><span class="token operator">: </span><a href="../-column-schema/index.html">ColumnSchema</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="738728921%2FProperties%2F1661689033" anchor-label="partitionKeyColumns" id="738728921%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="partition-key-columns.html"><span>partition</span><wbr><span>Key</span><wbr><span><span>Columns</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="738728921%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="partition-key-columns.html">partitionKeyColumns</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="../-column-schema/index.html">ColumnSchema</a><span class="token operator">&gt;</span></div><div class="brief "><p class="paragraph">All partition key columns of the primary table — needed to reconstruct the primary key.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-794287736%2FProperties%2F1661689033" anchor-label="tableName" id="-794287736%2FProperties%2F1661689033" data-filterable-set=":kandra-core:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-core:dokkaHtmlPartial/main" data-filterable-set=":kandra-core:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="table-name.html"><span>table</span><wbr><span><span>Name</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-794287736%2FProperties%2F1661689033"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-core:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="table-name.html">tableName</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      <div class="footer">
+        <span class="go-to-top-icon"><a href="#content" id="go-to-top-link"></a></span><span>© 2026 Copyright</span><span class="pull-right"><span>Generated by </span><a href="https://github.com/Kotlin/dokka"><span>dokka</span><span class="padded-icon"></span></a></span>
+      </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

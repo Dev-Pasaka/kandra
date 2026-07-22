@@ -1,0 +1,509 @@
+<!doctype html>
+<html class="no-js">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <title>FakeKandraSession</title>
+<link href="../../../images/logo-icon.svg" rel="icon" type="image/svg">    <script>var pathToRoot = "../../../";</script>
+    <script>document.documentElement.classList.replace("no-js","js");</script>
+    <script>const storage = localStorage.getItem("dokka-dark-mode")
+    if (storage == null) {
+        const osDarkSchemePreferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (osDarkSchemePreferred === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    } else {
+        const savedDarkMode = JSON.parse(storage)
+        if(savedDarkMode === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    }
+    </script>
+<script type="text/javascript" src="https://unpkg.com/kotlin-playground@1/dist/playground.min.js" async></script>
+<script type="text/javascript" src="../../../scripts/sourceset_dependencies.js" async></script>
+<link href="../../../styles/style.css" rel="Stylesheet">
+<link href="../../../styles/main.css" rel="Stylesheet">
+<link href="../../../styles/prism.css" rel="Stylesheet">
+<link href="../../../styles/logo-styles.css" rel="Stylesheet">
+<link href="../../../styles/font-jb-sans-auto.css" rel="Stylesheet">
+<script type="text/javascript" src="../../../scripts/clipboard.js" async></script>
+<script type="text/javascript" src="../../../scripts/navigation-loader.js" async></script>
+<script type="text/javascript" src="../../../scripts/platform-content-handler.js" async></script>
+<script type="text/javascript" src="../../../scripts/main.js" defer></script>
+<script type="text/javascript" src="../../../scripts/prism.js" async></script>
+<script type="text/javascript" src="../../../scripts/symbol-parameters-wrapper_deferred.js" defer></script></head>
+<body>
+    <div class="root">
+<nav class="navigation" id="navigation-wrapper">
+    <div class="navigation--inner">
+        <div class="navigation-title">
+            <button class="menu-toggle" id="menu-toggle" type="button">toggle menu</button>
+            <div class="library-name">
+<a class="library-name--link" href="../../../index.html">
+                            kandra
+                    </a>            </div>
+            <div class="library-version">0.4.5
+            </div>
+        </div>
+        <div class="filter-section" id="filter-section">
+                <button class="platform-tag platform-selector jvm-like" data-active="" data-filter=":kandra-test:dokkaHtmlPartial/main">jvm</button>
+        </div>
+    </div>
+    <div class="navigation-controls">
+        <button class="navigation-controls--btn navigation-controls--theme" id="theme-toggle-button" type="button">switch theme</button>
+        <div class="navigation-controls--btn navigation-controls--search" id="searchBar" role="button">search in API</div>
+    </div>
+</nav>
+        <div id="container">
+            <div class="sidebar" id="leftColumn">
+                <div class="sidebar--inner" id="sideMenu"></div>
+            </div>
+            <div id="main">
+<div class="main-content" data-page-type="classlike" id="content" pageids="kandra-test::io.kandra.test/FakeKandraSession///PointingToDeclaration//1710684214">
+  <div class="breadcrumbs"><a href="../../index.html">kandra-test</a><span class="delimiter">/</span><a href="../index.html">io.kandra.test</a><span class="delimiter">/</span><span class="current">FakeKandraSession</span></div>
+  <div class="cover ">
+    <h1 class="cover"><span>Fake</span><wbr><span>Kandra</span><wbr><span><span>Session</span></span></h1>
+    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">class </span><a href="index.html">FakeKandraSession</a> : <span data-unresolved-link="com.datastax.oss.driver.api.core/CqlSession///PointingToDeclaration/">CqlSession</span></div><p class="paragraph">In-memory drop-in replacement for <span data-unresolved-link="com.datastax.oss.driver.api.core/CqlSession///PointingToDeclaration/">CqlSession</span> — no ScyllaDB connection required.</p><p class="paragraph">Captures <span data-unresolved-link="com.datastax.oss.driver.api.core.cql/BatchStatement///PointingToDeclaration/">BatchStatement</span> executions so tests can assert batch behaviour. Use via <a href="../-kandra-test-utils/in-memory.html">KandraTestUtils.inMemory</a> to wire a full repository stack without Testcontainers.</p><p class="paragraph">Note: Because the DataStax driver's <code class="lang-kotlin">BoundStatement</code> is final, the fake session does not simulate actual query routing. Use it to verify structural behaviour (batch composition, save/delete ordering) rather than data round-trips.</p></div></div>
+  </div>
+  <div class="tabbedcontent">
+    <div class="tabs-section" tabs-section="tabs-section"><button class="section-tab" data-active="" data-togglable="CONSTRUCTOR,TYPE,PROPERTY,FUNCTION">Members</button></div>
+    <div class="tabs-section-body">
+      <div data-togglable="CONSTRUCTOR">
+        <h2 class="">Constructors</h2>
+        <div class="table"><a data-name="-1570608110%2FConstructors%2F1710684214" anchor-label="FakeKandraSession" id="-1570608110%2FConstructors%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="CONSTRUCTOR" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-fake-kandra-session.html"><span>Fake</span><wbr><span>Kandra</span><wbr><span><span>Session</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1570608110%2FConstructors%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">constructor</span><span class="token punctuation">(</span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="FUNCTION">
+        <h2 class="">Functions</h2>
+        <div class="table"><a data-name="305916302%2FFunctions%2F1710684214" anchor-label="capturedBatches" id="305916302%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="captured-batches.html"><span>captured</span><wbr><span><span>Batches</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="305916302%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="captured-batches.html"><span class="token function">capturedBatches</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/BatchStatement///PointingToDeclaration/">BatchStatement</span><span class="token operator">&gt;</span></div><div class="brief "><p class="paragraph">Returns all <span data-unresolved-link="com.datastax.oss.driver.api.core.cql/BatchStatement///PointingToDeclaration/">BatchStatement</span> instances that were executed via <a href="execute.html">execute</a>.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1941588521%2FFunctions%2F1710684214" anchor-label="checkSchemaAgreement" id="-1941588521%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#-1941588521%2FFunctions%2F1710684214"><span>check</span><wbr><span>Schema</span><wbr><span><span>Agreement</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1941588521%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-1941588521%2FFunctions%2F1710684214"><span class="token function">checkSchemaAgreement</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1164095779%2FFunctions%2F1710684214" anchor-label="checkSchemaAgreementAsync" id="-1164095779%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="check-schema-agreement-async.html"><span>check</span><wbr><span>Schema</span><wbr><span>Agreement</span><wbr><span><span>Async</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1164095779%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="check-schema-agreement-async.html"><span class="token function">checkSchemaAgreementAsync</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="922778841%2FFunctions%2F1710684214" anchor-label="close" id="922778841%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#922778841%2FFunctions%2F1710684214"><span><span>close</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="922778841%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="index.html#922778841%2FFunctions%2F1710684214"><span class="token function">close</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1342612414%2FFunctions%2F1710684214" anchor-label="closeAsync" id="1342612414%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="close-async.html"><span>close</span><wbr><span><span>Async</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1342612414%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="close-async.html"><span class="token function">closeAsync</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><a href="https://docs.oracle.com/javase/8/docs/api/java/lang/Void.html">Void</a><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-2129434627%2FFunctions%2F1710684214" anchor-label="closeFuture" id="-2129434627%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="close-future.html"><span>close</span><wbr><span><span>Future</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-2129434627%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="close-future.html"><span class="token function">closeFuture</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><a href="https://docs.oracle.com/javase/8/docs/api/java/lang/Void.html">Void</a><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1285876174%2FFunctions%2F1710684214" anchor-label="execute" id="1285876174%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#1267202433%2FFunctions%2F1710684214"><span><span>execute</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1285876174%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#1267202433%2FFunctions%2F1710684214"><span class="token function">execute</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.graph/GraphStatement///PointingToDeclaration/">GraphStatement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.graph/GraphResultSet///PointingToDeclaration/">GraphResultSet</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-22130204%2FFunctions%2F1710684214"><span class="token function">execute</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/ResultSet///PointingToDeclaration/">ResultSet</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-992910452%2FFunctions%2F1710684214"><span class="token function">execute</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span><span class="token keyword">vararg </span>p1<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/ResultSet///PointingToDeclaration/">ResultSet</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-1804895306%2FFunctions%2F1710684214"><span class="token function">execute</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p1<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-mutable-map/index.html">MutableMap</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/ResultSet///PointingToDeclaration/">ResultSet</span></div><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="execute.html"><span class="token function">execute</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">statement<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/Statement///PointingToDeclaration/">Statement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/ResultSet///PointingToDeclaration/">ResultSet</span></div><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><span class="token operator">&lt;</span><a href="execute.html">RequestT</a><span class="token operator"> : </span><span data-unresolved-link="com.datastax.oss.driver.api.core.session/Request///PointingToDeclaration/">Request</span><span class="token punctuation">, </span><a href="execute.html">ResultT</a><span class="token operator"> : </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt; </span><a href="execute.html"><span class="token function">execute</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">request<span class="token operator">: </span><a href="execute.html">RequestT</a><span class="token punctuation">, </span></span><span class="parameter ">resultType<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.type.reflect/GenericType///PointingToDeclaration/">GenericType</span><span class="token operator">&lt;</span><a href="execute.html">ResultT</a><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="execute.html">ResultT</a><span class="token operator">?</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1811442097%2FFunctions%2F1710684214" anchor-label="executeAsync" id="1811442097%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#1141507515%2FFunctions%2F1710684214"><span>execute</span><wbr><span><span>Async</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1811442097%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#1141507515%2FFunctions%2F1710684214"><span class="token function">executeAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.graph/GraphStatement///PointingToDeclaration/">GraphStatement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.dse.driver.api.core.graph/AsyncGraphResultSet///PointingToDeclaration/">AsyncGraphResultSet</span><span class="token operator">&gt;</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-348827027%2FFunctions%2F1710684214"><span class="token function">executeAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/AsyncResultSet///PointingToDeclaration/">AsyncResultSet</span><span class="token operator">&gt;</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#729276195%2FFunctions%2F1710684214"><span class="token function">executeAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span><span class="token keyword">vararg </span>p1<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/AsyncResultSet///PointingToDeclaration/">AsyncResultSet</span><span class="token operator">&gt;</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#1546341695%2FFunctions%2F1710684214"><span class="token function">executeAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p1<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-mutable-map/index.html">MutableMap</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/AsyncResultSet///PointingToDeclaration/">AsyncResultSet</span><span class="token operator">&gt;</span></div><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="execute-async.html"><span class="token function">executeAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">statement<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/Statement///PointingToDeclaration/">Statement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/AsyncResultSet///PointingToDeclaration/">AsyncResultSet</span><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1498677896%2FFunctions%2F1710684214" anchor-label="executeContinuously" id="1498677896%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#1498677896%2FFunctions%2F1710684214"><span>execute</span><wbr><span><span>Continuously</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1498677896%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#1498677896%2FFunctions%2F1710684214"><span class="token function">executeContinuously</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/Statement///PointingToDeclaration/">Statement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.cql.continuous/ContinuousResultSet///PointingToDeclaration/">ContinuousResultSet</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-296495110%2FFunctions%2F1710684214" anchor-label="executeContinuouslyAsync" id="-296495110%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#-296495110%2FFunctions%2F1710684214"><span>execute</span><wbr><span>Continuously</span><wbr><span><span>Async</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-296495110%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-296495110%2FFunctions%2F1710684214"><span class="token function">executeContinuouslyAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/Statement///PointingToDeclaration/">Statement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.dse.driver.api.core.cql.continuous/ContinuousAsyncResultSet///PointingToDeclaration/">ContinuousAsyncResultSet</span><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1054721334%2FFunctions%2F1710684214" anchor-label="executeContinuouslyReactive" id="-1054721334%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#-234931623%2FFunctions%2F1710684214"><span>execute</span><wbr><span>Continuously</span><wbr><span><span>Reactive</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1054721334%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-234931623%2FFunctions%2F1710684214"><span class="token function">executeContinuouslyReactive</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/Statement///PointingToDeclaration/">Statement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.cql.continuous.reactive/ContinuousReactiveResultSet///PointingToDeclaration/">ContinuousReactiveResultSet</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-1360050755%2FFunctions%2F1710684214"><span class="token function">executeContinuouslyReactive</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.cql.continuous.reactive/ContinuousReactiveResultSet///PointingToDeclaration/">ContinuousReactiveResultSet</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="965328016%2FFunctions%2F1710684214" anchor-label="executeReactive" id="965328016%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#1432883109%2FFunctions%2F1710684214"><span>execute</span><wbr><span><span>Reactive</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="965328016%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#1432883109%2FFunctions%2F1710684214"><span class="token function">executeReactive</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/Statement///PointingToDeclaration/">Statement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.cql.reactive/ReactiveResultSet///PointingToDeclaration/">ReactiveResultSet</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-1875980023%2FFunctions%2F1710684214"><span class="token function">executeReactive</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.cql.reactive/ReactiveResultSet///PointingToDeclaration/">ReactiveResultSet</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-134821881%2FFunctions%2F1710684214"><span class="token function">executeReactive</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span><span class="token keyword">vararg </span>p1<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.cql.reactive/ReactiveResultSet///PointingToDeclaration/">ReactiveResultSet</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-2067249189%2FFunctions%2F1710684214"><span class="token function">executeReactive</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p1<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-mutable-map/index.html">MutableMap</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.cql.reactive/ReactiveResultSet///PointingToDeclaration/">ReactiveResultSet</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-94383310%2FFunctions%2F1710684214"><span class="token function">executeReactive</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.graph/GraphStatement///PointingToDeclaration/">GraphStatement</span><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.dse.driver.api.core.graph.reactive/ReactiveGraphResultSet///PointingToDeclaration/">ReactiveGraphResultSet</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="874871337%2FFunctions%2F1710684214" anchor-label="forceCloseAsync" id="874871337%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="force-close-async.html"><span>force</span><wbr><span>Close</span><wbr><span><span>Async</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="874871337%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="force-close-async.html"><span class="token function">forceCloseAsync</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><a href="https://docs.oracle.com/javase/8/docs/api/java/lang/Void.html">Void</a><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-792956087%2FFunctions%2F1710684214" anchor-label="getContext" id="-792956087%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="get-context.html"><span>get</span><wbr><span><span>Context</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-792956087%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="get-context.html"><span class="token function">getContext</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.context/DriverContext///PointingToDeclaration/">DriverContext</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1639902363%2FFunctions%2F1710684214" anchor-label="getKeyspace" id="1639902363%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="get-keyspace.html"><span>get</span><wbr><span><span>Keyspace</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1639902363%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="get-keyspace.html"><span class="token function">getKeyspace</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/Optional.html">Optional</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core/CqlIdentifier///PointingToDeclaration/">CqlIdentifier</span><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1073970061%2FFunctions%2F1710684214" anchor-label="getMetadata" id="-1073970061%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="get-metadata.html"><span>get</span><wbr><span><span>Metadata</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1073970061%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="get-metadata.html"><span class="token function">getMetadata</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.metadata/Metadata///PointingToDeclaration/">Metadata</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="280479413%2FFunctions%2F1710684214" anchor-label="getMetrics" id="280479413%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="get-metrics.html"><span>get</span><wbr><span><span>Metrics</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="280479413%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="get-metrics.html"><span class="token function">getMetrics</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/Optional.html">Optional</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.metrics/Metrics///PointingToDeclaration/">Metrics</span><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1335587049%2FFunctions%2F1710684214" anchor-label="getName" id="-1335587049%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="get-name.html"><span>get</span><wbr><span><span>Name</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1335587049%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="get-name.html"><span class="token function">getName</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="118621548%2FFunctions%2F1710684214" anchor-label="isClosed" id="118621548%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="is-closed.html"><span>is</span><wbr><span><span>Closed</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="118621548%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="is-closed.html"><span class="token function">isClosed</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="950919345%2FFunctions%2F1710684214" anchor-label="isSchemaMetadataEnabled" id="950919345%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="is-schema-metadata-enabled.html"><span>is</span><wbr><span>Schema</span><wbr><span>Metadata</span><wbr><span><span>Enabled</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="950919345%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="is-schema-metadata-enabled.html"><span class="token function">isSchemaMetadataEnabled</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1040638335%2FFunctions%2F1710684214" anchor-label="prepare" id="-1040638335%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#970775465%2FFunctions%2F1710684214"><span><span>prepare</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1040638335%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#970775465%2FFunctions%2F1710684214"><span class="token function">prepare</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/PrepareRequest///PointingToDeclaration/">PrepareRequest</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/PreparedStatement///PointingToDeclaration/">PreparedStatement</span></div><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="prepare.html"><span class="token function">prepare</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">statement<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/SimpleStatement///PointingToDeclaration/">SimpleStatement</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/PreparedStatement///PointingToDeclaration/">PreparedStatement</span></div><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="prepare.html"><span class="token function">prepare</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">query<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/PreparedStatement///PointingToDeclaration/">PreparedStatement</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1771838826%2FFunctions%2F1710684214" anchor-label="prepareAsync" id="-1771838826%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#-2027125874%2FFunctions%2F1710684214"><span>prepare</span><wbr><span><span>Async</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1771838826%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-2027125874%2FFunctions%2F1710684214"><span class="token function">prepareAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/PrepareRequest///PointingToDeclaration/">PrepareRequest</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/PreparedStatement///PointingToDeclaration/">PreparedStatement</span><span class="token operator">&gt;</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#1357542447%2FFunctions%2F1710684214"><span class="token function">prepareAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/SimpleStatement///PointingToDeclaration/">SimpleStatement</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/PreparedStatement///PointingToDeclaration/">PreparedStatement</span><span class="token operator">&gt;</span></div><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-1797180005%2FFunctions%2F1710684214"><span class="token function">prepareAsync</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span>&nbsp;</span>p0<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.cql/PreparedStatement///PointingToDeclaration/">PreparedStatement</span><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-167272186%2FFunctions%2F1710684214" anchor-label="refreshSchema" id="-167272186%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="index.html#-167272186%2FFunctions%2F1710684214"><span>refresh</span><wbr><span><span>Schema</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-167272186%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><div class="block"><div class="block"><span class="token annotation builtin">@</span><span data-unresolved-link="edu.umd.cs.findbugs.annotations/NonNull///PointingToDeclaration/"><span class="token annotation builtin">NonNull</span></span></div></div><span class="token keyword">open </span><span class="token keyword">fun </span><a href="index.html#-167272186%2FFunctions%2F1710684214"><span class="token function">refreshSchema</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core.metadata/Metadata///PointingToDeclaration/">Metadata</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1522118178%2FFunctions%2F1710684214" anchor-label="refreshSchemaAsync" id="1522118178%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="refresh-schema-async.html"><span>refresh</span><wbr><span>Schema</span><wbr><span><span>Async</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1522118178%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="refresh-schema-async.html"><span class="token function">refreshSchemaAsync</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.metadata/Metadata///PointingToDeclaration/">Metadata</span><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1269728439%2FFunctions%2F1710684214" anchor-label="reset" id="-1269728439%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="reset.html"><span><span>reset</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1269728439%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="reset.html"><span class="token function">reset</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="/<Error class: unknown class>///PointingToDeclaration/">&lt;Error class: unknown class&gt;</span></div><div class="brief "><p class="paragraph">Clears all captured batches.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1488121099%2FFunctions%2F1710684214" anchor-label="setSchemaMetadataEnabled" id="1488121099%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="set-schema-metadata-enabled.html"><span>set</span><wbr><span>Schema</span><wbr><span>Metadata</span><wbr><span><span>Enabled</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1488121099%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">open </span><span class="token keyword">override </span><span class="token keyword">fun </span><a href="set-schema-metadata-enabled.html"><span class="token function">setSchemaMetadataEnabled</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">newValue<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a><span class="token operator">?</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletionStage.html">CompletionStage</a><span class="token operator">&lt;</span><span data-unresolved-link="com.datastax.oss.driver.api.core.metadata/Metadata///PointingToDeclaration/">Metadata</span><span class="token operator">&gt;</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-143598508%2FFunctions%2F1710684214" anchor-label="tableContents" id="-143598508%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="table-contents.html"><span>table</span><wbr><span><span>Contents</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-143598508%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="table-contents.html"><span class="token function">tableContents</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">tableName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-map/index.html">Map</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">?</span><span class="token operator">&gt;</span><span class="token operator">&gt;</span></div><div class="brief "><p class="paragraph">Returns an empty in-memory table contents list (structural test placeholder).</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      <div class="footer">
+        <span class="go-to-top-icon"><a href="#content" id="go-to-top-link"></a></span><span>© 2026 Copyright</span><span class="pull-right"><span>Generated by </span><a href="https://github.com/Kotlin/dokka"><span>dokka</span><span class="padded-icon"></span></a></span>
+      </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
