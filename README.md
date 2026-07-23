@@ -84,7 +84,7 @@ authoring a schema migration.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.5"))
+    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.6"))
     implementation("ke.co.coinx.kandra:kandra-ktor")
     implementation("ke.co.coinx.kandra:kandra-koin")   // or kandra-kodein
     ksp("ke.co.coinx.kandra:kandra-codegen")           // optional — type-safe table objects
