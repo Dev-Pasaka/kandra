@@ -4,6 +4,7 @@ import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.annotations.CacheResult
 import io.kandra.core.annotations.ClusteringKey
 import io.kandra.core.annotations.ClusteringOrder
+import io.kandra.core.annotations.GeneratedUuid
 import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
@@ -16,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -61,6 +63,20 @@ data class IntegrationEvent(
     val payload: String,
     val tags: Set<String> = emptySet(),
     @Version val version: Long = 0L
+)
+
+/**
+ * Covers `@GeneratedUuid`: an `Instant`-derived clustering key silently overwrites same-millisecond
+ * rows on save (Cassandra writes are upserts on the full key) — `@GeneratedUuid` avoids that by
+ * populating the clustering key with a UUIDv7 instead, which sorts chronologically like the `Instant`
+ * would have, without the collision risk. The placeholder value below is always overwritten by Kandra
+ * on save; it exists only so the data class constructor doesn't require callers to supply one.
+ */
+@ScyllaTable("integration_generated_uuid_events")
+data class IntegrationGeneratedUuidEvent(
+    @PartitionKey val streamId: UUID,
+    @GeneratedUuid @ClusteringKey val eventId: UUID = UUID(0, 0),
+    val payload: String
 )
 
 /** Regression coverage for Finding #8 — non-nullable empty Set/Map columns threw on read. */
@@ -144,7 +160,8 @@ class KandraIntegrationTest {
         IntegrationBatchSecondary::class,
         IntegrationCachedClustered::class,
         IntegrationLookupClustered::class,
-        IntegrationSoftDeletedLookup::class
+        IntegrationSoftDeletedLookup::class,
+        IntegrationGeneratedUuidEvent::class
     )
 
     @AfterAll
@@ -285,6 +302,37 @@ class KandraIntegrationTest {
         repo.update(updated, updated.copy(payload = "updated-payload"))
         val afterUpdate = repo.findById(event.streamId, event.occurredAt)!!
         assertEquals("updated-payload", afterUpdate.payload)
+    }
+
+    // ── @GeneratedUuid: avoids same-millisecond clustering-key collisions on upsert ─────────
+
+    @Test
+    fun `GeneratedUuid populates the clustering key on save, ignoring the placeholder value`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationGeneratedUuidEvent>()
+        val streamId = UUID.randomUUID()
+        repo.save(IntegrationGeneratedUuidEvent(streamId, payload = "only-row"))
+
+        val rows = repo.findAll { IntegrationGeneratedUuidEventTable.streamId eq streamId }
+        assertEquals(1, rows.size)
+        assertEquals("only-row", rows.first().payload)
+        assertNotEquals(UUID(0, 0), rows.first().eventId)
+        assertEquals(7, rows.first().eventId.version())
+    }
+
+    @Test
+    fun `GeneratedUuid clustering keys sort chronologically even when written in the same millisecond`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationGeneratedUuidEvent>()
+        val streamId = UUID.randomUUID()
+
+        // Both saves target the same partition back-to-back — an Instant-derived clustering key
+        // would risk landing in the same millisecond and one row silently overwriting the other.
+        repo.save(IntegrationGeneratedUuidEvent(streamId, payload = "first"))
+        repo.save(IntegrationGeneratedUuidEvent(streamId, payload = "second"))
+
+        val rows = repo.findAll { IntegrationGeneratedUuidEventTable.streamId eq streamId }
+        assertEquals(2, rows.size)
+        assertEquals(listOf("first", "second"), rows.map { it.payload })
+        assertTrue(rows[0].eventId < rows[1].eventId)
     }
 
     // ── Finding #8 regression: non-nullable empty Set/Map columns threw on read ──────────────

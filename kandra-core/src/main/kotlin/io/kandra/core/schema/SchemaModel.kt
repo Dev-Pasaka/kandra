@@ -2,6 +2,7 @@ package io.kandra.core.schema
 
 import io.kandra.core.annotations.ClusteringOrder
 import io.kandra.core.annotations.LookupConsistency
+import io.kandra.core.annotations.UuidStrategy
 import kotlin.reflect.KClass
 import kotlin.reflect.KType
 
@@ -18,7 +19,8 @@ data class ColumnSchema(
     val isUpdatedAt: Boolean = false,
     val isSecondaryIndex: Boolean = false,
     val isSensitive: Boolean = false,
-    val isVersion: Boolean = false
+    val isVersion: Boolean = false,
+    val generatedUuidStrategy: UuidStrategy? = null
 )
 
 data class ClusteringKeySchema(val order: ClusteringOrder, val index: Int)
@@ -44,7 +46,9 @@ data class TableSchema(
     /** The `markerProperty` column from `@SoftDelete`, if configured. Enables `findActive()`. */
     val softDeleteMarkerColumn: ColumnSchema? = null,
     val gcGraceSeconds: Int? = null,
-    val cacheConfig: CacheResultConfig? = null
+    val cacheConfig: CacheResultConfig? = null,
+    /** Columns marked `@GeneratedUuid`, auto-populated on INSERT. Excludes `@Transient` columns. */
+    val generatedUuidColumns: List<ColumnSchema> = emptyList()
 )
 
 data class LookupTableSchema(

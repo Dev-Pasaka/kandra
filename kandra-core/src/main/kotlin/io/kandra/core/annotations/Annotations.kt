@@ -94,6 +94,20 @@ annotation class WriteConsistency(val level: io.kandra.core.KandraConsistency)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Version
 
+enum class UuidStrategy { TIME_ORDERED, RANDOM }
+
+/**
+ * Auto-populates a `UUID` field on every INSERT via [io.kandra.core.KandraUuid], the same way
+ * [CreatedAt] is auto-populated. Any caller-supplied value is overwritten. Never touched by
+ * update()/updateForce() — primary key components are immutable in Cassandra. Must be on a `UUID` field.
+ *
+ * Use on a `@ClusteringKey`/`@PartitionKey` to avoid the same-millisecond collision risk of keys
+ * derived from `Instant.now()`.
+ */
+@Target(AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class GeneratedUuid(val strategy: UuidStrategy = UuidStrategy.TIME_ORDERED)
+
 /** When applied, delete() sets a TTL on the row instead of issuing a DELETE. Avoids tombstone accumulation. */
 /**
  * @param markerProperty Opt-in name of a `Boolean` property on the entity that permanently
