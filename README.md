@@ -48,6 +48,7 @@ This README covers the common cases end-to-end. For everything else:
 | [`docs/issues/`](docs/issues/README.md) | Known gaps and issues — open, fixed, and closed — with the reasoning behind each |
 | [`docs/test-plan/`](docs/test-plan/README.md) | Step-by-step plan for building a real Ktor app against the published artifact and a real ScyllaDB cluster, with an exhaustive functional/edge-case coverage matrix and scoring rubric |
 | [`docs/history/`](docs/history/) | The original build specs used to generate each version (0.1.0 → 0.4.0) — historical context, not current docs |
+| [`docs/site/`](docs/site/README.md) | Build prompts for the separate documentation website project, one file per Kandra version |
 | [API docs (Dokka)](https://dev-pasaka.github.io/kandra/) | Generated per-release from source, published on tag |
 | [`.claude/skills/`](.claude/skills/) | Per-module Claude Code skills — see [Using with Claude Code](#using-with-claude-code) below |
 
