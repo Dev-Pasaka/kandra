@@ -267,18 +267,38 @@ class QueryExecutor(
         }
     }
 
-    fun <T : Any> findActive(entityClass: KClass<T>): List<T> {
-        val marker = requireActiveMarker()
+    /**
+     * Builds the CQL for `findActive()`. If the marker column has a `@SecondaryIndex`, the query
+     * is answered by the index and no `ALLOW FILTERING` is needed. Otherwise, `ALLOW FILTERING` is
+     * required — Kandra does not emit it implicitly; the caller must opt in with
+     * `allowFullScan = true`, mirroring how the predicate DSL refuses to emit it at all.
+     */
+    private fun buildActiveQueryCql(marker: io.kandra.core.schema.ColumnSchema, allowFullScan: Boolean): String {
+        val hasSecondaryIndex = schema.secondaryIndexes.any { it.cqlName == marker.cqlName }
+        if (hasSecondaryIndex) {
+            return "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ?"
+        }
+        if (!allowFullScan) {
+            throw KandraQueryException(
+                "findActive() on '${schema.tableName}' requires ALLOW FILTERING on '${marker.cqlName}', " +
+                "which Kandra does not emit implicitly. Add a @SecondaryIndex to the marker column, or " +
+                "pass allowFullScan = true to findActive() to opt in explicitly."
+            )
+        }
         activeMarkerWarning(marker)
-        val cql = "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
+        return "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
+    }
+
+    fun <T : Any> findActive(entityClass: KClass<T>, allowFullScan: Boolean = false): List<T> {
+        val marker = requireActiveMarker()
+        val cql = buildActiveQueryCql(marker, allowFullScan)
         val rs = session.execute(session.prepare(cql).bind(false))
         return rs.all().map { decodeEntity(it, entityClass) }
     }
 
-    suspend fun <T : Any> findActiveSuspend(entityClass: KClass<T>): List<T> {
+    suspend fun <T : Any> findActiveSuspend(entityClass: KClass<T>, allowFullScan: Boolean = false): List<T> {
         val marker = requireActiveMarker()
-        activeMarkerWarning(marker)
-        val cql = "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
+        val cql = buildActiveQueryCql(marker, allowFullScan)
         val prepared = session.prepareSuspend(cql)
         return session.executeSuspendAll(prepared.bind(false)).map { decodeEntity(it, entityClass) }
     }

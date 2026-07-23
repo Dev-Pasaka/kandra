@@ -8,6 +8,7 @@ import io.kandra.core.annotations.GeneratedUuid
 import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
+import io.kandra.core.annotations.SecondaryIndex
 import io.kandra.core.annotations.SoftDelete
 import io.kandra.core.annotations.Version
 import io.kandra.core.exception.KandraOptimisticLockException
@@ -40,6 +41,18 @@ data class IntegrationWidget(
     @PartitionKey val id: UUID,
     val name: String,
     val isDeleted: Boolean = false
+)
+
+/**
+ * Regression coverage for ISS-036 — `findActive()`'s marker column has a `@SecondaryIndex`, so the
+ * query is answered by the index and no `ALLOW FILTERING` (nor `allowFullScan = true`) is required.
+ */
+@ScyllaTable("integration_indexed_widgets")
+@SoftDelete(ttlSeconds = 2, markerProperty = "isDeleted")
+data class IntegrationIndexedWidget(
+    @PartitionKey val id: UUID,
+    val name: String,
+    @SecondaryIndex val isDeleted: Boolean = false
 )
 
 /**
@@ -153,6 +166,7 @@ class KandraIntegrationTest {
     private val db = KandraTestcontainers.freshKeyspace(
         IntegrationUser::class,
         IntegrationWidget::class,
+        IntegrationIndexedWidget::class,
         IntegrationEvent::class,
         IntegrationCollections::class,
         IntegrationCached::class,
@@ -225,8 +239,50 @@ class KandraIntegrationTest {
         assertNotNull(repo.findById(widget.id))
 
         // findActive() excludes it immediately via the permanent (non-TTL'd) marker column.
-        val active = repo.findActive()
+        // The marker column has no @SecondaryIndex, so this requires an explicit opt-in — ISS-036.
+        val active = repo.findActive(allowFullScan = true)
         assertFalse(active.any { it.id == widget.id })
+    }
+
+    // ── ISS-036: findActive()'s ALLOW FILTERING is now an explicit opt-in ──────────────────
+
+    @Test
+    fun `findActive without a secondary index throws unless allowFullScan is true`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationWidget>()
+        val widget = IntegrationWidget(UUID.randomUUID(), "widget-no-index")
+        repo.save(widget)
+
+        // No @SecondaryIndex on `isDeleted` and no allowFullScan=true — must throw at call time,
+        // not silently emit ALLOW FILTERING with just a WARN log.
+        assertThrows(KandraQueryException::class.java) {
+            runBlocking { repo.findActive() }
+        }
+        Unit
+    }
+
+    @Test
+    fun `findActive with allowFullScan=true succeeds and still emits ALLOW FILTERING`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationWidget>()
+        val widget = IntegrationWidget(UUID.randomUUID(), "widget-full-scan")
+        repo.save(widget)
+
+        val active = repo.findActive(allowFullScan = true)
+        assertTrue(active.any { it.id == widget.id })
+    }
+
+    @Test
+    fun `findActive on an entity with a secondary index succeeds without allowFullScan`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationIndexedWidget>()
+        val widget = IntegrationIndexedWidget(UUID.randomUUID(), "widget-indexed")
+        repo.save(widget)
+
+        // Marker column has @SecondaryIndex — no ALLOW FILTERING needed, no opt-in required.
+        val active = repo.findActive()
+        assertTrue(active.any { it.id == widget.id })
+
+        repo.delete(widget)
+        val activeAfterDelete = repo.findActive()
+        assertFalse(activeAfterDelete.any { it.id == widget.id })
     }
 
     @Test
