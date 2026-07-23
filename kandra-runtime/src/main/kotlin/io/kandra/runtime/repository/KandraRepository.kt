@@ -136,10 +136,15 @@ class KandraRepository<T : Any>(
     /**
      * Returns all rows not yet soft-deleted. Requires `@SoftDelete(markerProperty = "...")`
      * on [T] — throws [KandraSchemaException] otherwise.
+     *
+     * If the marker column has no `@SecondaryIndex`, answering this query requires
+     * `ALLOW FILTERING`. Kandra does not emit that implicitly — this throws
+     * [io.kandra.core.exception.KandraQueryException] unless you pass `allowFullScan = true`
+     * to explicitly opt into the scatter-gather scan.
      */
-    fun findActive(): List<T> {
+    fun findActive(allowFullScan: Boolean = false): List<T> {
         checkNotShuttingDown()
-        return executor.findActive(entityClass)
+        return executor.findActive(entityClass, allowFullScan)
     }
 
     fun raw(cql: String, vararg params: Any?): List<Row> {
