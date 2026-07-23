@@ -36,8 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
-import kotlin.reflect.full.memberFunctions
-import kotlin.reflect.full.memberProperties
+import kotlin.reflect.KProperty1
 
 private val logger = KotlinLogging.logger {}
 
@@ -187,10 +186,10 @@ class BatchEngine(
         val batch = batchLookups.fold(
             BatchStatement.newInstance(DefaultBatchType.LOGGED)
                 .add(statementBuilder.insertPrimary(schema, stampedWithVersion, ttlSeconds, timestampMicros = timestampMicros, consistency = consistency))
-        ) { acc, l -> acc.add(statementBuilder.insertLookup(l, stampedWithVersion)) }
+        ) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stampedWithVersion)) }
         if (debugConfig.logBatches) logger.debug { "Executing LOGGED BATCH with ${batchLookups.size + 1} statements for ${schema.tableName}" }
         executeWithRetry(batch, schema.tableName, "save")
-        fireEventual(eventualLookups, stampedWithVersion)
+        fireEventual(schema, eventualLookups, stampedWithVersion)
     }
 
     fun saveIfNotExists(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean {
@@ -204,10 +203,10 @@ class BatchEngine(
         if (!applied) return false
         val (batchLookups, eventualLookups) = schema.lookupTables.partition { it.consistency == LookupConsistency.BATCH }
         if (batchLookups.isNotEmpty()) {
-            val lookupBatch = batchLookups.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, l -> acc.add(statementBuilder.insertLookup(l, stamped)) }
+            val lookupBatch = batchLookups.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stamped)) }
             executeWithRetry(lookupBatch)
         }
-        fireEventual(eventualLookups, stamped)
+        fireEventual(schema, eventualLookups, stamped)
         return true
     }
 
@@ -218,9 +217,9 @@ class BatchEngine(
         val batch = batchLookups.fold(
             BatchStatement.newInstance(DefaultBatchType.LOGGED)
                 .add(statementBuilder.insertPrimaryWithNulls(schema, stamped, ttlSeconds))
-        ) { acc, l -> acc.add(statementBuilder.insertLookup(l, stamped)) }
+        ) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stamped)) }
         executeWithRetry(batch)
-        fireEventual(eventualLookups, stamped)
+        fireEventual(schema, eventualLookups, stamped)
     }
 
     // ── Update ───────────────────────────────────────────────────────────────
@@ -231,11 +230,11 @@ class BatchEngine(
         val stamped = injectTimestamps(schema, new, isInsert = false)
 
         if (versionCol != null) {
-            val oldProps = old::class.memberProperties.associateBy { it.name }
+            val oldProps = schema.reflection.propertiesByName
             val oldVersion = oldProps[versionCol.propertyName]?.call(old)
                 ?: throw KandraQueryException("@Version field '${versionCol.propertyName}' is null")
             val newVersion = incrementVersion(versionCol, oldVersion)
-            val stampedWithVersion = injectVersion(stamped, versionCol.propertyName, newVersion)
+            val stampedWithVersion = injectVersion(schema, stamped, versionCol.propertyName, newVersion)
             val stmt = buildVersionedUpdateStatement(schema, versionCol, stampedWithVersion, oldVersion)
             val rs = executeWithRetry(stmt)
             val applied = rs.one()?.getBoolean("[applied]") ?: false
@@ -265,7 +264,7 @@ class BatchEngine(
     // ── Delete ───────────────────────────────────────────────────────────────
 
     fun delete(schema: TableSchema, entity: Any) {
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         val keyValues = (schema.partitionKeys + schema.clusteringKeys).map { key ->
             props[key.propertyName]?.call(entity) ?: throw KandraQueryException("Key '${key.propertyName}' is null on delete")
         }
@@ -309,7 +308,7 @@ class BatchEngine(
         stamped.forEach { entity ->
             allStatements.add(statementBuilder.insertPrimary(schema, entity, ttlSeconds))
             schema.lookupTables.forEach { lookup ->
-                if (lookup.consistency == LookupConsistency.BATCH) allStatements.add(statementBuilder.insertLookup(lookup, entity))
+                if (lookup.consistency == LookupConsistency.BATCH) allStatements.add(statementBuilder.insertLookup(schema, lookup, entity))
             }
             if (schema.lookupTables.any { it.consistency == LookupConsistency.EVENTUAL }) eventualInserts.add(entity)
         }
@@ -330,7 +329,7 @@ class BatchEngine(
         }
         if (eventualInserts.isNotEmpty()) {
             val eventualLookups = schema.lookupTables.filter { it.consistency == LookupConsistency.EVENTUAL }
-            eventualInserts.forEach { entity -> fireEventual(eventualLookups, entity) }
+            eventualInserts.forEach { entity -> fireEventual(schema, eventualLookups, entity) }
         }
     }
 
@@ -342,12 +341,12 @@ class BatchEngine(
         return buildList {
             add(statementBuilder.insertPrimary(schema, stamped, ttlSeconds))
             schema.lookupTables.filter { it.consistency == LookupConsistency.BATCH }
-                .forEach { add(statementBuilder.insertLookup(it, stamped)) }
+                .forEach { add(statementBuilder.insertLookup(schema, it, stamped)) }
         }
     }
 
     internal fun collectDelete(schema: TableSchema, entity: Any): List<BatchableStatement<*>> {
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         val keyValues = (schema.partitionKeys + schema.clusteringKeys).map { key ->
             props[key.propertyName]?.call(entity) ?: throw KandraQueryException("Key '${key.propertyName}' is null on delete")
         }
@@ -371,10 +370,10 @@ class BatchEngine(
         val batch = batchLookups.fold(
             BatchStatement.newInstance(DefaultBatchType.LOGGED)
                 .add(statementBuilder.insertPrimary(schema, stampedWithVersion, ttlSeconds, timestampMicros = timestampMicros, consistency = consistency))
-        ) { acc, l -> acc.add(statementBuilder.insertLookup(l, stampedWithVersion)) }
+        ) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stampedWithVersion)) }
         if (debugConfig.logBatches) logger.debug { "Executing LOGGED BATCH with ${batchLookups.size + 1} statements for ${schema.tableName}" }
         executeWithRetrySuspend(batch)
-        fireEventualSuspend(eventualLookups, stampedWithVersion)
+        fireEventualSuspend(schema, eventualLookups, stampedWithVersion)
     }
 
     suspend fun saveIfNotExistsSuspend(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean {
@@ -388,10 +387,10 @@ class BatchEngine(
         if (!applied) return false
         val (batchLookups, eventualLookups) = schema.lookupTables.partition { it.consistency == LookupConsistency.BATCH }
         if (batchLookups.isNotEmpty()) {
-            val lookupBatch = batchLookups.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, l -> acc.add(statementBuilder.insertLookup(l, stamped)) }
+            val lookupBatch = batchLookups.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stamped)) }
             executeWithRetrySuspend(lookupBatch)
         }
-        fireEventualSuspend(eventualLookups, stamped)
+        fireEventualSuspend(schema, eventualLookups, stamped)
         return true
     }
 
@@ -402,9 +401,9 @@ class BatchEngine(
         val batch = batchLookups.fold(
             BatchStatement.newInstance(DefaultBatchType.LOGGED)
                 .add(statementBuilder.insertPrimaryWithNulls(schema, stamped, ttlSeconds))
-        ) { acc, l -> acc.add(statementBuilder.insertLookup(l, stamped)) }
+        ) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stamped)) }
         executeWithRetrySuspend(batch)
-        fireEventualSuspend(eventualLookups, stamped)
+        fireEventualSuspend(schema, eventualLookups, stamped)
     }
 
     suspend fun updateSuspend(schema: TableSchema, old: Any, new: Any) {
@@ -413,11 +412,11 @@ class BatchEngine(
         val stamped = injectTimestamps(schema, new, isInsert = false)
 
         if (versionCol != null) {
-            val oldProps = old::class.memberProperties.associateBy { it.name }
+            val oldProps = schema.reflection.propertiesByName
             val oldVersion = oldProps[versionCol.propertyName]?.call(old)
                 ?: throw KandraQueryException("@Version field '${versionCol.propertyName}' is null")
             val newVersion = incrementVersion(versionCol, oldVersion)
-            val stampedWithVersion = injectVersion(stamped, versionCol.propertyName, newVersion)
+            val stampedWithVersion = injectVersion(schema, stamped, versionCol.propertyName, newVersion)
             // Async prepare avoids blocking the dispatcher on the first call for this CQL string
             val stmt = buildVersionedUpdateStatementSuspend(schema, versionCol, stampedWithVersion, oldVersion)
             val rs = executeWithRetrySuspend(stmt)
@@ -457,7 +456,7 @@ class BatchEngine(
     }
 
     suspend fun deleteSuspend(schema: TableSchema, entity: Any) {
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         val keyValues = (schema.partitionKeys + schema.clusteringKeys).map { key ->
             props[key.propertyName]?.call(entity) ?: throw KandraQueryException("Key '${key.propertyName}' is null on delete")
         }
@@ -499,7 +498,7 @@ class BatchEngine(
         stamped.forEach { entity ->
             allStatements.add(statementBuilder.insertPrimary(schema, entity, ttlSeconds))
             schema.lookupTables.forEach { lookup ->
-                if (lookup.consistency == LookupConsistency.BATCH) allStatements.add(statementBuilder.insertLookup(lookup, entity))
+                if (lookup.consistency == LookupConsistency.BATCH) allStatements.add(statementBuilder.insertLookup(schema, lookup, entity))
             }
             if (schema.lookupTables.any { it.consistency == LookupConsistency.EVENTUAL }) eventualInserts.add(entity)
         }
@@ -520,7 +519,7 @@ class BatchEngine(
         }
         if (eventualInserts.isNotEmpty()) {
             val eventualLookups = schema.lookupTables.filter { it.consistency == LookupConsistency.EVENTUAL }
-            eventualInserts.forEach { entity -> fireEventualSuspend(eventualLookups, entity) }
+            eventualInserts.forEach { entity -> fireEventualSuspend(schema, eventualLookups, entity) }
         }
     }
 
@@ -529,7 +528,7 @@ class BatchEngine(
     private fun softDeleteBlocking(
         schema: TableSchema,
         entity: Any,
-        props: Map<String, kotlin.reflect.KProperty1<out Any, *>>,
+        props: Map<String, KProperty1<*, *>>,
         keyValues: List<Any>
     ) {
         val ttl = schema.softDeleteTtlSeconds!!
@@ -561,7 +560,7 @@ class BatchEngine(
     private suspend fun softDeleteSuspend(
         schema: TableSchema,
         entity: Any,
-        props: Map<String, kotlin.reflect.KProperty1<out Any, *>>,
+        props: Map<String, KProperty1<*, *>>,
         keyValues: List<Any>
     ) {
         val ttl = schema.softDeleteTtlSeconds!!
@@ -611,7 +610,7 @@ class BatchEngine(
         val cql = "UPDATE ${schema.tableName} SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
         val prepared = session.prepareSuspend(cql)   // truly async prepare
 
-        val entityProps = stampedWithVersion::class.memberProperties.associateBy { it.name }
+        val entityProps = schema.reflection.propertiesByName
         val values = mutableListOf<Any?>()
         nonKeyCols.forEach { col ->
             val encoded = codec.encode(entityProps[col.propertyName]?.call(stampedWithVersion), col.type)
@@ -649,7 +648,7 @@ class BatchEngine(
         val cql = "UPDATE ${schema.tableName} SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
         val prepared = session.prepare(cql)
 
-        val entityProps = stampedWithVersion::class.memberProperties.associateBy { it.name }
+        val entityProps = schema.reflection.propertiesByName
         val values = mutableListOf<Any?>()
         nonKeyCols.forEach { col ->
             val encoded = codec.encode(entityProps[col.propertyName]?.call(stampedWithVersion), col.type)
@@ -675,7 +674,7 @@ class BatchEngine(
 
     private fun throwOptimisticLockException(schema: TableSchema, old: Any, oldVersion: Any): Nothing {
         val pkValue = schema.partitionKeys.firstOrNull()?.let { pk ->
-            old::class.memberProperties.find { p -> p.name == pk.propertyName }?.call(old)
+            schema.reflection.propertiesByName[pk.propertyName]?.call(old)
         } ?: "unknown"
         throw KandraOptimisticLockException(
             "Optimistic lock conflict on ${schema.entityClass.simpleName}: version $oldVersion was modified concurrently",
@@ -713,11 +712,11 @@ class BatchEngine(
 
     // ── Eventual write helpers ────────────────────────────────────────────────
 
-    private fun fireEventual(eventualLookups: List<LookupTableSchema>, entity: Any) {
+    private fun fireEventual(schema: TableSchema, eventualLookups: List<LookupTableSchema>, entity: Any) {
         if (eventualLookups.isEmpty()) return
         scope.launch {
             eventualLookups.forEach { lookup ->
-                runCatching { session.execute(statementBuilder.insertLookup(lookup, entity)) }
+                runCatching { session.execute(statementBuilder.insertLookup(schema, lookup, entity)) }
                     .onFailure { err ->
                         logger.error(err) { "EVENTUAL lookup insert failed for ${lookup.tableName}" }
                         @OptIn(ExperimentalKandraApi::class)
@@ -727,11 +726,11 @@ class BatchEngine(
         }
     }
 
-    private fun fireEventualSuspend(eventualLookups: List<LookupTableSchema>, entity: Any) {
+    private fun fireEventualSuspend(schema: TableSchema, eventualLookups: List<LookupTableSchema>, entity: Any) {
         if (eventualLookups.isEmpty()) return
         scope.launch {
             eventualLookups.forEach { lookup ->
-                runCatching { session.executeSuspend(statementBuilder.insertLookup(lookup, entity)) }
+                runCatching { session.executeSuspend(statementBuilder.insertLookup(schema, lookup, entity)) }
                     .onFailure { err ->
                         logger.error(err) { "EVENTUAL lookup insert failed for ${lookup.tableName}" }
                         @OptIn(ExperimentalKandraApi::class)
@@ -756,16 +755,15 @@ class BatchEngine(
     }
 
     private fun buildUpdateStatements(schema: TableSchema, old: Any, new: Any): Pair<List<BatchableStatement<*>>, List<BatchableStatement<*>>> {
-        val oldProps = old::class.memberProperties.associateBy { it.name }
-        val newProps = new::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         val batchStmts = mutableListOf<BatchableStatement<*>>()
         val eventualStmts = mutableListOf<BatchableStatement<*>>()
         schema.lookupTables.forEach { lookup ->
-            val oldVal = oldProps[lookup.indexColumn.propertyName]?.call(old)
-            val newVal = newProps[lookup.indexColumn.propertyName]?.call(new)
+            val oldVal = props[lookup.indexColumn.propertyName]?.call(old)
+            val newVal = props[lookup.indexColumn.propertyName]?.call(new)
             val target = if (lookup.consistency == LookupConsistency.BATCH) batchStmts else eventualStmts
             if (oldVal != newVal && oldVal != null) target.add(statementBuilder.deleteLookup(lookup, oldVal))
-            if (newVal != null) target.add(statementBuilder.insertLookup(lookup, new))
+            if (newVal != null) target.add(statementBuilder.insertLookup(schema, lookup, new))
         }
         return batchStmts to eventualStmts
     }
@@ -777,11 +775,12 @@ class BatchEngine(
         val updatedAt = schema.updatedAtColumn
         val generatedUuidColumns = if (isInsert) schema.generatedUuidColumns else emptyList()
         if (createdAt == null && updatedAt == null && generatedUuidColumns.isEmpty()) return entity
-        val copyFn = entity::class.memberFunctions.find { it.name == "copy" } ?: return entity
+        val copyFn = schema.reflection.copyFunction ?: return entity
+        val copyParams = schema.reflection.copyParameters
         val now = Instant.now()
         val callArgs = mutableMapOf<KParameter, Any?>()
-        callArgs[copyFn.parameters[0]] = entity
-        copyFn.parameters.drop(1).forEach { param ->
+        callArgs[copyParams[0]] = entity
+        copyParams.drop(1).forEach { param ->
             val generatedCol = generatedUuidColumns.find { it.propertyName == param.name }
             when {
                 param.name == createdAt?.propertyName -> if (isInsert) callArgs[param] = now
@@ -803,14 +802,15 @@ class BatchEngine(
             Instant::class -> Instant.now()
             else -> throw KandraQueryException("@Version must be Long or Instant")
         }
-        return injectVersion(entity, versionCol.propertyName, initVersion)
+        return injectVersion(schema, entity, versionCol.propertyName, initVersion)
     }
 
-    private fun injectVersion(entity: Any, propertyName: String, version: Any): Any {
-        val copyFn = entity::class.memberFunctions.find { it.name == "copy" } ?: return entity
+    private fun injectVersion(schema: TableSchema, entity: Any, propertyName: String, version: Any): Any {
+        val copyFn = schema.reflection.copyFunction ?: return entity
+        val copyParams = schema.reflection.copyParameters
         val callArgs = mutableMapOf<KParameter, Any?>()
-        callArgs[copyFn.parameters[0]] = entity
-        copyFn.parameters.drop(1).forEach { param ->
+        callArgs[copyParams[0]] = entity
+        copyParams.drop(1).forEach { param ->
             if (param.name == propertyName) callArgs[param] = version
         }
         return copyFn.callBy(callArgs) ?: entity
