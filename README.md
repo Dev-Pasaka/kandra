@@ -310,6 +310,11 @@ CREATE TABLE IF NOT EXISTS users_by_email (
 
 **`LookupConsistency.BATCH`** — included in the same LOGGED batch (atomic).  
 **`LookupConsistency.EVENTUAL`** — written asynchronously via `CoroutineScope.launch` after the batch commits.
+Despite firing asynchronously, an `EVENTUAL` write shares the same safeguards as every other write:
+it retries on transient errors per `retry { }`'s `retryOn` set, counts toward `inFlightCount` so
+graceful shutdown waits for it to finish before closing the session, and is rejected (surfaced via
+`KandraEventListener.onEventualWriteFailed`, same as any other failure) once shutdown has begun. The
+only thing "eventual" about it is that the caller doesn't wait for it before `save()`/`update()` returns.
 
 ---
 
@@ -941,7 +946,7 @@ install(Kandra) {
 }
 ```
 
-On `ApplicationStopping`, Kandra sets `KandraRuntime.isShuttingDown = true` and drains `inFlightCount` down to zero (or the timeout) before closing the driver session.
+On `ApplicationStopping`, Kandra sets `KandraRuntime.isShuttingDown = true` and drains `inFlightCount` down to zero (or the timeout) before closing the driver session. This drain covers `LookupConsistency.EVENTUAL` lookup writes too — they retry on transient errors and are counted in `inFlightCount` exactly like every other write, so a `save()`/`update()` on an entity with an `EVENTUAL` lookup index can no longer race an in-progress shutdown and hit an already-closed session.
 
 ---
 

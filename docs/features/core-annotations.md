@@ -136,3 +136,7 @@ Declares a denormalised lookup table on a secondary field with configurable cons
     consistency = LookupConsistency.BATCH
 )
 ```
+
+`EVENTUAL` only defers the lookup write until after the primary batch commits — it still retries on
+transient errors, counts toward graceful shutdown's `inFlightCount` drain, and is rejected once
+shutdown begins, the same as `BATCH`. See [Health check & Graceful shutdown](operations.md).
