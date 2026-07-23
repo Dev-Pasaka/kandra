@@ -37,7 +37,11 @@ Enables optimistic locking via Lightweight Transactions (LWT).
 ```
 
 ### `@SoftDelete`
-Replaces hard DELETE with `UPDATE … USING TTL`. Lookup rows are hard-deleted.
+Replaces hard DELETE with `UPDATE … USING TTL`. `@LookupIndex` rows are left alone — a soft-deleted
+row still "exists" (queryable until its TTL expires), so it stays resolvable via its lookup index the
+same way `findById` still finds it. See
+[docs/issues/ISS-030-soft-delete-removes-lookup-rows.md](../issues/ISS-030-soft-delete-removes-lookup-rows.md)
+for why this is intentional, not a bug.
 
 ```kotlin
 @SoftDelete(ttlSeconds = 86400)
@@ -50,6 +54,12 @@ Optionally add `markerProperty` to enable `findActive()` — see
 @SoftDelete(ttlSeconds = 86400, markerProperty = "isDeleted")
 data class Widget(@PartitionKey val id: UUID, val isDeleted: Boolean = false, ...)
 ```
+
+**Storage cost with `@LookupIndex`:** combining `@SoftDelete` with `@LookupIndex` on the same entity
+means the lookup row outlives the primary table's effectively-deleted data — it isn't removed until
+the *entity's* soft-delete TTL expires, not when the primary row's non-key columns TTL out. For
+high-churn tables using both, expect the lookup table's live row count to grow faster than the
+primary table's at any given time. This is expected storage-cost behavior, not a bug.
 
 ### `@Sensitive`
 Masks field values with `***` in all Kandra log output via `KandraEntityLogger`.
@@ -136,3 +146,10 @@ Declares a denormalised lookup table on a secondary field with configurable cons
     consistency = LookupConsistency.BATCH
 )
 ```
+
+**With `@SoftDelete`:** a lookup row is not removed when the entity is soft-deleted — it remains
+until the entity's own soft-delete TTL expires, matching how `findById` still resolves a soft-deleted
+row. On high-churn tables combining both annotations, this means the lookup table's row count grows
+faster than the primary table's over time; this is expected, not a leak. See
+[`@SoftDelete`](#softdelete) above and
+[docs/issues/ISS-030-soft-delete-removes-lookup-rows.md](../issues/ISS-030-soft-delete-removes-lookup-rows.md).
