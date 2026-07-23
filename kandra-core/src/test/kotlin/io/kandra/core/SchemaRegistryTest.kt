@@ -5,6 +5,7 @@ import io.kandra.core.annotations.ClusteringOrder
 import io.kandra.core.annotations.Column
 import io.kandra.core.annotations.Counter
 import io.kandra.core.annotations.CreatedAt
+import io.kandra.core.annotations.GeneratedUuid
 import io.kandra.core.annotations.LookupConsistency
 import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
@@ -12,6 +13,7 @@ import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.annotations.Transient
 import io.kandra.core.annotations.Ttl
 import io.kandra.core.annotations.UpdatedAt
+import io.kandra.core.annotations.UuidStrategy
 import io.kandra.core.exception.KandraSchemaException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -115,6 +117,20 @@ data class CreatedAtEntity(
 data class BadCreatedAtEntity(
     @PartitionKey val id: UUID,
     @CreatedAt val name: String = ""  // wrong type
+)
+
+@ScyllaTable("generated_uuid_events")
+data class GeneratedUuidEvent(
+    @PartitionKey val streamId: UUID,
+    @GeneratedUuid @ClusteringKey val eventId: UUID,
+    @GeneratedUuid(strategy = UuidStrategy.RANDOM) val externalRef: UUID,
+    val payload: String
+)
+
+@ScyllaTable("bad_generated_uuid")
+data class BadGeneratedUuidEntity(
+    @PartitionKey val id: UUID,
+    @GeneratedUuid val name: String = ""  // wrong type
 )
 
 class SchemaRegistryTest {
@@ -257,6 +273,27 @@ class SchemaRegistryTest {
         assertThrows<KandraSchemaException> {
             SchemaRegistry.register(BadCreatedAtEntity::class)
         }
+    }
+
+    @Test
+    fun `GeneratedUuid columns are collected with their strategy`() {
+        val schema = SchemaRegistry.register(GeneratedUuidEvent::class)
+        assertEquals(2, schema.generatedUuidColumns.size)
+        val eventId = schema.generatedUuidColumns.find { it.propertyName == "eventId" }
+        val externalRef = schema.generatedUuidColumns.find { it.propertyName == "externalRef" }
+        assertNotNull(eventId)
+        assertNotNull(externalRef)
+        assertEquals(UuidStrategy.TIME_ORDERED, eventId!!.generatedUuidStrategy)
+        assertEquals(UuidStrategy.RANDOM, externalRef!!.generatedUuidStrategy)
+    }
+
+    @Test
+    fun `GeneratedUuid on non-UUID field throws KandraSchemaException`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(BadGeneratedUuidEntity::class)
+        }
+        assertTrue(ex.message!!.contains("@GeneratedUuid"))
+        assertTrue(ex.message!!.contains("must be a UUID field"))
     }
 
     @Test

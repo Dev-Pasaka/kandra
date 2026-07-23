@@ -5,6 +5,7 @@ import io.kandra.core.annotations.ClusteringKey
 import io.kandra.core.annotations.Column
 import io.kandra.core.annotations.Counter
 import io.kandra.core.annotations.CreatedAt
+import io.kandra.core.annotations.GeneratedUuid
 import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
@@ -23,6 +24,7 @@ import io.kandra.core.schema.LookupIndexSchema
 import io.kandra.core.schema.LookupTableSchema
 import io.kandra.core.schema.TableSchema
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KClass
 import kotlin.reflect.full.findAnnotation
@@ -73,6 +75,7 @@ object SchemaRegistry {
             val isSecondaryIndex = prop.findAnnotation<SecondaryIndex>() != null
             val isSensitive = prop.findAnnotation<Sensitive>() != null
             val isVersion = prop.findAnnotation<Version>() != null
+            val generatedUuidAnn = prop.findAnnotation<GeneratedUuid>()
             val cqlName = columnAnn?.name ?: camelToSnake(prop.name)
 
             // @CreatedAt / @UpdatedAt must be on Instant fields
@@ -82,6 +85,16 @@ object SchemaRegistry {
                     throw KandraSchemaException(
                         "@${if (isCreatedAt) "CreatedAt" else "UpdatedAt"} on '${klass.simpleName}.${prop.name}' " +
                             "must be an Instant field."
+                    )
+                }
+            }
+
+            // @GeneratedUuid must be on a UUID field
+            if (generatedUuidAnn != null) {
+                val classifier = prop.returnType.classifier as? KClass<*>
+                if (classifier != UUID::class) {
+                    throw KandraSchemaException(
+                        "@GeneratedUuid on '${klass.simpleName}.${prop.name}' must be a UUID field, got: ${prop.returnType}"
                     )
                 }
             }
@@ -101,7 +114,8 @@ object SchemaRegistry {
                 isUpdatedAt = isUpdatedAt,
                 isSecondaryIndex = isSecondaryIndex,
                 isSensitive = isSensitive,
-                isVersion = isVersion
+                isVersion = isVersion,
+                generatedUuidStrategy = generatedUuidAnn?.strategy
             )
         }
 
@@ -190,6 +204,7 @@ object SchemaRegistry {
         }
 
         val secondaryIndexes = columnSchemas.filter { it.isSecondaryIndex && !it.isTransient }
+        val generatedUuidColumns = columnSchemas.filter { it.generatedUuidStrategy != null && !it.isTransient }
 
         val softDeleteAnn = klass.findAnnotation<SoftDelete>()
         val cacheResultAnn = klass.findAnnotation<CacheResult>()
@@ -229,7 +244,8 @@ object SchemaRegistry {
             softDeleteTtlSeconds = softDeleteAnn?.ttlSeconds,
             softDeleteMarkerColumn = softDeleteMarkerColumn,
             gcGraceSeconds = tableAnnotation.gcGraceSeconds.takeIf { it >= 0 },
-            cacheConfig = cacheResultAnn?.let { CacheResultConfig(it.ttlSeconds, it.maxSize) }
+            cacheConfig = cacheResultAnn?.let { CacheResultConfig(it.ttlSeconds, it.maxSize) },
+            generatedUuidColumns = generatedUuidColumns
         )
     }
 

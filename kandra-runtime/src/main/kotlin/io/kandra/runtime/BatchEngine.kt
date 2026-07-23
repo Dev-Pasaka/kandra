@@ -14,9 +14,11 @@ import io.kandra.core.InternalKandraApi
 import io.kandra.core.KandraConsistency
 import io.kandra.core.KandraEventListener
 import io.kandra.core.KandraMetrics
+import io.kandra.core.KandraUuid
 import io.kandra.core.KandraValidationException
 import io.kandra.core.KandraValidator
 import io.kandra.core.annotations.LookupConsistency
+import io.kandra.core.annotations.UuidStrategy
 import io.kandra.core.exception.KandraOptimisticLockException
 import io.kandra.core.exception.KandraQueryException
 import io.kandra.core.schema.ColumnSchema
@@ -773,15 +775,22 @@ class BatchEngine(
     internal fun injectTimestamps(schema: TableSchema, entity: Any, isInsert: Boolean): Any {
         val createdAt = schema.createdAtColumn
         val updatedAt = schema.updatedAtColumn
-        if (createdAt == null && updatedAt == null) return entity
+        val generatedUuidColumns = if (isInsert) schema.generatedUuidColumns else emptyList()
+        if (createdAt == null && updatedAt == null && generatedUuidColumns.isEmpty()) return entity
         val copyFn = entity::class.memberFunctions.find { it.name == "copy" } ?: return entity
         val now = Instant.now()
         val callArgs = mutableMapOf<KParameter, Any?>()
         callArgs[copyFn.parameters[0]] = entity
         copyFn.parameters.drop(1).forEach { param ->
-            when (param.name) {
-                createdAt?.propertyName -> if (isInsert) callArgs[param] = now
-                updatedAt?.propertyName -> callArgs[param] = now
+            val generatedCol = generatedUuidColumns.find { it.propertyName == param.name }
+            when {
+                param.name == createdAt?.propertyName -> if (isInsert) callArgs[param] = now
+                param.name == updatedAt?.propertyName -> callArgs[param] = now
+                generatedCol != null -> callArgs[param] = when (generatedCol.generatedUuidStrategy) {
+                    UuidStrategy.TIME_ORDERED -> KandraUuid.timeOrdered()
+                    UuidStrategy.RANDOM -> KandraUuid.random()
+                    null -> null
+                }
             }
         }
         return copyFn.callBy(callArgs) ?: entity
