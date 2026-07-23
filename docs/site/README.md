@@ -11,21 +11,34 @@ material (module list, annotation set, DSL syntax, skill docs) changes release t
 written against an older version can go stale in ways that are easy to miss if it's edited in place.
 Keeping one file per version makes that drift visible instead of silent.
 
-| Version | File |
-|---|---|
-| [0.4.5](build-prompt-0.4.5.md) | Initial build prompt — full site scope, information architecture, and content requirements |
+| Version | Kind | File |
+|---|---|---|
+| 0.4.6 | Incremental update | [build-prompt-0.4.6.md](build-prompt-0.4.6.md) — adds `@GeneratedUuid`/`UuidStrategy`/`KandraUuid` coverage to specific pages only |
+| 0.4.5 | Full build | [build-prompt-0.4.5.md](build-prompt-0.4.5.md) — initial build prompt, full site scope, information architecture, and content requirements |
 
-## Updating this for a new Kandra release
+## Full build vs. incremental update
 
-Don't edit an existing `build-prompt-X.Y.Z.md` in place once it's been used to build or update the
-site. Instead:
+- **Full build** — for when the site doesn't exist yet, or is being substantially reworked. Covers
+  scope, information architecture, and every page from zero (see `build-prompt-0.4.5.md`'s §1–§11).
+- **Incremental update** — for when the site already exists and one release added a small, well-scoped
+  feature. States only what's new, exactly which existing pages to touch, and explicitly tells the
+  agent not to re-derive or rebuild anything already covered by the last full build (see
+  `build-prompt-0.4.6.md`). Cheaper to write and cheaper for a fresh Claude Code session to execute
+  correctly than handing over the entire accumulated build prompt again.
 
-1. Copy the latest file to `build-prompt-<new-version>.md`.
-2. Re-verify every claim in it against current source — annotation set, method signatures, DSL syntax,
-   module list (`settings.gradle.kts`), and anything under `docs/issues/` added since the last prompt.
-   Treat the previous prompt as a draft to correct, not a source of truth (see its own §4/§9 for why).
-   Note in the new file's header what changed since the previous version, if anything did.
-3. Add a row to the table above.
+## Adding a prompt for a new Kandra release
 
-The prompt itself is the authority on how to hand it off and what "done" looks like — see its §11
-("Definition of done") rather than duplicating that here.
+Don't edit an existing `build-prompt-X.Y.Z.md` in place once it's been used. Instead:
+
+1. Decide full build or incremental update (almost always the latter, once a full build exists — reach
+   for a full build again only after a rework big enough that page-by-page deltas stop making sense).
+2. For an incremental update: write a new, self-contained `build-prompt-<new-version>.md` stating what
+   changed since the last release, the source files to verify it against, and the exact pages to touch
+   — modeled on `build-prompt-0.4.6.md`'s structure (§1–§6). Don't copy the full prior prompt into it.
+   For a full build: copy the latest full-build file, re-verify every claim in it against current source
+   (annotation set, method signatures, DSL syntax, module list, `docs/issues/`), and correct anything
+   stale — treat the previous prompt as a draft, not a source of truth.
+3. Add a row to the table above, noting its kind.
+
+Each prompt is the authority on how to hand itself off and what "done" looks like for its own scope —
+see its own definition-of-done section rather than duplicating that here.
