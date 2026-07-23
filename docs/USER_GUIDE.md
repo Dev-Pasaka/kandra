@@ -294,6 +294,11 @@ data class User(
 | `consistency` | `LookupConsistency` | `BATCH` | `BATCH` = atomic with primary; `EVENTUAL` = async |
 
 > **When to use `EVENTUAL`:** For high-write-throughput tables where strict atomicity between primary and lookup is not required. Failed eventual writes are forwarded to `KandraEventListener.onEventualWriteFailed`.
+>
+> `EVENTUAL` only relaxes *atomicity* with the primary write, not durability guarantees: the write still
+> retries on transient errors per `retry { }`'s `retryOn` set, counts toward `inFlightCount`, and is
+> rejected once graceful shutdown begins — the same protections every other write gets. See
+> [Graceful shutdown](#graceful-shutdown).
 
 ---
 
@@ -593,6 +598,13 @@ install(Kandra) {
     }
 }
 ```
+
+`LookupConsistency.EVENTUAL` lookup writes fired from `save()`/`update()` are drained by this same
+mechanism — they're routed through the same retry/`inFlightCount`/shutdown-gate path as every
+synchronous write, so they no longer risk running against an already-closed session during shutdown.
+A new `EVENTUAL` write attempted after step 1 above throws the same `KandraQueryException` a
+synchronous query would, surfaced via `KandraEventListener.onEventualWriteFailed` (since the write
+happens on a background coroutine, not the caller's call stack).
 
 ---
 

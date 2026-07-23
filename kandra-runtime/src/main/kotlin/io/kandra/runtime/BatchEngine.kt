@@ -45,11 +45,16 @@ private val logger = KotlinLogging.logger {}
  * Executes save, update, delete, and saveAll operations using LOGGED batch statements.
  *
  * BATCH-consistency lookups are included in the atomic batch.
- * EVENTUAL-consistency lookups fire asynchronously via [scope] after the batch commits;
- * failures are forwarded to [eventListener] (if set) then logged.
+ * EVENTUAL-consistency lookups fire asynchronously via [scope] after the batch commits, but are
+ * routed through the same [executeWithRetry]/[executeWithRetrySuspend] path as every other write:
+ * they retry on transient failures per [retryConfig.retryOn], are counted in [inFlightCount] so
+ * graceful shutdown drains them before closing the session, and are rejected once [isShuttingDown]
+ * is set — same as any synchronous query. Failures (including "rejected due to shutdown") are
+ * forwarded to [eventListener] (if set) then logged.
  *
  * Transient failures listed in [retryConfig.retryOn] are retried with linear backoff.
- * When [isShuttingDown] is set, all new queries are rejected with [KandraQueryException].
+ * When [isShuttingDown] is set, all new queries — eventual lookups included — are rejected with
+ * [KandraQueryException].
  */
 @InternalKandraApi
 class BatchEngine(
@@ -249,7 +254,7 @@ class BatchEngine(
             BatchStatement.newInstance(DefaultBatchType.LOGGED).add(statementBuilder.insertPrimary(schema, stamped))
         ) { acc, stmt -> acc.add(stmt) }
         executeWithRetry(batch)
-        fireEventualStatements(eventualStmts, new, "(update)")
+        fireEventualStatements(eventualStmts, new, "(update)", schema.tableName)
     }
 
     fun updateForce(schema: TableSchema, entity: Any) {
@@ -692,7 +697,7 @@ class BatchEngine(
             val batch = batchStmts.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, s -> acc.add(s) }
             executeWithRetry(batch)
         }
-        fireEventualStatements(eventualStmts, new, "(version update)")
+        fireEventualStatements(eventualStmts, new, "(version update)", schema.tableName)
     }
 
     private suspend fun updateLookupsSuspend(schema: TableSchema, old: Any, new: Any) {
@@ -717,7 +722,7 @@ class BatchEngine(
         if (eventualLookups.isEmpty()) return
         scope.launch {
             eventualLookups.forEach { lookup ->
-                runCatching { session.execute(statementBuilder.insertLookup(lookup, entity)) }
+                runCatching { executeWithRetry(statementBuilder.insertLookup(lookup, entity), lookup.tableName, "eventualLookupInsert") }
                     .onFailure { err ->
                         logger.error(err) { "EVENTUAL lookup insert failed for ${lookup.tableName}" }
                         @OptIn(ExperimentalKandraApi::class)
@@ -731,7 +736,7 @@ class BatchEngine(
         if (eventualLookups.isEmpty()) return
         scope.launch {
             eventualLookups.forEach { lookup ->
-                runCatching { session.executeSuspend(statementBuilder.insertLookup(lookup, entity)) }
+                runCatching { executeWithRetrySuspend(statementBuilder.insertLookup(lookup, entity), lookup.tableName, "eventualLookupInsert") }
                     .onFailure { err ->
                         logger.error(err) { "EVENTUAL lookup insert failed for ${lookup.tableName}" }
                         @OptIn(ExperimentalKandraApi::class)
@@ -741,11 +746,11 @@ class BatchEngine(
         }
     }
 
-    private fun fireEventualStatements(stmts: List<BatchableStatement<*>>, entity: Any, context: String) {
+    private fun fireEventualStatements(stmts: List<BatchableStatement<*>>, entity: Any, context: String, tableName: String = "unknown") {
         if (stmts.isEmpty()) return
         scope.launch {
             stmts.forEach { stmt ->
-                runCatching { session.execute(stmt) }
+                runCatching { executeWithRetry(stmt, tableName, context) }
                     .onFailure { err ->
                         logger.error(err) { "EVENTUAL lookup $context failed" }
                         @OptIn(ExperimentalKandraApi::class)
