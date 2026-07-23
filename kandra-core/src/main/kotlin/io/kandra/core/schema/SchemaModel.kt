@@ -48,7 +48,13 @@ data class TableSchema(
     val gcGraceSeconds: Int? = null,
     val cacheConfig: CacheResultConfig? = null,
     /** Columns marked `@GeneratedUuid`, auto-populated on INSERT. Excludes `@Transient` columns. */
-    val generatedUuidColumns: List<ColumnSchema> = emptyList()
+    val generatedUuidColumns: List<ColumnSchema> = emptyList(),
+    /**
+     * The reflection surface (copy function, property map, primary constructor) for [entityClass],
+     * resolved once at registration time. `kandra-runtime` reads/writes entity fields through this
+     * instead of re-resolving via `entity::class`/`entityClass` on every call. See ISS-034.
+     */
+    val reflection: EntityReflection
 )
 
 data class LookupTableSchema(

@@ -15,7 +15,6 @@ import io.kandra.runtime.dsl.KandraRawQuery
 import io.kandra.runtime.dsl.QueryContext
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
-import kotlin.reflect.full.memberProperties
 
 /**
  * Blocking repository for performing CRUD operations on a ScyllaDB table.
@@ -153,7 +152,7 @@ class KandraRepository<T : Any>(
     }
 
     private fun keyValuesOf(entity: T): List<Any> = (schema.partitionKeys + schema.clusteringKeys).map { key ->
-        entity::class.memberProperties.find { it.name == key.propertyName }?.call(entity)
+        schema.reflection.propertiesByName[key.propertyName]?.call(entity)
             ?: throw KandraQueryException("Key '${key.propertyName}' is null")
     }
 
