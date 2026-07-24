@@ -167,3 +167,70 @@ rows are hard-deleted," which directly contradicted the actual (correct) ISS-030
 - The `@SoftDelete` page no longer claims lookup rows are hard-deleted.
 - The `@LookupIndex`/`@LookupTable` page notes the storage-growth interaction with `@SoftDelete`.
 - No other page changed for this section.
+
+---
+
+## PR #23 — `findActive()`'s `ALLOW FILTERING` is now an explicit opt-in (⚠️ BREAKING CHANGE)
+
+### 1. What shipped
+
+`findActive()`/`findActiveSuspend()` (for `@SoftDelete(markerProperty = "...")` entities) build CQL
+directly and, when the marker column has no `@SecondaryIndex`, used to silently emit
+`ALLOW FILTERING` (just a `WARN` log). This contradicted the site's own landing-page claim that
+Kandra's query layer structurally cannot express `ALLOW FILTERING` — that claim is true for the
+*predicate* DSL (`repo.find { ... }`) but was never true for `findActive()`, which bypasses the DSL
+entirely.
+
+`findActive(allowFullScan: Boolean = false)` now:
+- Queries the marker column's `@SecondaryIndex` directly if present — no `ALLOW FILTERING`,
+  `allowFullScan` irrelevant.
+- **Throws `KandraQueryException` at call time** if there's no `@SecondaryIndex` and `allowFullScan`
+  is left at its default `false` — instead of silently scanning.
+- Runs the old `ALLOW FILTERING` + WARN behavior only if the caller explicitly passes
+  `allowFullScan = true`.
+
+**This breaks existing callers**: any `findActive()` call on an entity whose marker column has no
+`@SecondaryIndex` now throws instead of silently succeeding. Callers must add `@SecondaryIndex` to
+the marker column or pass `allowFullScan = true`.
+
+### 2. Source of truth
+
+- **[`landing-page-correction-gh-12.md`](landing-page-correction-gh-12.md)** — a self-contained,
+  ready-to-hand-off correction note for the landing page's `ALLOW FILTERING` claim specifically,
+  written by the PR itself. Use it verbatim for the landing-page edit; don't re-derive that wording.
+- `docs/features/repositories.md` — the `findActive()` section (search "GH #12") has the full,
+  already-accurate behavior breakdown (indexed vs. non-indexed, default vs. `allowFullScan = true`).
+  Adapt directly for any module/API-reference page.
+- `docs/issues/ISS-036-findactive-allow-filtering-scope.md` — original writeup, good battle-scar
+  material: "a library that markets 'no silent ALLOW FILTERING' had exactly one silent ALLOW
+  FILTERING path, in the one method that bypasses the DSL enforcing that guarantee."
+- `docs/USER_GUIDE.md` — `@SoftDelete` section (search "allowFullScan") now has the corrected,
+  accurate explanation including the lookup-row-retention note from PR #22.
+
+### 3. Exact edits, page by page
+
+- **Landing page** — apply the correction from `landing-page-correction-gh-12.md` exactly as written
+  there. This is the highest-priority edit in this whole 0.4.7 batch — it's a live, publicly-visible
+  inaccuracy on the marketing page, not just an internal reference page.
+- **Whichever page documents `findActive()`/`@SoftDelete`** (per 0.4.5 prompt's IA, likely
+  `/modules/kandra-runtime` repository API section): update the signature to
+  `findActive(allowFullScan: Boolean = false)`, document the throws-by-default behavior, and mark it
+  clearly as a breaking change versus prior site content (if the site documented the old silent
+  behavior anywhere).
+- **`/battle-scars`** — add an entry for ISS-036. This one has an unusually sharp narrative hook (see
+  ISS-036 source above) — worth a real entry, higher priority than ISS-035's.
+- **Any "breaking changes" / migration-notes page** (if the site has one, per 0.4.5 prompt's IA) — add
+  an entry: upgrading past this fix requires either adding `@SecondaryIndex` to soft-delete marker
+  columns or passing `allowFullScan = true` at every `findActive()` call site, or those calls will
+  start throwing.
+- **Everywhere else — leave unchanged.**
+
+### 4. Definition of done for this section
+
+- Landing page's `ALLOW FILTERING` claim is scoped to the predicate DSL, per
+  `landing-page-correction-gh-12.md`.
+- The `findActive()` reference shows the new signature and throws-by-default behavior, called out as
+  breaking.
+- One `/battle-scars` entry covers ISS-036.
+- Any migration/breaking-changes page lists this fix with the upgrade path.
+- No other page changed for this section.
