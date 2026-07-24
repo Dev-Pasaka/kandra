@@ -535,8 +535,10 @@ fun `save captures batch statement`() {
 # Unit tests (no database required)
 JAVA_HOME=<jdk-21-path> ./gradlew :kandra-core:test
 
-# All modules (ktor integration tests require a ScyllaDB instance)
-JAVA_HOME=<jdk-21-path> ./gradlew test -x :kandra-ktor:test
+# Full suite, all modules — kandra-test and kandra-ktor spin up a real
+# Cassandra/ScyllaDB-compatible container via Testcontainers automatically,
+# no manual database setup or exclusions needed. Requires Docker running locally.
+JAVA_HOME=<jdk-21-path> ./gradlew test
 
 # Full build
 JAVA_HOME=<jdk-21-path> ./gradlew build

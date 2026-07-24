@@ -13,6 +13,11 @@ import kotlin.reflect.KClass
  * [io.kandra.core.exception.KandraQueryException].
  *
  * Add retryable exceptions via [retryOn] — only exception types in this set trigger retry.
+ *
+ * **Exception:** the `@Version` LWT update statement (`update()`/`updateSuspend()` on a
+ * `@Version`-annotated entity) is never retried by this policy, regardless of configuration — see
+ * `docs/features/core-annotations.md` and `docs/issues/ISS-032-versioned-update-spurious-optimistic-lock.md`
+ * for why blindly retrying a conditional update is unsafe.
  */
 class RetryConfig {
     var maxAttempts: Int = 3
