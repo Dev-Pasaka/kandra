@@ -339,10 +339,55 @@ absence of either DI framework on the classpath is silent (the common case for m
 
 ---
 
+## Post-batch — new example page + two pre-existing doc bugs found during review
+
+Not tied to a specific PR — found and fixed while reviewing the repo's own documentation for accuracy
+against the merged PRs above.
+
+### 1. New source material: an end-to-end "tables → production routes" example
+
+**`docs/production-example.md`** (new file) is a complete, source-verified walkthrough: defining
+`@ScyllaTable` entities, a full production `install(Kandra) { ... }` block (auth, retry, consistency
+Strict Mode, health check, graceful shutdown, batch guard), wiring `kandra-codegen`'s typed DI
+accessors over hand-typed Koin qualifiers, and using the result in real Ktor route handlers (including
+`KandraOptimisticLockException` handling on a `@Version` update, `findActive()`, pagination). It also
+contains a three-way comparison — hand-typed `named()` qualifier vs. calling
+`KandraRuntime.suspendRepository<T>()` inline per-request vs. the generated typed accessor — explaining
+concretely why the third is correct (the first has no compile-time safety; the second silently drops
+your plugin's `ConsistencyConfig`/`DebugConfig` and rebuilds a fresh statement cache on every call).
+
+**If the site has (or should have) a "Quick Start" / "Tutorial" / "Getting Started" page beyond what
+`build-prompt-0.4.5.md`'s original tutorial section covers**, this is strong source material for either
+extending that page or adding a dedicated "Production Setup" page — it's more complete and more
+opinionated (with reasoning, not just syntax) than a typical quick-start. Use your judgment on whether
+it's a new page or an extension of an existing one, per the site's actual information architecture;
+don't duplicate the existing tutorial's beginner-oriented content, this is the "how do I actually run
+this in production" follow-up.
+
+### 2. Two annotation-signature bugs fixed in `docs/USER_GUIDE.md` and `docs/features/core-annotations.md`
+
+Both files previously showed `@PartitionKey(order = 0)` and `@ClusteringKey(order = 0, descending =
+true)` — neither compiles against current source. The real signatures:
+
+```kotlin
+annotation class PartitionKey(val index: Int = 0)
+annotation class ClusteringKey(val order: ClusteringOrder = ClusteringOrder.ASC, val index: Int = 0)
+```
+
+i.e. `@PartitionKey(index = 0)`, and `@ClusteringKey(order = ClusteringOrder.DESC, index = 0)` — no
+`descending` parameter exists; ordering is set via the `order: ClusteringOrder` enum.
+
+**If the site's own code examples anywhere show `@PartitionKey(order = ...)` or
+`@ClusteringKey(..., descending = ...)`, they have the same bug — grep the site's source for
+`PartitionKey(order` and `descending` and fix every occurrence.** This is a compile-time bug, not a
+style nit — any reader who copy-pastes it gets a build error.
+
+---
+
 ## Batch complete
 
-This file now covers every PR merged into `main` between 0.4.6 and this point (#18–#25). Once this
-prompt has been executed against the live site, this file's job is done — start a fresh
-`build-prompt-<next-version>.md` for whatever ships next, per the process in
-[`docs/site/README.md`](README.md#adding-a-prompt-for-a-new-kandra-release). Don't keep appending to
-this file after it's been handed off and acted on.
+This file now covers every PR merged into `main` between 0.4.6 and this point (#18–#25), plus the two
+post-batch documentation fixes above. Once this prompt has been executed against the live site, this
+file's job is done — start a fresh `build-prompt-<next-version>.md` for whatever ships next, per the
+process in [`docs/site/README.md`](README.md#adding-a-prompt-for-a-new-kandra-release). Don't keep
+appending to this file after it's been handed off and acted on.
