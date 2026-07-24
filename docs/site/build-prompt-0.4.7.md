@@ -72,3 +72,54 @@ re-fetch the entity's current version, and reissue `update(freshOld, new)`.
 - One `/battle-scars` entry covers ISS-032.
 - Any per-operation retry-behavior reference table reflects the exception.
 - No other page changed for this section.
+
+---
+
+## PR #20 — `EVENTUAL` lookup writes now share retry/`inFlightCount`/shutdown-gate safeguards
+
+### 1. What shipped
+
+`LookupConsistency.EVENTUAL` lookup writes (from `save`/`update`/`saveAll`, fired asynchronously via
+`scope.launch` after the primary batch commits) used to call `session.execute(...)`/`executeSuspend(...)`
+directly, bypassing `executeWithRetry()`/`executeWithRetrySuspend()`. Practical effect: an `EVENTUAL`
+lookup write got no retry-on-transient-error, wasn't counted in `inFlightCount` (so graceful shutdown
+didn't wait for it), and wasn't rejected once `isShuttingDown` was set — a `save()`/`update()` racing
+`ApplicationStopping` could fire a query against an already-closed `CqlSession`.
+
+Now routed through the same `executeWithRetry()`/`executeWithRetrySuspend()` path as every other write:
+`EVENTUAL` writes retry per `RetryConfig`, are tracked in `inFlightCount` so the graceful-shutdown drain
+waits for them, and are rejected with `KandraQueryException` (never reaching the driver) once shutdown
+has started. This is a reliability fix, not an API or behavior contract change — no caller-visible
+signature changed, `EVENTUAL` still means "fire-and-forget from the caller's perspective," it's just now
+provably safe under shutdown and transient failures the way `BATCH` lookups already were.
+
+### 2. Source of truth
+
+- `docs/USER_GUIDE.md` and `docs/features/operations.md` — both already updated with the "EVENTUAL
+  writes share the same safeguards" explanation (search for `inFlightCount` in each). Adapt directly.
+- `docs/features/core-annotations.md` — the `@LookupIndex`/`LookupConsistency.EVENTUAL` section has the
+  matching short-form note.
+- `docs/issues/ISS-033-eventual-lookup-bypasses-safeguards.md` — original bug writeup.
+- `kandra-runtime/src/main/kotlin/io/kandra/runtime/BatchEngine.kt` — `fireEventual`/`fireEventualSuspend`/
+  `fireEventualStatements`.
+
+### 3. Exact edits, page by page
+
+- **Whichever page documents `@LookupIndex`/`LookupConsistency`** (per 0.4.5 prompt's IA): update the
+  description of `EVENTUAL` to state it shares retry, `inFlightCount`, and shutdown-gate behavior with
+  every other write — pull the exact wording from `docs/USER_GUIDE.md`'s `LookupConsistency.EVENTUAL`
+  section, it's already precise.
+- **Whichever page documents graceful shutdown** (per 0.4.5 prompt's IA, likely under `/modules/kandra-ktor`
+  or an operations/production-readiness page): note that the shutdown drain now correctly covers
+  in-flight `EVENTUAL` lookup writes, not just the primary batch.
+- **`/battle-scars`** — optional, lower priority than the ISS-032 entry above: a short entry on
+  ISS-033 if the site is tracking every real production-shaped bug found this way; skip if the page is
+  getting crowded, this one is less generally-applicable than ISS-032's lesson.
+- **Everywhere else — leave unchanged.**
+
+### 4. Definition of done for this section
+
+- The `LookupConsistency`/`@LookupIndex` page states `EVENTUAL` writes retry, count toward
+  `inFlightCount`, and are rejected (not silently attempted) once shutdown begins.
+- The graceful-shutdown page/section reflects that the drain covers `EVENTUAL` writes.
+- No other page changed for this section.
