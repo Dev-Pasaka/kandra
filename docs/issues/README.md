@@ -44,6 +44,7 @@ Docker before relying on them.
 | [ISS-031](ISS-031-runtime-tests-ktor-ci-exclusion.md) | `kandra-runtime` had no unit tests, and `kandra-ktor`'s tests never ran in CI |
 | [ISS-032](ISS-032-versioned-update-spurious-optimistic-lock.md) | `@Version` LWT updates were blindly retried on transient errors, causing spurious `KandraOptimisticLockException` |
 | [ISS-033](ISS-033-eventual-lookup-bypasses-safeguards.md) | `EVENTUAL` lookup writes bypassed retry, `inFlightCount`, and the shutdown gate |
+| [ISS-034](ISS-034-uncached-entity-reflection.md) | Entity reflection (copy fn, properties, constructor) re-resolved uncached on every call |
 
 ## Closed — not a bug
 

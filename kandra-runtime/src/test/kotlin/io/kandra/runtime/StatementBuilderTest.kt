@@ -82,7 +82,7 @@ class StatementBuilderTest {
         val builder = StatementBuilder(ControllableFakeSession())
         val lookup = schema.lookupTables.single()
 
-        val stmt = builder.insertLookup(lookup, WithLookup(UUID.randomUUID(), "a@b.com"))
+        val stmt = builder.insertLookup(schema, lookup, WithLookup(UUID.randomUUID(), "a@b.com"))
 
         assertEquals(false, stmt.recorded().idempotent)
     }

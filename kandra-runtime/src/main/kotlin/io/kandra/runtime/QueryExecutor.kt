@@ -18,7 +18,7 @@ import io.kandra.runtime.dsl.KandraRawQuery
 import io.kandra.runtime.dsl.QueryContext
 import java.util.Base64
 import kotlin.reflect.KClass
-import kotlin.reflect.full.primaryConstructor
+import kotlin.reflect.KFunction
 
 private val logger = KotlinLogging.logger {}
 
@@ -470,9 +470,14 @@ class QueryExecutor(
         return parts.joinToString(" AND ") to values
     }
 
+    @Suppress("UNCHECKED_CAST")
     internal fun <T : Any> decodeEntity(row: Row, entityClass: KClass<T>): T {
-        val ctor = entityClass.primaryConstructor
+        // Resolved once per entity KClass in SchemaRegistry.register() and cached on
+        // TableSchema.reflection — entityClass is always schema.entityClass here, so this avoids
+        // re-resolving primaryConstructor/its KParameter list via reflection on every row decoded.
+        val ctor = schema.reflection.primaryConstructor as? KFunction<T>
             ?: throw KandraQueryException("Entity '${entityClass.simpleName}' has no primary constructor.")
+        val ctorParams = schema.reflection.constructorParameters
 
         val allCols = buildList {
             addAll(schema.partitionKeys)
@@ -481,7 +486,7 @@ class QueryExecutor(
             addAll(schema.lookupTables.map { it.indexColumn })
         }.associateBy { it.propertyName }
 
-        val args = ctor.parameters.associateWith { param ->
+        val args = ctorParams.associateWith { param ->
             val col = allCols[param.name]
             if (col == null) null else codec.decode(row, col)
         }

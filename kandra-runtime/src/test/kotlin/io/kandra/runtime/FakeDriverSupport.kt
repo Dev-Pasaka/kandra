@@ -2,6 +2,7 @@ package io.kandra.runtime
 
 import com.datastax.oss.driver.api.core.ConsistencyLevel
 import com.datastax.oss.driver.api.core.CqlIdentifier
+import com.datastax.oss.driver.api.core.CqlSession
 import com.datastax.oss.driver.api.core.NoNodeAvailableException
 import com.datastax.oss.driver.api.core.context.DriverContext
 import com.datastax.oss.driver.api.core.cql.AsyncResultSet
@@ -28,7 +29,8 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
 
 /**
- * Test-only support for exercising [BatchEngine] / [StatementBuilder] without a real cluster.
+ * Test-only support for exercising [BatchEngine] / [StatementBuilder] / [QueryExecutor] without a
+ * real cluster.
  *
  * `kandra-test`'s `FakeKandraSession` cannot be reused here (it lives in `kandra-test`, which
  * depends on `kandra-runtime` — depending back would be circular), and its own `PreparedStatement
@@ -40,7 +42,8 @@ import java.util.concurrent.CompletionStage
  * in for it. The proxy intercepts every call itself rather than delegating to the interface's real
  * default methods (which would require live codec/protocol-version plumbing this test double
  * doesn't have) — it just records what was set at each bound index, which is exactly what
- * [StatementBuilder]'s idempotency/UNSET-vs-NULL tests need to assert on.
+ * [StatementBuilder]'s idempotency/UNSET-vs-NULL tests need to assert on. [Row] is likewise a plain
+ * interface backed by a map, for tests that need to exercise a decode path ([fakeRow]).
  */
 
 /** Records everything a [BoundStatement] proxy was asked to do, for later assertions. */
@@ -191,7 +194,7 @@ internal class EmptyAsyncResultSet : AsyncResultSet {
 internal class ControllableFakeSession(
     private val failuresBeforeSuccess: Int = 0,
     private val exceptionFactory: () -> Throwable = { NoNodeAvailableException() }
-) : com.datastax.oss.driver.api.core.CqlSession {
+) : CqlSession {
 
     private val executed = Collections.synchronizedList(mutableListOf<Statement<*>>())
 
@@ -245,3 +248,63 @@ internal class ControllableFakeSession(
 /** Pulls out the top-level [BatchStatement]s among everything [ControllableFakeSession] executed. */
 internal fun ControllableFakeSession.executedBatches(): List<BatchStatement> =
     executedStatements().filterIsInstance<BatchStatement>()
+
+/** Minimal [CqlSession] double: `prepare` produces an inspectable statement, `execute` records calls. */
+internal class FakeCqlSession : CqlSession {
+    private val executed = mutableListOf<Statement<*>>()
+    fun executedStatements(): List<Statement<*>> = executed.toList()
+
+    override fun execute(statement: Statement<*>): ResultSet {
+        executed.add(statement)
+        return EmptyResultSet()
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <RequestT : com.datastax.oss.driver.api.core.session.Request, ResultT : Any> execute(
+        request: RequestT,
+        resultType: GenericType<ResultT>
+    ): ResultT? {
+        if (request is Statement<*>) execute(request)
+        return null
+    }
+
+    override fun executeAsync(statement: Statement<*>): CompletionStage<AsyncResultSet> =
+        CompletableFuture.completedFuture(null)
+
+    override fun prepare(query: String): PreparedStatement = FakePreparedStatement(query)
+    override fun prepare(statement: SimpleStatement): PreparedStatement = FakePreparedStatement(statement.query)
+
+    override fun getName(): String = "FakeCqlSession"
+    override fun getMetadata(): Metadata = throw UnsupportedOperationException()
+    override fun isSchemaMetadataEnabled(): Boolean = false
+    override fun setSchemaMetadataEnabled(newValue: Boolean?): CompletionStage<Metadata> = CompletableFuture.failedFuture(UnsupportedOperationException())
+    override fun refreshSchemaAsync(): CompletionStage<Metadata> = CompletableFuture.failedFuture(UnsupportedOperationException())
+    override fun checkSchemaAgreementAsync(): CompletionStage<Boolean> = CompletableFuture.completedFuture(true)
+    override fun getContext(): DriverContext = throw UnsupportedOperationException()
+    override fun getKeyspace(): Optional<CqlIdentifier> = Optional.empty()
+    override fun getMetrics(): Optional<Metrics> = Optional.empty()
+    override fun closeFuture(): CompletionStage<Void> = CompletableFuture.completedFuture(null)
+    override fun closeAsync(): CompletionStage<Void> = CompletableFuture.completedFuture(null)
+    override fun forceCloseAsync(): CompletionStage<Void> = CompletableFuture.completedFuture(null)
+    override fun isClosed(): Boolean = false
+}
+
+private class RowHandler(private val columns: Map<String, Any?>) : InvocationHandler {
+    override fun invoke(proxy: Any, method: Method, args: Array<Any?>?): Any? {
+        val a = args ?: emptyArray()
+        return when (method.name) {
+            "isNull" -> !columns.containsKey(a[0] as String) || columns[a[0] as String] == null
+            "getUuid", "getString", "getInt", "getLong", "getBoolean", "getDouble", "getFloat",
+            "getInstant", "getLocalDate", "getBigDecimal", "getByteBuffer", "getObject" ->
+                columns[a[0] as String]
+            "toString" -> "FakeRow($columns)"
+            "hashCode" -> System.identityHashCode(proxy)
+            "equals" -> proxy === a.getOrNull(0)
+            else -> null
+        }
+    }
+}
+
+/** [Row] backed by a plain `propertyName-agnostic` CQL-column-name -> value map. */
+internal fun fakeRow(columns: Map<String, Any?>): Row =
+    Proxy.newProxyInstance(Row::class.java.classLoader, arrayOf(Row::class.java), RowHandler(columns)) as Row
