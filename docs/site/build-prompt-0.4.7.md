@@ -234,3 +234,52 @@ the marker column or pass `allowFullScan = true`.
 - One `/battle-scars` entry covers ISS-036.
 - Any migration/breaking-changes page lists this fix with the upgrade path.
 - No other page changed for this section.
+
+---
+
+## PR #24 — Consistency Strict Mode: warn on `LOCAL_ONE`/`ONE` in multi-DC deployments (new opt-in feature)
+
+### 1. What shipped
+
+New opt-in `consistency { strictMode = true }` on `ConsistencyConfig` (default `false`, backward
+compatible, WARN-only — never throws). When `strictMode` is on **and** the deployment is multi-DC
+(auto-derived by the `Kandra` Ktor plugin from `loadBalancing.allowedRemoteDcs.isNotEmpty()` — not a
+separate flag the user sets), every query whose resolved consistency level is `LOCAL_ONE` or `ONE`
+logs a WARN. Rationale: `LOCAL_ONE`/`ONE` are easy defaults that silently read/write against a single
+node's local view — fine for single-DC, but in a multi-DC deployment that single node might not have
+seen the latest write from another DC yet, so a single-replica read can return stale data without any
+error. This is a common footgun for teams that provision multi-DC infrastructure and never revisit
+their consistency-level defaults. The warning is unconditional (no "warn once" dedup) and never
+changes query behavior — purely observability.
+
+### 2. Source of truth
+
+- `docs/features/multidc.md` — "Strict Mode" section (search "GH #5"), already accurate and complete:
+  config example, exactly when it fires, and the reasoning. Adapt directly.
+- `docs/USER_GUIDE.md` — has a shorter version of the same, cross-referenced.
+- `.claude/skills/kandra-multidc/SKILL.md` and `.claude/skills/kandra-runtime/SKILL.md` — both updated
+  with the config surface and warning-trigger details.
+- `docs/issues/ISS-037-consistency-strict-mode.md` — original writeup.
+- `kandra-runtime/src/main/kotlin/io/kandra/runtime/ConsistencyConfig.kt` — `strictMode` and the
+  `@InternalKandraApi multiDcTopology` field (plugin-derived, not user-set).
+- `kandra-runtime/src/main/kotlin/io/kandra/runtime/StatementBuilder.kt` — `warnIfStrictModeViolation`
+  for the exact trigger condition.
+
+### 3. Exact edits, page by page
+
+- **Whichever page documents multi-DC configuration** (per 0.4.5 prompt's IA, likely
+  `/modules/kandra-multidc` or a dedicated multi-DC guide page): add a "Strict Mode" subsection —
+  config snippet, what triggers the warning, and the reasoning (stale-read risk from `LOCAL_ONE`/`ONE`
+  in a multi-DC topology). Note it's observability-only, never throws, and `multiDcTopology` is
+  auto-derived, not a separate setting.
+- **Whichever page documents consistency-level configuration generally** (per 0.4.5 prompt's IA,
+  likely under `/modules/kandra-runtime` or a config reference page): add `strictMode` to the
+  `ConsistencyConfig` field list.
+- **Everywhere else — leave unchanged.** This is a small, self-contained opt-in feature; don't expand
+  scope into a general "choosing consistency levels" tutorial unless one already exists to extend.
+
+### 4. Definition of done for this section
+
+- The multi-DC page documents `strictMode`, its config surface, and exactly when it warns.
+- The consistency-config reference (if the site has one) lists `strictMode` as a field.
+- No other page changed for this section.
