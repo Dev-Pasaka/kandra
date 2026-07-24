@@ -36,6 +36,28 @@ Enables optimistic locking via Lightweight Transactions (LWT).
 @Version val version: Long = 0L
 ```
 
+**Not automatically retried on transient errors.** Unlike every other write path, `update()`/
+`updateSuspend()` on a `@Version` entity execute the `IF version = ?` statement exactly once — they
+never participate in `RetryConfig`'s retry-on-timeout behavior (the default `retryOn` includes
+`WriteTimeoutException`/`ReadTimeoutException`/`NoNodeAvailableException`). This is deliberate: if the
+driver reports a transient error, the write may have already been applied server-side (the version may
+already have advanced) even though the client never saw the success response. Blindly retrying the same
+conditional statement would then observe `[applied] = false` and raise a spurious
+`KandraOptimisticLockException` for a write that actually succeeded — a false "someone else modified
+this" for what was really "you already modified this, you just didn't hear back." Only the caller can
+tell those two cases apart. If you want retry-on-timeout semantics for a versioned update, catch the
+transient exception yourself, re-fetch the entity's current version, and reissue `update(old, new)` with
+the freshly-read `old` — do not retry the same `(old, new)` pair blindly.
+
+```kotlin
+try {
+    repo.update(old, new)
+} catch (e: WriteTimeoutException) {
+    val current = repo.findById(old.id)!!   // re-fetch: is my write already applied, or must I redo it?
+    repo.update(current, new.copy(version = current.version))
+}
+```
+
 ### `@SoftDelete`
 Replaces hard DELETE with `UPDATE … USING TTL`. `@LookupIndex` rows are left alone — a soft-deleted
 row still "exists" (queryable until its TTL expires), so it stays resolvable via its lookup index the
@@ -153,3 +175,7 @@ row. On high-churn tables combining both annotations, this means the lookup tabl
 faster than the primary table's over time; this is expected, not a leak. See
 [`@SoftDelete`](#softdelete) above and
 [docs/issues/ISS-030-soft-delete-removes-lookup-rows.md](../issues/ISS-030-soft-delete-removes-lookup-rows.md).
+
+`EVENTUAL` only defers the lookup write until after the primary batch commits — it still retries on
+transient errors, counts toward graceful shutdown's `inFlightCount` drain, and is rejected once
+shutdown begins, the same as `BATCH`. See [Health check & Graceful shutdown](operations.md).

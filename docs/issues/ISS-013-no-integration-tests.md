@@ -1,7 +1,10 @@
 # ISS-013: No integration tests against a real ScyllaDB/Cassandra cluster
 
-**Status:** Fixed — tests written and compile-verified; not yet run end-to-end (this environment
-has no Docker daemon). Run `./gradlew test` in an environment with Docker (e.g. CI) to execute them.
+**Status:** Fixed — confirmed passing end-to-end against a live Testcontainers-backed cluster (see
+[ISS-031](ISS-031-runtime-tests-ktor-ci-exclusion.md)). `kandra-test`'s `KandraIntegrationTest`
+(19 tests) and `kandra-ktor`'s `KandraPluginTest` (3 tests) both run green via
+`JAVA_HOME=... ./gradlew test --no-daemon`, and `KandraPluginTest` is now included in CI (it was
+previously excluded with `-x :kandra-ktor:test` in every job that ran tests).
 
 ## Problem
 
@@ -29,11 +32,14 @@ fakes can't catch this).
 
 ## Verification note
 
-Confirmed the Docker-dependent tests fail fast (~19s) with a clear
-`Could not find a valid Docker environment` error rather than hanging, in this Docker-less
-environment — meaning they are structurally wired correctly and will run once Docker is available.
-They have not yet been observed passing against a live container; do that before relying on this
-suite in CI.
+Run against a live Docker daemon (`JAVA_HOME=... ./gradlew test --no-daemon`, no exclusions):
+`KandraIntegrationTest` (19 tests) and `KandraPluginTest` (3 tests) all pass. Getting
+`KandraPluginTest` green required two small fixes to the test itself, tracked under
+[ISS-031](ISS-031-runtime-tests-ktor-ci-exclusion.md): the default `KandraAuth.fromEnv()` auth
+provider throws when `SCYLLA_USERNAME`/`SCYLLA_PASSWORD` aren't set (never true in CI or local dev),
+and the test's generated keyspace name exceeded Cassandra's 48-character limit. Both were artifacts
+of the tests having never actually been executed before now, exactly as this issue's original
+"compile-verified, not yet observed passing" status warned.
 
 **Files:** `kandra-test/src/test/kotlin/io/kandra/test/KandraIntegrationTest.kt` (new),
 `kandra-ktor/src/test/kotlin/io/kandra/ktor/KandraPluginTest.kt`, both modules' `build.gradle.kts`.

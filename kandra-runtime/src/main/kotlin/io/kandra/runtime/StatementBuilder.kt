@@ -17,7 +17,6 @@ import io.kandra.runtime.codec.KandraUnset
 import java.util.Collections
 import kotlin.reflect.KClass
 import kotlin.reflect.full.findAnnotation
-import kotlin.reflect.full.memberProperties
 
 private val logger = KotlinLogging.logger {}
 
@@ -121,7 +120,7 @@ class StatementBuilder(
         val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
         val prepared = prepare(cql)
 
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         var stmt = prepared.bind()
         allCols.forEachIndexed { idx, col ->
             val prop = props[col.propertyName]
@@ -178,7 +177,7 @@ class StatementBuilder(
         val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
         val prepared = prepare(cql)
 
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         var stmt = prepared.bind()
         allCols.forEachIndexed { idx, col ->
             val prop = props[col.propertyName]
@@ -197,14 +196,19 @@ class StatementBuilder(
         return stmt
     }
 
-    fun insertLookup(lookup: LookupTableSchema, entity: Any): BoundStatement {
+    /**
+     * [schema] is only needed to source the entity's cached [io.kandra.core.schema.EntityReflection]
+     * property map (resolved once at [io.kandra.core.SchemaRegistry.register] time) — [entity] is
+     * always an instance of [schema]'s `entityClass`.
+     */
+    fun insertLookup(schema: TableSchema, lookup: LookupTableSchema, entity: Any): BoundStatement {
         val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns + lookup.clusteringKeyColumns
         val colNames = cols.joinToString(", ") { it.cqlName }
         val placeholders = cols.joinToString(", ") { "?" }
         val cql = "INSERT INTO ${lookup.tableName} ($colNames) VALUES ($placeholders)"
         val prepared = prepare(cql)
 
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         var stmt = prepared.bind()
         cols.forEachIndexed { idx, col ->
             val prop = props[col.propertyName]

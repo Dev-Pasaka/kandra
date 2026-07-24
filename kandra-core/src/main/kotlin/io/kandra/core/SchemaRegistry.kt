@@ -20,6 +20,7 @@ import io.kandra.core.exception.KandraSchemaException
 import io.kandra.core.schema.CacheResultConfig
 import io.kandra.core.schema.ClusteringKeySchema
 import io.kandra.core.schema.ColumnSchema
+import io.kandra.core.schema.EntityReflection
 import io.kandra.core.schema.LookupIndexSchema
 import io.kandra.core.schema.LookupTableSchema
 import io.kandra.core.schema.TableSchema
@@ -28,7 +29,9 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KClass
 import kotlin.reflect.full.findAnnotation
+import kotlin.reflect.full.memberFunctions
 import kotlin.reflect.full.memberProperties
+import kotlin.reflect.full.primaryConstructor
 
 /**
  * Thread-safe registry mapping entity classes to their [TableSchema].
@@ -245,7 +248,25 @@ object SchemaRegistry {
             softDeleteMarkerColumn = softDeleteMarkerColumn,
             gcGraceSeconds = tableAnnotation.gcGraceSeconds.takeIf { it >= 0 },
             cacheConfig = cacheResultAnn?.let { CacheResultConfig(it.ttlSeconds, it.maxSize) },
-            generatedUuidColumns = generatedUuidColumns
+            generatedUuidColumns = generatedUuidColumns,
+            reflection = buildEntityReflection(klass)
+        )
+    }
+
+    /**
+     * Resolves the reflection surface (`copy`, member properties, primary constructor) for [klass]
+     * exactly once — called only from [buildSchema], itself only reached once per class via
+     * [register]'s `getOrPut`. See ISS-034 / GitHub #13.
+     */
+    private fun <T : Any> buildEntityReflection(klass: KClass<T>): EntityReflection {
+        val copyFunction = klass.memberFunctions.find { it.name == "copy" }
+        val primaryConstructor = klass.primaryConstructor
+        return EntityReflection(
+            copyFunction = copyFunction,
+            copyParameters = copyFunction?.parameters ?: emptyList(),
+            propertiesByName = klass.memberProperties.associateBy { it.name },
+            primaryConstructor = primaryConstructor,
+            constructorParameters = primaryConstructor?.parameters ?: emptyList()
         )
     }
 

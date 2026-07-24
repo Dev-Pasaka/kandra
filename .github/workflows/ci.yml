@@ -29,7 +29,7 @@ jobs:
           restore-keys: ${{ runner.os }}-gradle-
 
       - name: Build and test
-        run: ./gradlew test --no-daemon -x :kandra-ktor:test
+        run: ./gradlew test --no-daemon
 
       - name: Upload test reports
         if: always()
@@ -52,7 +52,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Publish to Maven Central
-        run: ./gradlew publishToMavenCentral --no-daemon -x :kandra-ktor:test
+        run: ./gradlew publishToMavenCentral --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
