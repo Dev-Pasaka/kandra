@@ -1,6 +1,8 @@
 package io.kandra.ktor
 
 import com.datastax.oss.driver.api.core.CqlSession
+import io.kandra.core.ExperimentalKandraApi
+import io.kandra.core.KandraAuth
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
@@ -39,7 +41,10 @@ class KandraPluginTest {
     }
 
     private fun freshKeyspaceName(): String {
-        val ks = "kandra_ktor_test_${UUID.randomUUID().toString().replace("-", "")}"
+        // "kandra_ktor_" (12 chars) + a 32-char dash-stripped UUID = 44 chars, safely under
+        // Cassandra's 48-character keyspace name limit. The previous "kandra_ktor_test_" prefix
+        // (17 chars) pushed this to 49 chars and made every install() throw InvalidQueryException.
+        val ks = "kandra_ktor_${UUID.randomUUID().toString().replace("-", "")}"
         testKeyspace = ks
         return ks
     }
@@ -52,6 +57,7 @@ class KandraPluginTest {
         assert(schema.partitionKeys.first().cqlName == "id")
     }
 
+    @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `plugin installs without error`() {
         val cp = KandraTestcontainers.container.contactPoint
@@ -64,11 +70,17 @@ class KandraPluginTest {
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(TestItem::class)
+                    // The Cassandra Testcontainers image runs with AllowAllAuthenticator (no auth
+                    // required) — use a blank-credentials provider instead of the default
+                    // KandraAuth.fromEnv(), which throws if SCYLLA_USERNAME/SCYLLA_PASSWORD aren't
+                    // set in the environment (they never are in CI or local dev for this test).
+                    auth { provider = KandraAuth.static("", "") }
                 }
             }
         }
     }
 
+    @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `kandraSession is accessible after install`() {
         val cp = KandraTestcontainers.container.contactPoint
@@ -81,6 +93,7 @@ class KandraPluginTest {
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
                     register(TestItem::class)
+                    auth { provider = KandraAuth.static("", "") }
                 }
                 val session = kandraSession
                 assertNotNull(session)
