@@ -123,3 +123,47 @@ provably safe under shutdown and transient failures the way `BATCH` lookups alre
   `inFlightCount`, and are rejected (not silently attempted) once shutdown begins.
 - The graceful-shutdown page/section reflects that the drain covers `EVENTUAL` writes.
 - No other page changed for this section.
+
+---
+
+## PR #22 — `@LookupIndex` + `@SoftDelete` storage-growth is now documented (docs-only, no code change)
+
+### 1. What shipped
+
+Since the ISS-030 fix (0.4.4), soft-deleting an entity deliberately leaves its `@LookupIndex` row(s)
+alone until the entity's own soft-delete TTL expires — correct behavior, since a soft-deleted row
+still "exists" (queryable, non-key columns not yet expired) and must remain resolvable via its
+`@LookupIndex`, same as `findById` still finding it. The undocumented consequence: for high-churn
+tables combining both annotations, the lookup table ends up holding significantly more live rows than
+the primary table at any given time, since the primary table's non-key columns TTL/tombstone quickly
+on soft-delete but the lookup row survives until the *entity's* full soft-delete TTL expires. This is
+a real, non-obvious storage-cost implication — not a bug, not a behavior change, purely a
+documentation gap. `docs/features/core-annotations.md`'s `@SoftDelete` section previously said "Lookup
+rows are hard-deleted," which directly contradicted the actual (correct) ISS-030 behavior.
+
+### 2. Source of truth
+
+- `docs/features/core-annotations.md` — corrected `@SoftDelete` section plus new "Storage cost with
+  `@LookupIndex`" notes in both the `@SoftDelete` and `@LookupTable` sections, cross-linked. Adapt
+  directly.
+- `docs/issues/ISS-035-lookupindex-softdelete-storage-growth.md` — original writeup.
+- `docs/issues/ISS-030-soft-delete-removes-lookup-rows.md` — the underlying behavior this documents.
+
+### 3. Exact edits, page by page
+
+- **Whichever page documents `@SoftDelete`** (per 0.4.5 prompt's IA): if the site's copy says or
+  implies lookup rows are removed on soft-delete, correct it — they are deliberately kept until the
+  entity's own TTL expires.
+- **Whichever page documents `@LookupIndex`/`@LookupTable`**: add a short storage-cost callout —
+  combining `@LookupIndex` + `@SoftDelete` on the same entity means the lookup table will hold more
+  live rows than the primary table on high-churn data, and this is expected.
+- **`/battle-scars`** — optional: this is a documentation gap, not a discovered bug, so it's a weaker
+  fit than ISS-032/ISS-033's entries. Skip unless the site has a lower-severity "gotchas/considerations"
+  category distinct from battle-scars.
+- **Everywhere else — leave unchanged.**
+
+### 4. Definition of done for this section
+
+- The `@SoftDelete` page no longer claims lookup rows are hard-deleted.
+- The `@LookupIndex`/`@LookupTable` page notes the storage-growth interaction with `@SoftDelete`.
+- No other page changed for this section.
