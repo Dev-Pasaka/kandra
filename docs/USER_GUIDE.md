@@ -389,9 +389,20 @@ data class Order(
 After calling `repo.delete(order)`:
 - Non-key columns (`customerId`, `total`, `status`) are set with TTL = 604800s.
 - `findById(order.id)` still returns the row until the TTL fires and ScyllaDB removes the data.
-- Lookup table rows are hard-deleted immediately (they hold no useful data after soft-delete).
+- `@LookupIndex` rows are deliberately **kept alive**, not hard-deleted — a soft-deleted row still
+  "exists" until its own TTL expires, so it must remain resolvable via its lookup index too, same as
+  `findById`. On high-churn tables combining `@LookupIndex` + `@SoftDelete`, this means the lookup
+  table holds more live rows than the primary table at any given time — expected, not a leak (see
+  [ISS-030](issues/ISS-030-soft-delete-removes-lookup-rows.md) and
+  [ISS-035](issues/ISS-035-lookupindex-softdelete-storage-growth.md)).
 
-> **Limitation:** There is currently no `findActive()` method because ScyllaDB does not expose a predicate for "TTL has not expired". If you need to distinguish live vs soft-deleted rows, add a `deletedAt: Instant?` column and filter on it yourself.
+To distinguish live vs soft-deleted rows, add `@SoftDelete(ttlSeconds = ..., markerProperty = "isDeleted")`
+with a `Boolean` field and call `repo.findActive()` — see
+[`docs/features/repositories.md`](features/repositories.md#findactive-soft-delete-entities-only) and
+[ISS-007](issues/ISS-007-find-active-soft-delete.md). `findActive()` queries the marker column directly
+if it has `@SecondaryIndex`; otherwise it throws unless you pass `allowFullScan = true`, since answering
+without an index requires `ALLOW FILTERING` — an explicit opt-in, not a silent default (see
+[ISS-036](issues/ISS-036-findactive-allow-filtering-scope.md)).
 
 ---
 

@@ -239,6 +239,7 @@ fun find(block: QueryContext.() -> Unit): T?
 fun findAll(limit: Int? = null, block: QueryContext.() -> Unit): List<T>
 fun findPage(pageSize: Int, pageToken: String? = null, block: QueryContext.() -> Unit = {}): KandraPage<T>
 fun exists(block: QueryContext.() -> Unit): Boolean
+fun findActive(allowFullScan: Boolean = false): List<T>
 fun raw(cql: String, vararg params: Any?): List<Row>
 fun rawQuery(query: KandraRawQuery): List<Row>
 ```
@@ -303,6 +304,18 @@ inside `BatchEngine.executeWithRetry`.
   `IN` branch or the lookup-table branch, `exists()` runs the **full** query (`SELECT *`, no `LIMIT`)
   and just checks `rows.isNotEmpty()` — meaningfully more expensive than the direct-CQL path for the
   same logical check.
+
+- **`findActive(allowFullScan = false)`** — only valid on entities with `@SoftDelete(markerProperty =
+  "...")`; throws `KandraSchemaException` at call time if the entity has no marker column configured.
+  If the marker column has `@SecondaryIndex`, queries it directly (`WHERE <marker> = false`), no
+  `ALLOW FILTERING`, `allowFullScan` is irrelevant. Without a `@SecondaryIndex` on the marker column,
+  `allowFullScan` defaults to `false` and the call throws `KandraQueryException` rather than silently
+  scanning — this is the one place in the repository API that can still emit `ALLOW FILTERING`, and as
+  of GH #12 / ISS-036 it requires an explicit opt-in (`allowFullScan = true`) instead of a silent
+  default; **this is a breaking change** from pre-0.5.0 behavior. With `allowFullScan = true` and no
+  index, runs `WHERE <marker> = false ALLOW FILTERING` and logs a WARN (scatter-gather). Soft-deleted
+  rows remain findable via `findById`/`@LookupIndex` until their own TTL expires — `findActive()` is
+  the only read path that filters them out.
 
 - **`raw(cql, vararg params)`** — prepares and binds `cql` directly (`session.prepare(cql).bind(*params)`),
   returns `rs.all()` (materializes every row). Logs a WARN if `params` is empty **and** `cql` contains
