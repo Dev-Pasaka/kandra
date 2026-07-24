@@ -15,9 +15,9 @@ data class User(...)
 Defines primary key components. Multiple `@PartitionKey` fields form a composite partition key.
 
 ```kotlin
-@PartitionKey(order = 0)
+@PartitionKey(index = 0)
 val userId: UUID,
-@ClusteringKey(order = 0, descending = true)
+@ClusteringKey(order = ClusteringOrder.DESC, index = 0)
 val createdAt: Instant
 ```
 

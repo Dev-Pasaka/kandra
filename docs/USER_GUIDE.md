@@ -154,14 +154,14 @@ CREATE TABLE IF NOT EXISTS users (
 
 ### `@PartitionKey` / `@ClusteringKey`
 
-Define the primary key. Use `order` to handle composite keys.
+Define the primary key. Use `index` to order composite keys.
 
 ```kotlin
 @ScyllaTable("events")
 data class Event(
-    @PartitionKey(order = 0) val userId: UUID,
-    @PartitionKey(order = 1) val type: String,         // composite partition key
-    @ClusteringKey(order = 0, descending = true) val createdAt: Instant,
+    @PartitionKey(index = 0) val userId: UUID,
+    @PartitionKey(index = 1) val type: String,         // composite partition key
+    @ClusteringKey(order = ClusteringOrder.DESC, index = 0) val createdAt: Instant,
     val payload: String
 )
 ```
