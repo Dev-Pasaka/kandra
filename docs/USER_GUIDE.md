@@ -294,6 +294,11 @@ data class User(
 | `consistency` | `LookupConsistency` | `BATCH` | `BATCH` = atomic with primary; `EVENTUAL` = async |
 
 > **When to use `EVENTUAL`:** For high-write-throughput tables where strict atomicity between primary and lookup is not required. Failed eventual writes are forwarded to `KandraEventListener.onEventualWriteFailed`.
+>
+> `EVENTUAL` only relaxes *atomicity* with the primary write, not durability guarantees: the write still
+> retries on transient errors per `retry { }`'s `retryOn` set, counts toward `inFlightCount`, and is
+> rejected once graceful shutdown begins — the same protections every other write gets. See
+> [Graceful shutdown](#graceful-shutdown).
 
 ---
 
@@ -342,6 +347,27 @@ try {
 ```
 
 > **Note:** LWT cannot be included in a LOGGED batch. Kandra automatically issues the LWT as a standalone statement, then writes lookup table changes in a separate batch.
+
+> **Note — no automatic retry on transient errors.** Every other write path in Kandra retries on
+> `WriteTimeoutException`/`ReadTimeoutException`/`NoNodeAvailableException` per `RetryConfig` (default:
+> up to 3 attempts). `update()`/`updateSuspend()` on a `@Version` entity deliberately **do not** —
+> the `IF version = ?` statement is executed exactly once. Reasoning: on a transient error, the write
+> may have already been applied server-side (advancing the version) even though the client never saw
+> the success response; retrying the identical conditional statement would then see `[applied] = false`
+> and raise a **spurious** `KandraOptimisticLockException` — reporting "someone else changed this row"
+> when actually "your own prior attempt already succeeded." Only the caller can tell those two
+> situations apart. If you want retry-on-timeout semantics for a versioned update, catch the transient
+> exception yourself, re-fetch the entity (to learn its true current version), and reissue `update()`
+> with that freshly-read `old` — do not retry the same `(old, new)` pair blindly:
+>
+> ```kotlin
+> try {
+>     repo.update(old, new)
+> } catch (e: WriteTimeoutException) {
+>     val current = repo.findById(old.id)!!
+>     repo.update(current, new.copy(version = current.version))
+> }
+> ```
 
 ---
 
@@ -593,6 +619,13 @@ install(Kandra) {
     }
 }
 ```
+
+`LookupConsistency.EVENTUAL` lookup writes fired from `save()`/`update()` are drained by this same
+mechanism — they're routed through the same retry/`inFlightCount`/shutdown-gate path as every
+synchronous write, so they no longer risk running against an already-closed session during shutdown.
+A new `EVENTUAL` write attempted after step 1 above throws the same `KandraQueryException` a
+synchronous query would, surfaced via `KandraEventListener.onEventualWriteFailed` (since the write
+happens on a background coroutine, not the caller's call stack).
 
 ---
 
