@@ -1,5 +1,6 @@
 package io.kandra.codegen
 
+import com.google.devtools.ksp.getClassDeclarationByName
 import com.google.devtools.ksp.processing.CodeGenerator
 import com.google.devtools.ksp.processing.Dependencies
 import com.google.devtools.ksp.processing.KSPLogger
@@ -14,7 +15,9 @@ import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.validate
 
 /**
- * KSP processor that generates a type-safe `*Table` object for every `@ScyllaTable` class.
+ * KSP processor that generates a type-safe `*Table` object for every `@ScyllaTable` class, and —
+ * conditionally, only when detected on the *consuming* module's compilation classpath — typed
+ * Koin/Kodein DI accessor functions for that same entity.
  *
  * For an entity:
  * ```kotlin
@@ -30,6 +33,36 @@ import com.google.devtools.ksp.validate
  *     ...
  * }
  * ```
+ *
+ * If `org.koin.core.component.KoinComponent` resolves on this compilation's classpath, it also
+ * emits `UserKoinDi.kt`:
+ * ```kotlin
+ * fun KoinComponent.userRepo(): KandraRepository<User> =
+ *     get<KandraRepository<*>>(named("UserRepo")) as KandraRepository<User>
+ * fun KoinComponent.userSuspendRepo(): KandraSuspendRepository<User> =
+ *     get<KandraSuspendRepository<*>>(named("UserSuspendRepo")) as KandraSuspendRepository<User>
+ * ```
+ *
+ * If `org.kodein.di.DIAware` resolves on this compilation's classpath, it also emits
+ * `UserKodeinDi.kt`:
+ * ```kotlin
+ * fun DIAware.userRepo(): KandraRepository<User> =
+ *     direct.instance<KandraRepository<*>>(tag = "User") as KandraRepository<User>
+ * fun DIAware.userSuspendRepo(): KandraSuspendRepository<User> =
+ *     direct.instance<KandraSuspendRepository<*>>(tag = "UserSuspend") as KandraSuspendRepository<User>
+ * ```
+ *
+ * Detection is purely presence-based (a classpath probe via [Resolver.getClassDeclarationByName]);
+ * this module never takes a compile dependency on `koin-core` or `kodein-di` itself — the DI
+ * marker types are referenced only as raw fully-qualified strings spliced into generated source,
+ * exactly like `kandra-runtime`'s types already are for the `*Table` object. Neither Koin nor
+ * Kodein present is the common case (e.g. this repo's own module graph) and is not an error or a
+ * warning — it's simply skipped for that entity.
+ *
+ * The generated qualifier/tag strings are load-bearing: they must match `kandra-koin`'s
+ * `Application.kandraKoin()` (`"${'$'}{Entity}Repo"` / `"${'$'}{Entity}SuspendRepo"`) and
+ * `kandra-kodein`'s `Application.kandraKodein()` (`"${'$'}{Entity}"` / `"${'$'}{Entity}Suspend"`)
+ * exactly, since these accessors exist only to retrieve the exact bindings those files create.
  */
 class KandraProcessor(
     private val codeGenerator: CodeGenerator,
@@ -40,14 +73,20 @@ class KandraProcessor(
         val symbols = resolver.getSymbolsWithAnnotation("io.kandra.core.annotations.ScyllaTable")
         val unprocessed = symbols.filter { !it.validate() }.toList()
 
+        // Classpath presence probes — resolved once per round, not once per entity. A null result
+        // just means that DI framework isn't on this compilation's classpath; that's the normal
+        // case, not an error.
+        val koinPresent = resolver.getClassDeclarationByName(KOIN_MARKER_FQN) != null
+        val kodeinPresent = resolver.getClassDeclarationByName(KODEIN_MARKER_FQN) != null
+
         symbols
             .filter { it is KSClassDeclaration && it.validate() }
-            .forEach { processClass(it as KSClassDeclaration) }
+            .forEach { processClass(it as KSClassDeclaration, koinPresent, kodeinPresent) }
 
         return unprocessed
     }
 
-    private fun processClass(classDecl: KSClassDeclaration) {
+    private fun processClass(classDecl: KSClassDeclaration, koinPresent: Boolean, kodeinPresent: Boolean) {
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
         val objectName = "${className}Table"
@@ -86,6 +125,100 @@ object $objectName : io.kandra.runtime.dsl.KandraTable<$className> {
         file.close()
 
         logger.info("Kandra codegen: generated $objectName for $className")
+
+        if (koinPresent) {
+            emitKoinAccessors(classDecl, packageName, className)
+        }
+        if (kodeinPresent) {
+            emitKodeinAccessors(classDecl, packageName, className)
+        }
+    }
+
+    /**
+     * Emits `${className}KoinDi.kt`: typed [org.koin.core.component.KoinComponent] extension
+     * functions that wrap the exact `named(...)` qualifier lookups `kandra-koin`'s
+     * `Application.kandraKoin()` binds under, so callers get a compile-time-checked accessor
+     * instead of hand-typing the qualifier string at every injection site.
+     *
+     * Referenced Koin types (`KoinComponent`, the `get()`/`named()` extensions) are spliced in as
+     * raw fully-qualified strings — this module has no compile dependency on `koin-core`, only the
+     * *consuming* module (where this file lands and is compiled) does.
+     */
+    private fun emitKoinAccessors(classDecl: KSClassDeclaration, packageName: String, className: String) {
+        val entityVar = className.decapitalize()
+        val fileName = "${className}KoinDi"
+
+        val fileContent = """
+// GENERATED BY KANDRA — DO NOT EDIT
+package $packageName
+
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.get
+import org.koin.core.qualifier.named
+
+@Suppress("UNCHECKED_CAST")
+fun KoinComponent.${entityVar}Repo(): io.kandra.runtime.repository.KandraRepository<$className> =
+    get<io.kandra.runtime.repository.KandraRepository<*>>(named("${className}Repo")) as io.kandra.runtime.repository.KandraRepository<$className>
+
+@Suppress("UNCHECKED_CAST")
+fun KoinComponent.${entityVar}SuspendRepo(): io.kandra.runtime.repository.KandraSuspendRepository<$className> =
+    get<io.kandra.runtime.repository.KandraSuspendRepository<*>>(named("${className}SuspendRepo")) as io.kandra.runtime.repository.KandraSuspendRepository<$className>
+""".trimIndent()
+
+        val file = codeGenerator.createNewFile(
+            dependencies = Dependencies(aggregating = false, classDecl.containingFile!!),
+            packageName = packageName,
+            fileName = fileName
+        )
+        file.write(fileContent.toByteArray())
+        file.close()
+
+        logger.info("Kandra codegen: generated $fileName (Koin accessors) for $className")
+    }
+
+    /**
+     * Emits `${className}KodeinDi.kt`: typed [org.kodein.di.DIAware] extension functions that wrap
+     * the exact `tag = "..."` lookups `kandra-kodein`'s `Application.kandraKodein()` binds under.
+     *
+     * Uses `DIAware.direct.instance<T>(tag)` rather than the more commonly seen `by instance(...)`
+     * property-delegate form: `DIAware.instance<T>()` returns a `LazyDelegate<T>` meant for `by`
+     * property delegation, not a directly usable `T` — an expression-bodied function needs a value,
+     * so this goes through `direct` (a [org.kodein.di.DirectDI]) whose `instance<T>()` returns `T`
+     * immediately.
+     *
+     * Referenced Kodein types are spliced in as raw fully-qualified strings — this module has no
+     * compile dependency on `kodein-di`, only the *consuming* module does.
+     */
+    private fun emitKodeinAccessors(classDecl: KSClassDeclaration, packageName: String, className: String) {
+        val entityVar = className.decapitalize()
+        val fileName = "${className}KodeinDi"
+
+        val fileContent = """
+// GENERATED BY KANDRA — DO NOT EDIT
+package $packageName
+
+import org.kodein.di.DIAware
+import org.kodein.di.direct
+import org.kodein.di.instance
+
+@Suppress("UNCHECKED_CAST")
+fun DIAware.${entityVar}Repo(): io.kandra.runtime.repository.KandraRepository<$className> =
+    direct.instance<io.kandra.runtime.repository.KandraRepository<*>>(tag = "$className") as io.kandra.runtime.repository.KandraRepository<$className>
+
+@Suppress("UNCHECKED_CAST")
+fun DIAware.${entityVar}SuspendRepo(): io.kandra.runtime.repository.KandraSuspendRepository<$className> =
+    direct.instance<io.kandra.runtime.repository.KandraSuspendRepository<*>>(tag = "${className}Suspend") as io.kandra.runtime.repository.KandraSuspendRepository<$className>
+""".trimIndent()
+
+        val file = codeGenerator.createNewFile(
+            dependencies = Dependencies(aggregating = false, classDecl.containingFile!!),
+            packageName = packageName,
+            fileName = fileName
+        )
+        file.write(fileContent.toByteArray())
+        file.close()
+
+        logger.info("Kandra codegen: generated $fileName (Kodein accessors) for $className")
     }
 
     /**
@@ -118,8 +251,16 @@ object $objectName : io.kandra.runtime.dsl.KandraTable<$className> {
     private fun camelToSnake(name: String): String =
         name.replace(Regex("([A-Z])")) { "_${it.value.lowercase()}" }.trimStart('_')
 
+    private fun String.decapitalize(): String =
+        replaceFirstChar { it.lowercase() }
+
     private fun KSPropertyDeclaration.hasAnnotation(fqn: String): Boolean =
         annotations.any { it.annotationType.resolve().declaration.qualifiedName?.asString() == fqn }
+
+    private companion object {
+        const val KOIN_MARKER_FQN = "org.koin.core.component.KoinComponent"
+        const val KODEIN_MARKER_FQN = "org.kodein.di.DIAware"
+    }
 }
 
 class KandraProcessorProvider : SymbolProcessorProvider {
