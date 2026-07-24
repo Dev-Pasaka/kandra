@@ -43,6 +43,7 @@ This README covers the common cases end-to-end. For everything else:
 | Doc | Contents |
 |---|---|
 | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | The full reference — every annotation, config option, and repository method in depth |
+| [`docs/production-example.md`](docs/production-example.md) | End-to-end walkthrough: entities → plugin config → DI wiring → route handlers, with the reasoning behind each choice |
 | [`docs/changelog/`](docs/changelog/README.md) | What changed in each version, one file per version |
 | [`docs/features/`](docs/features/README.md) | Feature-by-feature reference, one file per area |
 | [`docs/issues/`](docs/issues/README.md) | Known gaps and issues — open, fixed, and closed — with the reasoning behind each |
