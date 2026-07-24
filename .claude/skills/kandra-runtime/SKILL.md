@@ -487,6 +487,12 @@ Builds every `BoundStatement`. Key behaviors:
   `StatementBuilder` but **not called** by `QueryExecutor.exists()` (which builds its own
   key-selecting SELECT inline via `resolveRows(limitOne = true, selectKeys = true)` instead); keep
   this in mind if you're tracing `exists()` behavior — the logic lives in `QueryExecutor`, not here.
+- **Strict Mode (GH #5)**: both `resolveWriteConsistency` and `resolveReadConsistency` end with a shared
+  `warnIfStrictModeViolation(schema, resolved)` check — if `consistencyConfig.strictMode &&
+  consistencyConfig.multiDcTopology` and `resolved` is `LOCAL_ONE` or `ONE`, logs a WARN naming the table
+  and the resolved level. Unconditional on every matching call (no "warn once" tracking, matching the
+  `QueryExecutor.findActive()` ALLOW FILTERING warning precedent) and never throws. `multiDcTopology` is
+  `@InternalKandraApi` and populated by `kandra-ktor`'s `Kandra.kt`, not user-set.
 
 ## Codec (`io.kandra.runtime.codec.KandraCodec`)
 
@@ -564,6 +570,13 @@ class ConsistencyConfig {
     var defaultRead: KandraConsistency = KandraConsistency.LOCAL_ONE
     var defaultWrite: KandraConsistency = KandraConsistency.LOCAL_QUORUM
     var defaultSerialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL   // not read anywhere in this module — saveIfNotExists takes serialConsistency as a direct param instead
+
+    // Strict Mode (GH #5) — opt-in, default false, WARN-only, never throws.
+    var strictMode: Boolean = false
+
+    // Not user-set — @InternalKandraApi. Populated automatically by the Kandra Ktor plugin's install
+    // path from `KandraConfig.loadBalancing.allowedRemoteDcs.isNotEmpty()`. See "Strict Mode" below.
+    @InternalKandraApi var multiDcTopology: Boolean = false
 }
 
 class DebugConfig {

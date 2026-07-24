@@ -41,6 +41,7 @@ Docker before relying on them.
 | [ISS-028](ISS-028-cache-invalidation-key-mismatch.md) | Cache invalidation silently missed the real entry for clustering-keyed entities |
 | [ISS-029](ISS-029-lookup-index-clustering-key-broken.md) | `@LookupIndex` resolution broke entirely for entities with a clustering key |
 | [ISS-030](ISS-030-soft-delete-removes-lookup-rows.md) | Soft-delete unconditionally removed lookup-table rows |
+| [ISS-037](ISS-037-consistency-strict-mode.md) | Consistency Strict Mode — warn on `LOCAL_ONE`/`ONE` in multi-DC deployments |
 
 ## Closed — not a bug
 
