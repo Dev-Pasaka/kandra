@@ -122,6 +122,7 @@ class KandraPluginTest {
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(TestItem::class)
+                    auth { provider = KandraAuth.static("", "") }
                     consistency {
                         strictMode = true
                     }

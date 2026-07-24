@@ -3,6 +3,7 @@ package io.kandra.runtime
 import com.datastax.oss.driver.api.core.CqlSession
 import io.kandra.core.InternalKandraApi
 import io.kandra.core.KandraConsistency
+import io.kandra.core.schema.EntityReflection
 import io.kandra.core.schema.TableSchema
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -11,6 +12,9 @@ import org.junit.jupiter.api.Test
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import java.lang.reflect.Method
+import kotlin.reflect.full.memberFunctions
+import kotlin.reflect.full.memberProperties
+import kotlin.reflect.full.primaryConstructor
 
 /** Placeholder entity solely so [TableSchema.entityClass] has something real to point at. */
 private data class StrictModeEntity(val id: Int)
@@ -45,7 +49,14 @@ class ConsistencyStrictModeTest {
         partitionKeys = emptyList(),
         clusteringKeys = emptyList(),
         columns = emptyList(),
-        lookupTables = emptyList()
+        lookupTables = emptyList(),
+        reflection = EntityReflection(
+            copyFunction = StrictModeEntity::class.memberFunctions.find { it.name == "copy" },
+            copyParameters = StrictModeEntity::class.memberFunctions.find { it.name == "copy" }?.parameters ?: emptyList(),
+            propertiesByName = StrictModeEntity::class.memberProperties.associateBy { it.name },
+            primaryConstructor = StrictModeEntity::class.primaryConstructor,
+            constructorParameters = StrictModeEntity::class.primaryConstructor?.parameters ?: emptyList()
+        )
     )
 
     private fun resolveWriteMethod(): Method =
