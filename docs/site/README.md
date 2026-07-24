@@ -13,6 +13,7 @@ Keeping one file per version makes that drift visible instead of silent.
 
 | Version | Kind | File |
 |---|---|---|
+| 0.4.7 | Incremental update (in progress) | [build-prompt-0.4.7.md](build-prompt-0.4.7.md) — accumulates one section per fix/feature merged since 0.4.6; not yet a tagged release |
 | 0.4.6 | Incremental update | [build-prompt-0.4.6.md](build-prompt-0.4.6.md) — adds `@GeneratedUuid`/`UuidStrategy`/`KandraUuid` coverage to specific pages only |
 | 0.4.5 | Full build | [build-prompt-0.4.5.md](build-prompt-0.4.5.md) — initial build prompt, full site scope, information architecture, and content requirements |
 
@@ -42,3 +43,13 @@ Don't edit an existing `build-prompt-X.Y.Z.md` in place once it's been used. Ins
 
 Each prompt is the authority on how to hand itself off and what "done" looks like for its own scope —
 see its own definition-of-done section rather than duplicating that here.
+
+## Outstanding corrections to the live site
+
+Unlike the build/update prompts above, this is a standing note (not tied to a specific version)
+about a claim already live on the **landing page** that needs correcting next time someone touches
+it — see [`landing-page-correction-gh-12.md`](landing-page-correction-gh-12.md). Short version: the
+landing page's "Kandra's query DSL structurally cannot express `ALLOW FILTERING`" claim needs
+scoping to the *predicate* DSL specifically — `findActive()` is a deliberate, now-explicit-opt-in
+exception (`allowFullScan = true`, GH #12 / ISS-036), not a DSL loophole. Remove this section once
+the correction has been applied.

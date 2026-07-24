@@ -310,6 +310,11 @@ CREATE TABLE IF NOT EXISTS users_by_email (
 
 **`LookupConsistency.BATCH`** — included in the same LOGGED batch (atomic).  
 **`LookupConsistency.EVENTUAL`** — written asynchronously via `CoroutineScope.launch` after the batch commits.
+Despite firing asynchronously, an `EVENTUAL` write shares the same safeguards as every other write:
+it retries on transient errors per `retry { }`'s `retryOn` set, counts toward `inFlightCount` so
+graceful shutdown waits for it to finish before closing the session, and is rejected (surfaced via
+`KandraEventListener.onEventualWriteFailed`, same as any other failure) once shutdown has begun. The
+only thing "eventual" about it is that the caller doesn't wait for it before `save()`/`update()` returns.
 
 ---
 
@@ -530,8 +535,10 @@ fun `save captures batch statement`() {
 # Unit tests (no database required)
 JAVA_HOME=<jdk-21-path> ./gradlew :kandra-core:test
 
-# All modules (ktor integration tests require a ScyllaDB instance)
-JAVA_HOME=<jdk-21-path> ./gradlew test -x :kandra-ktor:test
+# Full suite, all modules — kandra-test and kandra-ktor spin up a real
+# Cassandra/ScyllaDB-compatible container via Testcontainers automatically,
+# no manual database setup or exclusions needed. Requires Docker running locally.
+JAVA_HOME=<jdk-21-path> ./gradlew test
 
 # Full build
 JAVA_HOME=<jdk-21-path> ./gradlew build
@@ -941,7 +948,7 @@ install(Kandra) {
 }
 ```
 
-On `ApplicationStopping`, Kandra sets `KandraRuntime.isShuttingDown = true` and drains `inFlightCount` down to zero (or the timeout) before closing the driver session.
+On `ApplicationStopping`, Kandra sets `KandraRuntime.isShuttingDown = true` and drains `inFlightCount` down to zero (or the timeout) before closing the driver session. This drain covers `LookupConsistency.EVENTUAL` lookup writes too — they retry on transient errors and are counted in `inFlightCount` exactly like every other write, so a `save()`/`update()` on an entity with an `EVENTUAL` lookup index can no longer race an in-progress shutdown and hit an already-closed session.
 
 ---
 

@@ -307,4 +307,83 @@ class SchemaRegistryTest {
     fun `getOrNull returns null for unregistered class`() {
         assertNull(SchemaRegistry.getOrNull(SimpleEntity::class))
     }
+
+    // ── EntityReflection cache (ISS-034 / GitHub #13) ─────────────────────────
+
+    @Test
+    fun `reflection copy function is resolved and callable`() {
+        val schema = SchemaRegistry.register(SimpleEntity::class)
+        val copyFn = schema.reflection.copyFunction
+        assertNotNull(copyFn)
+        assertEquals("copy", copyFn!!.name)
+
+        val entity = SimpleEntity(UUID.randomUUID(), "v1")
+        val params = schema.reflection.copyParameters
+        assertEquals(copyFn.parameters, params, "copyParameters must be copyFunction.parameters")
+
+        val valueParam = params.first { it.name == "value" }
+        val copied = copyFn.callBy(mapOf(params[0] to entity, valueParam to "v2")) as SimpleEntity
+        assertEquals("v2", copied.value)
+        assertEquals(entity.id, copied.id, "unspecified copy() args must retain the original value")
+    }
+
+    @Test
+    fun `reflection property map resolves every declared property by name`() {
+        val schema = SchemaRegistry.register(User::class)
+        val entity = User(UUID.randomUUID(), Instant.EPOCH, "a@b.com", "555-1234", "Ada")
+
+        val props = schema.reflection.propertiesByName
+        assertEquals(setOf("userId", "createdAt", "email", "phone", "name", "cachedToken"), props.keys)
+        assertEquals(entity.userId, props["userId"]!!.call(entity))
+        assertEquals("a@b.com", props["email"]!!.call(entity))
+        assertEquals("Ada", props["name"]!!.call(entity))
+    }
+
+    @Test
+    fun `reflection primary constructor and parameters match the entity's declared constructor`() {
+        val schema = SchemaRegistry.register(CompoundPkEntity::class)
+        val ctor = schema.reflection.primaryConstructor
+        assertNotNull(ctor)
+        assertEquals(schema.reflection.constructorParameters, ctor!!.parameters)
+        assertEquals(
+            listOf("tenantId", "timestamp", "eventId", "payload"),
+            schema.reflection.constructorParameters.map { it.name }
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val built = (ctor as kotlin.reflect.KFunction<CompoundPkEntity>).callBy(
+            schema.reflection.constructorParameters.zip(
+                listOf(UUID.randomUUID(), Instant.EPOCH, UUID.randomUUID(), "payload")
+            ).toMap()
+        )
+        assertEquals("payload", built.payload)
+    }
+
+    @Test
+    fun `reflection is resolved once and reused across repeated register calls (same entity type)`() {
+        val first = SchemaRegistry.register(SimpleEntity::class)
+        val second = SchemaRegistry.register(SimpleEntity::class)
+
+        // register() is getOrPut-backed — a second call for the same class must return the exact
+        // same TableSchema (and therefore the exact same EntityReflection), not rebuild it.
+        assertTrue(first === second, "register() must return the cached TableSchema on repeat calls")
+        assertTrue(first.reflection === second.reflection, "EntityReflection must not be rebuilt per call")
+        assertTrue(
+            first.reflection.propertiesByName === second.reflection.propertiesByName,
+            "the cached property map itself must be reused, not recomputed"
+        )
+    }
+
+    @Test
+    fun `distinct entity types get distinct, independently correct reflection caches`() {
+        val simple = SchemaRegistry.register(SimpleEntity::class)
+        val compound = SchemaRegistry.register(CompoundPkEntity::class)
+
+        assertTrue(simple.reflection !== compound.reflection)
+        assertEquals(setOf("id", "value"), simple.reflection.propertiesByName.keys)
+        assertEquals(
+            setOf("tenantId", "timestamp", "eventId", "payload"),
+            compound.reflection.propertiesByName.keys
+        )
+    }
 }

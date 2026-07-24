@@ -22,6 +22,7 @@ users.findAll { where { "status" eq "active" } }
 users.findPage(pageSize = 20, pageToken = token) { ... }
 users.exists { where { "email" eq "x@y.com" } }
 users.findActive()                 // see below — @SoftDelete(markerProperty = "...") only
+users.findActive(allowFullScan = true)  // opt in to ALLOW FILTERING when there's no @SecondaryIndex
 
 users.raw("SELECT * FROM users WHERE status = ?", "active")
 users.rawQuery(KandraRawQuery.cql("SELECT * FROM users WHERE status = ?").bind("active").build())
@@ -44,9 +45,30 @@ Requires `@SoftDelete(markerProperty = "...")` on the entity (see
 [core-annotations.md](core-annotations.md#softdelete)) — without it, `findActive()` throws
 `KandraSchemaException`. The marker column is a plain `Boolean` field that Kandra writes
 permanently (no TTL) on soft-delete, so `findActive()` can reliably filter it out immediately —
-even before the other columns' TTL has expired. Internally this runs
-`WHERE <marker> = false ALLOW FILTERING` and logs a WARN (scatter-gather across all nodes);
-add `@SecondaryIndex` to the marker column for tables of meaningful size.
+even before the other columns' TTL has expired.
+
+**`findActive(allowFullScan: Boolean = false)`** — as of this fix (GH #12), this is the one place in Kandra
+that can still emit `ALLOW FILTERING`, and it now requires an explicit, visible opt-in at the call
+site instead of a silent default, consistent with how the rest of the library treats
+`ALLOW FILTERING` as something the predicate DSL structurally refuses to emit (see
+[ISS-021](../issues/ISS-021-allow-filtering-error-message.md)) and how other unsafe-by-default
+behavior requires opt-in (`@Version`, `saveIfNotExists`):
+
+- If the marker column has `@SecondaryIndex`, `findActive()` queries the index directly —
+  `WHERE <marker> = false`, no `ALLOW FILTERING` needed, and `allowFullScan` is irrelevant.
+- If the marker column has **no** `@SecondaryIndex` and `allowFullScan` is left at its default
+  `false`, `findActive()` throws `KandraQueryException` at call time — it explains that answering
+  the query would require `ALLOW FILTERING`, which Kandra does not emit implicitly, and that you
+  should either add `@SecondaryIndex` to the marker column or pass `allowFullScan = true`.
+  This is a **breaking change**: existing callers relying on the previous silent-`ALLOW FILTERING`-
+  plus-WARN behavior will now get an exception unless they add `@SecondaryIndex` or pass
+  `allowFullScan = true`.
+- If the marker column has no `@SecondaryIndex` and you explicitly pass `allowFullScan = true`,
+  `findActive()` behaves as before 0.5.0: it runs `WHERE <marker> = false ALLOW FILTERING` and logs
+  a WARN (scatter-gather across all nodes). Prefer adding `@SecondaryIndex` to the marker column for
+  tables of meaningful size instead of opting into the full scan repeatedly.
+
+See [ISS-036](../issues/ISS-036-findactive-allow-filtering-scope.md) for the full rationale.
 
 ## Batch scope
 
