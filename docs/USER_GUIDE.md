@@ -343,6 +343,27 @@ try {
 
 > **Note:** LWT cannot be included in a LOGGED batch. Kandra automatically issues the LWT as a standalone statement, then writes lookup table changes in a separate batch.
 
+> **Note — no automatic retry on transient errors.** Every other write path in Kandra retries on
+> `WriteTimeoutException`/`ReadTimeoutException`/`NoNodeAvailableException` per `RetryConfig` (default:
+> up to 3 attempts). `update()`/`updateSuspend()` on a `@Version` entity deliberately **do not** —
+> the `IF version = ?` statement is executed exactly once. Reasoning: on a transient error, the write
+> may have already been applied server-side (advancing the version) even though the client never saw
+> the success response; retrying the identical conditional statement would then see `[applied] = false`
+> and raise a **spurious** `KandraOptimisticLockException` — reporting "someone else changed this row"
+> when actually "your own prior attempt already succeeded." Only the caller can tell those two
+> situations apart. If you want retry-on-timeout semantics for a versioned update, catch the transient
+> exception yourself, re-fetch the entity (to learn its true current version), and reissue `update()`
+> with that freshly-read `old` — do not retry the same `(old, new)` pair blindly:
+>
+> ```kotlin
+> try {
+>     repo.update(old, new)
+> } catch (e: WriteTimeoutException) {
+>     val current = repo.findById(old.id)!!
+>     repo.update(current, new.copy(version = current.version))
+> }
+> ```
+
 ---
 
 ### `@SoftDelete`

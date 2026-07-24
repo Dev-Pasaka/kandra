@@ -48,7 +48,10 @@ private val logger = KotlinLogging.logger {}
  * EVENTUAL-consistency lookups fire asynchronously via [scope] after the batch commits;
  * failures are forwarded to [eventListener] (if set) then logged.
  *
- * Transient failures listed in [retryConfig.retryOn] are retried with linear backoff.
+ * Transient failures listed in [retryConfig.retryOn] are retried with linear backoff — except the
+ * `@Version` LWT update statement (see [update]/[updateSuspend]), which is executed exactly once via
+ * [executeOnce]/[executeOnceSuspend] to avoid a blind retry masking a real success as a spurious
+ * [KandraOptimisticLockException].
  * When [isShuttingDown] is set, all new queries are rejected with [KandraQueryException].
  */
 @InternalKandraApi
@@ -176,6 +179,61 @@ class BatchEngine(
         }
     }
 
+    /**
+     * Executes [statement] exactly once — no retry-on-transient-error loop — while still
+     * participating in [inFlightCount] tracking and the [checkNotShuttingDown] gate.
+     *
+     * Used for the `@Version` LWT update statement (`UPDATE ... IF version = ?`): blindly retrying
+     * a conditional update on a transient exception (timeout, etc.) is unsafe, because the server may
+     * have already applied the write and advanced the version before the client observed the error —
+     * a retry would then see `[applied] = false` and raise a spurious [KandraOptimisticLockException]
+     * for a write that actually succeeded. By executing once, any transient exception propagates to
+     * the caller as-is (never masked as an optimistic-lock conflict), and a real `[applied] = false`
+     * result (no exception) still reflects a genuine concurrent modification.
+     */
+    private fun executeOnce(
+        statement: Statement<*>,
+        tableName: String = "unknown",
+        operation: String = "query"
+    ): com.datastax.oss.driver.api.core.cql.ResultSet {
+        checkNotShuttingDown()
+        val start = System.currentTimeMillis()
+        inFlightCount.incrementAndGet()
+        try {
+            val rs = session.execute(statement)
+            val elapsed = System.currentTimeMillis() - start
+            if (debugConfig.logSlowQueriesMs > 0 && elapsed > debugConfig.logSlowQueriesMs) {
+                logger.warn { "Slow query detected: ${elapsed}ms (threshold ${debugConfig.logSlowQueriesMs}ms)" }
+            }
+            metricsRecorder?.record(tableName, operation, elapsed)
+            return rs
+        } finally {
+            inFlightCount.decrementAndGet()
+        }
+    }
+
+    /** Suspend counterpart of [executeOnce] — see its doc for why the versioned-update path skips retry. */
+    private suspend fun executeOnceSuspend(
+        statement: Statement<*>,
+        tableName: String = "unknown",
+        operation: String = "query"
+    ): AsyncResultSet {
+        checkNotShuttingDown()
+        val start = System.currentTimeMillis()
+        inFlightCount.incrementAndGet()
+        try {
+            val rs = session.executeSuspend(statement)
+            val elapsed = System.currentTimeMillis() - start
+            if (debugConfig.logSlowQueriesMs > 0 && elapsed > debugConfig.logSlowQueriesMs) {
+                logger.warn { "Slow query detected: ${elapsed}ms (threshold ${debugConfig.logSlowQueriesMs}ms)" }
+            }
+            metricsRecorder?.record(tableName, operation, elapsed)
+            return rs
+        } finally {
+            inFlightCount.decrementAndGet()
+        }
+    }
+
     // ── Save ─────────────────────────────────────────────────────────────────
 
     fun save(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null) {
@@ -237,7 +295,9 @@ class BatchEngine(
             val newVersion = incrementVersion(versionCol, oldVersion)
             val stampedWithVersion = injectVersion(stamped, versionCol.propertyName, newVersion)
             val stmt = buildVersionedUpdateStatement(schema, versionCol, stampedWithVersion, oldVersion)
-            val rs = executeWithRetry(stmt)
+            // Not executeWithRetry: a blind retry of this LWT would risk observing our own prior
+            // attempt's success as a false optimistic-lock conflict. See executeOnce's doc.
+            val rs = executeOnce(stmt, schema.tableName, "update")
             val applied = rs.one()?.getBoolean("[applied]") ?: false
             if (!applied) throwOptimisticLockException(schema, old, oldVersion)
             updateLookups(schema, old, stampedWithVersion)
@@ -420,7 +480,9 @@ class BatchEngine(
             val stampedWithVersion = injectVersion(stamped, versionCol.propertyName, newVersion)
             // Async prepare avoids blocking the dispatcher on the first call for this CQL string
             val stmt = buildVersionedUpdateStatementSuspend(schema, versionCol, stampedWithVersion, oldVersion)
-            val rs = executeWithRetrySuspend(stmt)
+            // Not executeWithRetrySuspend: a blind retry of this LWT would risk observing our own
+            // prior attempt's success as a false optimistic-lock conflict. See executeOnceSuspend's doc.
+            val rs = executeOnceSuspend(stmt, schema.tableName, "update")
             val applied = rs.currentPage().firstOrNull()?.getBoolean("[applied]") ?: false
             if (!applied) throwOptimisticLockException(schema, old, oldVersion)
             updateLookupsSuspend(schema, old, stampedWithVersion)

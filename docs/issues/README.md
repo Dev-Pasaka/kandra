@@ -42,6 +42,7 @@ Docker before relying on them.
 | [ISS-029](ISS-029-lookup-index-clustering-key-broken.md) | `@LookupIndex` resolution broke entirely for entities with a clustering key |
 | [ISS-030](ISS-030-soft-delete-removes-lookup-rows.md) | Soft-delete unconditionally removed lookup-table rows |
 | [ISS-031](ISS-031-runtime-tests-ktor-ci-exclusion.md) | `kandra-runtime` had no unit tests, and `kandra-ktor`'s tests never ran in CI |
+| [ISS-032](ISS-032-versioned-update-spurious-optimistic-lock.md) | `@Version` LWT updates were blindly retried on transient errors, causing spurious `KandraOptimisticLockException` |
 
 ## Closed — not a bug
 

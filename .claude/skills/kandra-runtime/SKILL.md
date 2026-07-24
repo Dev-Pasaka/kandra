@@ -126,9 +126,21 @@ fun updateForce(entity: T)
   throws `KandraQueryException("@Version field must be Long or Instant")`), and issues
   `UPDATE <table> SET col=?, ... WHERE pk=? [AND pk2=?...] IF <versionCol> = ?` with
   `setSerialConsistencyLevel(LOCAL_SERIAL)` (hardcoded, not configurable via `RetryConfig`/consistency
-  params). If `[applied]` is `false`, throws `KandraOptimisticLockException(message, entityClass,
-  partitionKey)`. On success, lookup tables are diffed against the caller-supplied `old` (see below)
-  and updated in a follow-up batch/eventual write.
+  params). **This statement is executed exactly once — not through `executeWithRetry`/
+  `executeWithRetrySuspend`, but through `executeOnce`/`executeOnceSuspend`, which keep the
+  `inFlightCount`/`checkNotShuttingDown` bookkeeping but skip the catch-matching-exception-and-retry
+  loop.** A transient exception (`WriteTimeoutException`, etc.) propagates to the caller as-is instead
+  of being retried: retrying this specific statement is unsafe because the server may have already
+  applied the write and advanced the version before the client observed the error, so a retry could
+  see `[applied] = false` and raise a spurious `KandraOptimisticLockException` for a write that actually
+  succeeded. If `[applied]` is `false` on the one attempt that *was* made, throws
+  `KandraOptimisticLockException(message, entityClass, partitionKey)` — this now only ever reflects a
+  genuine concurrent modification, never a self-inflicted retry collision. On success, lookup tables
+  are diffed against the caller-supplied `old` (see below) and updated in a follow-up batch/eventual
+  write. Callers that want retry-on-timeout semantics for a versioned update must catch the transient
+  exception themselves, re-fetch the entity's current version, and reissue `update(old, new)` — only the
+  caller can tell "my own prior attempt already applied" apart from "someone else changed it" (see
+  `docs/issues/ISS-032-versioned-update-spurious-optimistic-lock.md`).
   **If no `@Version` column exists**, `update()` does **not** issue a CQL `UPDATE` at all — it
   performs a full-row `INSERT` (`statementBuilder.insertPrimary`) that overwrites every column, batched
   with lookup-table changes, and there is **no concurrency check whatsoever** — the `old` argument is
@@ -437,7 +449,9 @@ class BatchEngine(
 }
 ```
 
-- **Retry**: `executeWithRetry`/`executeWithRetrySuspend` wrap every batch/statement execution. On
+- **Retry**: `executeWithRetry`/`executeWithRetrySuspend` wrap every batch/statement execution *except*
+  the `@Version` LWT update statement (see `update`/`updateSuspend` above, which use `executeOnce`/
+  `executeOnceSuspend` instead — no retry loop, but the same inFlightCount/shutdown bookkeeping). On
   any `Throwable` whose class is in `retryConfig.retryOn` (default: `WriteTimeoutException`,
   `ReadTimeoutException`, `NoNodeAvailableException`), retries with linear backoff
   `min(backoffMillis * (attempt + 1), maxBackoffMillis)` up to `maxAttempts` times (default 3), using
