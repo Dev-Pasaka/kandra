@@ -133,6 +133,41 @@ val userRepo: KandraRepository<User> by di.instance()
 val userSuspendRepo: KandraSuspendRepository<User> by di.instance()
 ```
 
+## Typed accessors via kandra-codegen (since 0.4.7)
+
+If `kandra-codegen`'s KSP processor is also applied to a module that depends on `kodein-di` (which
+`kandra-kodein` itself does — see its `build.gradle.kts`), it generates a typed `DIAware` extension function
+per `@ScyllaTable` entity that wraps the exact `tag = "..."` lookup `kandraKodein()` binds under — no
+hand-typed tag string, no unchecked cast at the call site:
+
+```kotlin
+// generated FooKodeinDi.kt, for an entity `User`
+fun DIAware.userRepo(): KandraRepository<User> = ...        // wraps tag = "User"
+fun DIAware.userSuspendRepo(): KandraSuspendRepository<User> = ... // wraps tag = "UserSuspend"
+```
+
+so the routing example above becomes:
+
+```kotlin
+get("/users/{id}") {
+    val repo = closestDI().userSuspendRepo()
+    val user = repo.findById(call.parameters["id"]!!)
+    call.respond(user ?: HttpStatusCode.NotFound)
+}
+```
+
+(`closestDI()` returns a `LazyDI`, which — like every `DI` — is a `DIAware`, so the generated extension is
+callable on it directly.) Internally the generated accessor goes through `DIAware.direct.instance<T>(tag)`
+rather than the bare `instance<T>(tag)` you'd write for `by` delegation, since a directly-returned value is
+needed for an expression-bodied function — see the `kandra-codegen` skill's "Typed Koin/Kodein DI accessors"
+section for why bare `instance()` doesn't work here (it returns a `LazyDelegate<T>`, not a `T`).
+
+Prefer the generated `fooRepo()`/`fooSuspendRepo()` over hand-typed `tag = "Foo"`/`tag = "FooSuspend"` lookups
+wherever `kandra-codegen` is on the build — a typo or an entity rename now fails to *compile* instead of
+throwing `DI.NotFoundException` at first resolution. This only applies to `kandraKodein()`'s bindings — there
+is no generated accessor for `bindKandraRepository<T>`'s untagged reified bindings, since those need no
+qualifier/tag disambiguation in the first place (already type-safe by construction).
+
 ## Gotchas
 
 - `kandraKodein()` bindings are **tagged and star-projected** (`KandraRepository<*>` tag `"User"`); the

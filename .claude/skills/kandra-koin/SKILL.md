@@ -96,6 +96,34 @@ class UserService : KoinComponent {
 }
 ```
 
+## Typed accessors via kandra-codegen (since 0.4.7)
+
+If `kandra-codegen`'s KSP processor is also applied to a module that depends on `koin-core` (which
+`kandra-koin` itself does — see its `build.gradle.kts`), it generates a typed `KoinComponent` extension
+function per `@ScyllaTable` entity that wraps the exact `named(...)` lookup above — no hand-typed qualifier
+string, no unchecked cast at the call site:
+
+```kotlin
+// generated FooKoinDi.kt, for an entity `User`
+fun KoinComponent.userRepo(): KandraRepository<User> = ...        // wraps named("UserRepo")
+fun KoinComponent.userSuspendRepo(): KandraSuspendRepository<User> = ... // wraps named("UserSuspendRepo")
+```
+
+so the example above becomes:
+
+```kotlin
+class UserService : KoinComponent {
+    suspend fun getUser(id: String): User? = userSuspendRepo().findById(id)
+}
+```
+
+Prefer the generated `fooRepo()`/`fooSuspendRepo()` over hand-typed `named("FooRepo")`/`named("FooSuspendRepo")`
+wherever `kandra-codegen` is on the build — a typo or an entity rename now fails to *compile* instead of
+throwing `NoDefinitionFoundException` at first injection. This is purely additive: `kandraKoin()`'s bindings
+are unchanged, the qualifier strings are identical, and the generated accessor is just a thin wrapper around
+the same `get<T>(named(...))` call you'd write by hand. See the `kandra-codegen` skill's "Typed Koin/Kodein DI
+accessors" section for the generation mechanics (classpath-presence detection, exact generated shape).
+
 ## Gotchas
 
 - Qualifier suffixes are exactly `Repo` and `SuspendRepo` — **`"UserRepo"`** and **`"UserSuspendRepo"`**, not
