@@ -483,6 +483,14 @@ gated by either annotation — they're considered stable public API.
   `@UpdatedAt` columns from the "all non-key columns must be @Counter" check — but does **not** exclude
   `@LookupIndex` or `@SecondaryIndex` columns, so a `@Counter` entity with a non-counter `@LookupIndex`
   column will fail registration.
+- Combining `@LookupIndex` with `@SoftDelete` on the same entity means the lookup row is *not* cleaned
+  up when the entity is soft-deleted — it stays live until the entity's own `softDeleteTtlSeconds`
+  expires (the repository layer deliberately leaves it, per
+  `docs/issues/ISS-030-soft-delete-removes-lookup-rows.md`, since a soft-deleted row still "exists" and
+  must remain resolvable via lookup, same as `findById`). For a high-churn table using both annotations,
+  expect the `{tableName}_{tableSuffix}` lookup table to carry noticeably more live rows than the
+  primary table at any point in time — factor that into storage-cost estimates when designing such an
+  entity, it is expected behavior, not a leak.
 - `SchemaRegistry.register` is `getOrPut` — the *first* successful call wins and is cached; if you mutate
   annotations or reload the class in a way the JVM doesn't consider a "different" `KClass`, you won't see
   the updated schema. Call `SchemaRegistry.clear()` between test classes.

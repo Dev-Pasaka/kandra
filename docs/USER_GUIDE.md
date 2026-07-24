@@ -294,6 +294,11 @@ data class User(
 | `consistency` | `LookupConsistency` | `BATCH` | `BATCH` = atomic with primary; `EVENTUAL` = async |
 
 > **When to use `EVENTUAL`:** For high-write-throughput tables where strict atomicity between primary and lookup is not required. Failed eventual writes are forwarded to `KandraEventListener.onEventualWriteFailed`.
+>
+> `EVENTUAL` only relaxes *atomicity* with the primary write, not durability guarantees: the write still
+> retries on transient errors per `retry { }`'s `retryOn` set, counts toward `inFlightCount`, and is
+> rejected once graceful shutdown begins — the same protections every other write gets. See
+> [Graceful shutdown](#graceful-shutdown).
 
 ---
 
@@ -343,6 +348,27 @@ try {
 
 > **Note:** LWT cannot be included in a LOGGED batch. Kandra automatically issues the LWT as a standalone statement, then writes lookup table changes in a separate batch.
 
+> **Note — no automatic retry on transient errors.** Every other write path in Kandra retries on
+> `WriteTimeoutException`/`ReadTimeoutException`/`NoNodeAvailableException` per `RetryConfig` (default:
+> up to 3 attempts). `update()`/`updateSuspend()` on a `@Version` entity deliberately **do not** —
+> the `IF version = ?` statement is executed exactly once. Reasoning: on a transient error, the write
+> may have already been applied server-side (advancing the version) even though the client never saw
+> the success response; retrying the identical conditional statement would then see `[applied] = false`
+> and raise a **spurious** `KandraOptimisticLockException` — reporting "someone else changed this row"
+> when actually "your own prior attempt already succeeded." Only the caller can tell those two
+> situations apart. If you want retry-on-timeout semantics for a versioned update, catch the transient
+> exception yourself, re-fetch the entity (to learn its true current version), and reissue `update()`
+> with that freshly-read `old` — do not retry the same `(old, new)` pair blindly:
+>
+> ```kotlin
+> try {
+>     repo.update(old, new)
+> } catch (e: WriteTimeoutException) {
+>     val current = repo.findById(old.id)!!
+>     repo.update(current, new.copy(version = current.version))
+> }
+> ```
+
 ---
 
 ### `@SoftDelete`
@@ -363,9 +389,20 @@ data class Order(
 After calling `repo.delete(order)`:
 - Non-key columns (`customerId`, `total`, `status`) are set with TTL = 604800s.
 - `findById(order.id)` still returns the row until the TTL fires and ScyllaDB removes the data.
-- Lookup table rows are hard-deleted immediately (they hold no useful data after soft-delete).
+- `@LookupIndex` rows are deliberately **kept alive**, not hard-deleted — a soft-deleted row still
+  "exists" until its own TTL expires, so it must remain resolvable via its lookup index too, same as
+  `findById`. On high-churn tables combining `@LookupIndex` + `@SoftDelete`, this means the lookup
+  table holds more live rows than the primary table at any given time — expected, not a leak (see
+  [ISS-030](issues/ISS-030-soft-delete-removes-lookup-rows.md) and
+  [ISS-035](issues/ISS-035-lookupindex-softdelete-storage-growth.md)).
 
-> **Limitation:** There is currently no `findActive()` method because ScyllaDB does not expose a predicate for "TTL has not expired". If you need to distinguish live vs soft-deleted rows, add a `deletedAt: Instant?` column and filter on it yourself.
+To distinguish live vs soft-deleted rows, add `@SoftDelete(ttlSeconds = ..., markerProperty = "isDeleted")`
+with a `Boolean` field and call `repo.findActive()` — see
+[`docs/features/repositories.md`](features/repositories.md#findactive-soft-delete-entities-only) and
+[ISS-007](issues/ISS-007-find-active-soft-delete.md). `findActive()` queries the marker column directly
+if it has `@SecondaryIndex`; otherwise it throws unless you pass `allowFullScan = true`, since answering
+without an index requires `ALLOW FILTERING` — an explicit opt-in, not a silent default (see
+[ISS-036](issues/ISS-036-findactive-allow-filtering-scope.md)).
 
 ---
 
@@ -521,6 +558,30 @@ install(Kandra) {
 
 Available levels: `ANY`, `ONE`, `TWO`, `THREE`, `QUORUM`, `ALL`, `LOCAL_QUORUM`, `EACH_QUORUM`, `LOCAL_ONE`, `LOCAL_SERIAL`, `SERIAL`.
 
+#### Strict Mode (multi-DC `LOCAL_ONE`/`ONE` warning)
+
+Opt-in, default `false`, **WARN-only — never throws**:
+
+```kotlin
+install(Kandra) {
+    consistency {
+        strictMode = true
+    }
+    loadBalancing {
+        allowedRemoteDcs = listOf("eu-west") // marks this deployment as multi-DC
+    }
+}
+```
+
+When `strictMode = true` *and* `loadBalancing.allowedRemoteDcs` is non-empty, Kandra logs a WARN every
+time a query resolves (after per-call override → `@ReadConsistency`/`@WriteConsistency` → these
+defaults) to `LOCAL_ONE` or `ONE`. In a multi-DC deployment those levels are satisfied by a single
+replica in a single datacenter, which is usually not what's intended — `LOCAL_QUORUM` is the normal
+default precisely so reads/writes are acknowledged across datacenters. This never blocks or fails the
+query; it only warns, so enabling it cannot break an existing deployment. The multi-DC signal
+(`allowedRemoteDcs` non-empty) is picked up automatically — there's nothing else to configure beyond
+`strictMode` and whatever `loadBalancing.allowedRemoteDcs` you'd already set for multi-DC failover.
+
 ---
 
 ### Retry Policy
@@ -593,6 +654,13 @@ install(Kandra) {
     }
 }
 ```
+
+`LookupConsistency.EVENTUAL` lookup writes fired from `save()`/`update()` are drained by this same
+mechanism — they're routed through the same retry/`inFlightCount`/shutdown-gate path as every
+synchronous write, so they no longer risk running against an already-closed session during shutdown.
+A new `EVENTUAL` write attempted after step 1 above throws the same `KandraQueryException` a
+synchronous query would, surfaced via `KandraEventListener.onEventualWriteFailed` (since the write
+happens on a background coroutine, not the caller's call stack).
 
 ---
 

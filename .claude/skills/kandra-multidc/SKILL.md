@@ -266,11 +266,52 @@ class ConsistencyConfig {
     var defaultRead: KandraConsistency = KandraConsistency.LOCAL_ONE
     var defaultWrite: KandraConsistency = KandraConsistency.LOCAL_QUORUM
     var defaultSerialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    var strictMode: Boolean = false               // GH #5 — see "Strict Mode" below
+    @InternalKandraApi var multiDcTopology: Boolean = false  // not user-set — see below
 }
 ```
 
 Set via `install(Kandra) { consistency { defaultRead = ...; defaultWrite = ...; defaultSerialConsistency = ... } }`
 — this is the block `KandraMultiDc.describe()` reads from (`config.consistency.defaultRead` etc.).
+
+### Strict Mode — warn on `LOCAL_ONE`/`ONE` in a multi-DC deployment (GH #5)
+
+`ConsistencyConfig.strictMode` (opt-in, default `false`, **WARN-only, never throws**): when `true`,
+`StatementBuilder.resolveWriteConsistency`/`resolveReadConsistency` log a WARN — unconditionally, every
+matching call, no "warn once" tracking (same precedent as `QueryExecutor.findActive()`'s ALLOW FILTERING
+warning) — whenever the final resolved consistency (after per-call override → `@ReadConsistency`/
+`@WriteConsistency` → `ConsistencyConfig` defaults) is `LOCAL_ONE` or `ONE`, **and** the deployment is
+multi-DC.
+
+The multi-DC signal is `ConsistencyConfig.multiDcTopology` — annotated `@InternalKandraApi`, **not**
+something a user sets directly. The `Kandra` Ktor plugin (`kandra-ktor/.../Kandra.kt`) populates it
+automatically at install time from the topology signal that already exists for failover:
+
+```kotlin
+config.consistency.multiDcTopology = config.loadBalancing.allowedRemoteDcs.isNotEmpty()
+```
+
+So the only user-facing config is:
+
+```kotlin
+install(Kandra) {
+    consistency { strictMode = true }
+    loadBalancing { allowedRemoteDcs = listOf("eu-west") } // already set for multi-DC failover
+}
+```
+
+This is deliberately **not** wired through `kandra-multidc`/`KandraMultiDc.describe()` — that function is
+a pure startup-logging string builder, not in the runtime read/write path, and stays untouched by this
+feature. `kandra-runtime` has no dependency on `kandra-multidc` (nor vice versa); the whole feature lives
+in `ConsistencyConfig` (kandra-runtime) + `StatementBuilder` (kandra-runtime) + the one-line topology
+assignment in `Kandra.kt` (kandra-ktor).
+
+Why `LOCAL_ONE`/`ONE` specifically: both are satisfied by acknowledgment from a single replica. In a
+single-DC deployment that's just "fastest possible" with no cross-DC implication. In a multi-DC
+deployment, though, `LOCAL_QUORUM` is the normal default specifically so a write/read is acknowledged by a
+majority of the *local* DC's replicas — dropping to `LOCAL_ONE`/`ONE` there means a single node's view is
+now taken as authoritative, which is usually accidental (e.g. a per-call override left over from
+single-DC-era code) rather than intentional.
 
 ### Resolution order (identical, stated three times in source — kandra-core, kandra-runtime, and repeated in the `kandra-multidc` module doc)
 

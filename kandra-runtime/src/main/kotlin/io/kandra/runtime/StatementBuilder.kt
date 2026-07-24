@@ -17,7 +17,6 @@ import io.kandra.runtime.codec.KandraUnset
 import java.util.Collections
 import kotlin.reflect.KClass
 import kotlin.reflect.full.findAnnotation
-import kotlin.reflect.full.memberProperties
 
 private val logger = KotlinLogging.logger {}
 
@@ -58,15 +57,38 @@ class StatementBuilder(
         set(idx, value, value::class.java as Class<Any>)
 
     private fun resolveWriteConsistency(schema: TableSchema, override: KandraConsistency?): KandraConsistency {
-        override?.let { return it }
-        schema.entityClass.findAnnotation<WriteConsistency>()?.let { return it.level }
-        return consistencyConfig.defaultWrite
+        val resolved = override
+            ?: schema.entityClass.findAnnotation<WriteConsistency>()?.level
+            ?: consistencyConfig.defaultWrite
+        warnIfStrictModeViolation(schema, resolved)
+        return resolved
     }
 
     private fun resolveReadConsistency(schema: TableSchema, override: KandraConsistency?): KandraConsistency {
-        override?.let { return it }
-        schema.entityClass.findAnnotation<ReadConsistency>()?.let { return it.level }
-        return consistencyConfig.defaultRead
+        val resolved = override
+            ?: schema.entityClass.findAnnotation<ReadConsistency>()?.level
+            ?: consistencyConfig.defaultRead
+        warnIfStrictModeViolation(schema, resolved)
+        return resolved
+    }
+
+    /**
+     * Strict Mode (GH #5): unconditional WARN — matches the existing
+     * [QueryExecutor.activeMarkerWarning]-style precedent of warning on every call rather than tracking
+     * "warn once" state — logged when a query resolves to `LOCAL_ONE`/`ONE` while both
+     * [ConsistencyConfig.strictMode] and [ConsistencyConfig.multiDcTopology] are true. Never throws.
+     */
+    private fun warnIfStrictModeViolation(schema: TableSchema, resolved: KandraConsistency) {
+        if (!consistencyConfig.strictMode || !consistencyConfig.multiDcTopology) return
+        if (resolved != KandraConsistency.LOCAL_ONE && resolved != KandraConsistency.ONE) return
+        logger.warn {
+            "Kandra strictMode: query on '${schema.tableName}' resolved to $resolved consistency in a " +
+            "multi-DC deployment (loadBalancing.allowedRemoteDcs is non-empty). LOCAL_QUORUM is usually " +
+            "the intended default for multi-DC deployments so writes/reads are acknowledged across " +
+            "datacenters, not just one local replica. Set an explicit consistency level, a " +
+            "@ReadConsistency/@WriteConsistency annotation, or consistency { defaultRead/defaultWrite = " +
+            "... } if $resolved is intentional here."
+        }
     }
 
     private fun KandraConsistency.toDriverLevel() =
@@ -121,7 +143,7 @@ class StatementBuilder(
         val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
         val prepared = prepare(cql)
 
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         var stmt = prepared.bind()
         allCols.forEachIndexed { idx, col ->
             val prop = props[col.propertyName]
@@ -178,7 +200,7 @@ class StatementBuilder(
         val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
         val prepared = prepare(cql)
 
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         var stmt = prepared.bind()
         allCols.forEachIndexed { idx, col ->
             val prop = props[col.propertyName]
@@ -197,14 +219,19 @@ class StatementBuilder(
         return stmt
     }
 
-    fun insertLookup(lookup: LookupTableSchema, entity: Any): BoundStatement {
+    /**
+     * [schema] is only needed to source the entity's cached [io.kandra.core.schema.EntityReflection]
+     * property map (resolved once at [io.kandra.core.SchemaRegistry.register] time) — [entity] is
+     * always an instance of [schema]'s `entityClass`.
+     */
+    fun insertLookup(schema: TableSchema, lookup: LookupTableSchema, entity: Any): BoundStatement {
         val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns + lookup.clusteringKeyColumns
         val colNames = cols.joinToString(", ") { it.cqlName }
         val placeholders = cols.joinToString(", ") { "?" }
         val cql = "INSERT INTO ${lookup.tableName} ($colNames) VALUES ($placeholders)"
         val prepared = prepare(cql)
 
-        val props = entity::class.memberProperties.associateBy { it.name }
+        val props = schema.reflection.propertiesByName
         var stmt = prepared.bind()
         cols.forEachIndexed { idx, col ->
             val prop = props[col.propertyName]

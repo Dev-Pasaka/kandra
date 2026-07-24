@@ -18,7 +18,7 @@ import io.kandra.runtime.dsl.KandraRawQuery
 import io.kandra.runtime.dsl.QueryContext
 import java.util.Base64
 import kotlin.reflect.KClass
-import kotlin.reflect.full.primaryConstructor
+import kotlin.reflect.KFunction
 
 private val logger = KotlinLogging.logger {}
 
@@ -267,18 +267,38 @@ class QueryExecutor(
         }
     }
 
-    fun <T : Any> findActive(entityClass: KClass<T>): List<T> {
-        val marker = requireActiveMarker()
+    /**
+     * Builds the CQL for `findActive()`. If the marker column has a `@SecondaryIndex`, the query
+     * is answered by the index and no `ALLOW FILTERING` is needed. Otherwise, `ALLOW FILTERING` is
+     * required — Kandra does not emit it implicitly; the caller must opt in with
+     * `allowFullScan = true`, mirroring how the predicate DSL refuses to emit it at all.
+     */
+    private fun buildActiveQueryCql(marker: io.kandra.core.schema.ColumnSchema, allowFullScan: Boolean): String {
+        val hasSecondaryIndex = schema.secondaryIndexes.any { it.cqlName == marker.cqlName }
+        if (hasSecondaryIndex) {
+            return "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ?"
+        }
+        if (!allowFullScan) {
+            throw KandraQueryException(
+                "findActive() on '${schema.tableName}' requires ALLOW FILTERING on '${marker.cqlName}', " +
+                "which Kandra does not emit implicitly. Add a @SecondaryIndex to the marker column, or " +
+                "pass allowFullScan = true to findActive() to opt in explicitly."
+            )
+        }
         activeMarkerWarning(marker)
-        val cql = "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
+        return "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
+    }
+
+    fun <T : Any> findActive(entityClass: KClass<T>, allowFullScan: Boolean = false): List<T> {
+        val marker = requireActiveMarker()
+        val cql = buildActiveQueryCql(marker, allowFullScan)
         val rs = session.execute(session.prepare(cql).bind(false))
         return rs.all().map { decodeEntity(it, entityClass) }
     }
 
-    suspend fun <T : Any> findActiveSuspend(entityClass: KClass<T>): List<T> {
+    suspend fun <T : Any> findActiveSuspend(entityClass: KClass<T>, allowFullScan: Boolean = false): List<T> {
         val marker = requireActiveMarker()
-        activeMarkerWarning(marker)
-        val cql = "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
+        val cql = buildActiveQueryCql(marker, allowFullScan)
         val prepared = session.prepareSuspend(cql)
         return session.executeSuspendAll(prepared.bind(false)).map { decodeEntity(it, entityClass) }
     }
@@ -470,9 +490,14 @@ class QueryExecutor(
         return parts.joinToString(" AND ") to values
     }
 
+    @Suppress("UNCHECKED_CAST")
     internal fun <T : Any> decodeEntity(row: Row, entityClass: KClass<T>): T {
-        val ctor = entityClass.primaryConstructor
+        // Resolved once per entity KClass in SchemaRegistry.register() and cached on
+        // TableSchema.reflection — entityClass is always schema.entityClass here, so this avoids
+        // re-resolving primaryConstructor/its KParameter list via reflection on every row decoded.
+        val ctor = schema.reflection.primaryConstructor as? KFunction<T>
             ?: throw KandraQueryException("Entity '${entityClass.simpleName}' has no primary constructor.")
+        val ctorParams = schema.reflection.constructorParameters
 
         val allCols = buildList {
             addAll(schema.partitionKeys)
@@ -481,7 +506,7 @@ class QueryExecutor(
             addAll(schema.lookupTables.map { it.indexColumn })
         }.associateBy { it.propertyName }
 
-        val args = ctor.parameters.associateWith { param ->
+        val args = ctorParams.associateWith { param ->
             val col = allCols[param.name]
             if (col == null) null else codec.decode(row, col)
         }

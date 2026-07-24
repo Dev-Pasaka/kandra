@@ -41,6 +41,13 @@ Docker before relying on them.
 | [ISS-028](ISS-028-cache-invalidation-key-mismatch.md) | Cache invalidation silently missed the real entry for clustering-keyed entities |
 | [ISS-029](ISS-029-lookup-index-clustering-key-broken.md) | `@LookupIndex` resolution broke entirely for entities with a clustering key |
 | [ISS-030](ISS-030-soft-delete-removes-lookup-rows.md) | Soft-delete unconditionally removed lookup-table rows |
+| [ISS-031](ISS-031-runtime-tests-ktor-ci-exclusion.md) | `kandra-runtime` had no unit tests, and `kandra-ktor`'s tests never ran in CI |
+| [ISS-032](ISS-032-versioned-update-spurious-optimistic-lock.md) | `@Version` LWT updates were blindly retried on transient errors, causing spurious `KandraOptimisticLockException` |
+| [ISS-033](ISS-033-eventual-lookup-bypasses-safeguards.md) | `EVENTUAL` lookup writes bypassed retry, `inFlightCount`, and the shutdown gate |
+| [ISS-034](ISS-034-uncached-entity-reflection.md) | Entity reflection (copy fn, properties, constructor) re-resolved uncached on every call |
+| [ISS-035](ISS-035-lookupindex-softdelete-storage-growth.md) | `@LookupIndex` + `@SoftDelete` storage-growth implication was undocumented |
+| [ISS-036](ISS-036-findactive-allow-filtering-scope.md) | `findActive()`'s `ALLOW FILTERING` was a silent default — now an explicit `allowFullScan` opt-in |
+| [ISS-037](ISS-037-consistency-strict-mode.md) | Consistency Strict Mode — warn on `LOCAL_ONE`/`ONE` in multi-DC deployments |
 | [ISS-038](ISS-038-typed-di-codegen-accessors.md) | `kandra-koin`/`kandra-kodein` qualifiers were hand-typed strings with no compile-time safety |
 
 ## Closed — not a bug

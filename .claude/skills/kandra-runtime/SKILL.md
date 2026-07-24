@@ -73,8 +73,12 @@ fun saveAll(entities: List<T>, useBatch: Boolean = true)
   reflective `copy()`, sets the initial `@Version` value (`1L` for `Long`, `Instant.now()` for
   `Instant`) if present, then executes a single `LOGGED BATCH`: `INSERT INTO <table> (...) VALUES
   (...) USING TTL x AND TIMESTAMP y` for the primary row plus one `INSERT` per `@LookupIndex(
-  consistency = BATCH)` table. `EVENTUAL` lookups are fired via `scope.launch { session.execute(...)
-  }` **after** the batch commits — failures there are caught, logged at ERROR, and forwarded to
+  consistency = BATCH)` table. `EVENTUAL` lookups are fired via `scope.launch { ... }` **after** the
+  batch commits, but each one still goes through the same `executeWithRetry`/`executeWithRetrySuspend`
+  path as every other write (fixed in GH-14/ISS-033) — it retries on transient errors per
+  `retryConfig.retryOn`, is counted in `inFlightCount` (so graceful shutdown drains it before closing
+  the session), and is rejected once `isShuttingDown` is set, same as a synchronous query. Failures
+  (including a shutdown-rejection) are caught, logged at ERROR, and forwarded to
   `KandraEventListener.onEventualWriteFailed` if one is registered.
   Throws `KandraQueryException` immediately if `schema.isCounterTable` — counter tables can only use
   `increment()`/`decrement()`.
@@ -126,9 +130,21 @@ fun updateForce(entity: T)
   throws `KandraQueryException("@Version field must be Long or Instant")`), and issues
   `UPDATE <table> SET col=?, ... WHERE pk=? [AND pk2=?...] IF <versionCol> = ?` with
   `setSerialConsistencyLevel(LOCAL_SERIAL)` (hardcoded, not configurable via `RetryConfig`/consistency
-  params). If `[applied]` is `false`, throws `KandraOptimisticLockException(message, entityClass,
-  partitionKey)`. On success, lookup tables are diffed against the caller-supplied `old` (see below)
-  and updated in a follow-up batch/eventual write.
+  params). **This statement is executed exactly once — not through `executeWithRetry`/
+  `executeWithRetrySuspend`, but through `executeOnce`/`executeOnceSuspend`, which keep the
+  `inFlightCount`/`checkNotShuttingDown` bookkeeping but skip the catch-matching-exception-and-retry
+  loop.** A transient exception (`WriteTimeoutException`, etc.) propagates to the caller as-is instead
+  of being retried: retrying this specific statement is unsafe because the server may have already
+  applied the write and advanced the version before the client observed the error, so a retry could
+  see `[applied] = false` and raise a spurious `KandraOptimisticLockException` for a write that actually
+  succeeded. If `[applied]` is `false` on the one attempt that *was* made, throws
+  `KandraOptimisticLockException(message, entityClass, partitionKey)` — this now only ever reflects a
+  genuine concurrent modification, never a self-inflicted retry collision. On success, lookup tables
+  are diffed against the caller-supplied `old` (see below) and updated in a follow-up batch/eventual
+  write. Callers that want retry-on-timeout semantics for a versioned update must catch the transient
+  exception themselves, re-fetch the entity's current version, and reissue `update(old, new)` — only the
+  caller can tell "my own prior attempt already applied" apart from "someone else changed it" (see
+  `docs/issues/ISS-032-versioned-update-spurious-optimistic-lock.md`).
   **If no `@Version` column exists**, `update()` does **not** issue a CQL `UPDATE` at all — it
   performs a full-row `INSERT` (`statementBuilder.insertPrimary`) that overwrites every column, batched
   with lookup-table changes, and there is **no concurrency check whatsoever** — the `old` argument is
@@ -138,7 +154,9 @@ fun updateForce(entity: T)
   Lookup diffing logic (`buildUpdateStatements`): for each lookup table, if the index column's value
   changed (`oldVal != newVal && oldVal != null`) the old lookup row is deleted; if the new value is
   non-null, a lookup row is (re)inserted. `BATCH`-consistency lookup changes are folded into the same
-  `LOGGED BATCH` as the primary write; `EVENTUAL` changes fire via `scope.launch` afterward.
+  `LOGGED BATCH` as the primary write; `EVENTUAL` changes fire via `scope.launch` afterward, routed
+  through `executeWithRetry`/`executeWithRetrySuspend` the same as any other write (GH-14/ISS-033) —
+  retried on transient errors, counted in `inFlightCount`, rejected once shutdown begins.
 
 - **`updateForce(entity)`** — bypasses the `@Version` check entirely, even if the entity has a
   `@Version` column: always does a full-row `INSERT` overwrite in a batch. Because there's no separate
@@ -221,6 +239,7 @@ fun find(block: QueryContext.() -> Unit): T?
 fun findAll(limit: Int? = null, block: QueryContext.() -> Unit): List<T>
 fun findPage(pageSize: Int, pageToken: String? = null, block: QueryContext.() -> Unit = {}): KandraPage<T>
 fun exists(block: QueryContext.() -> Unit): Boolean
+fun findActive(allowFullScan: Boolean = false): List<T>
 fun raw(cql: String, vararg params: Any?): List<Row>
 fun rawQuery(query: KandraRawQuery): List<Row>
 ```
@@ -285,6 +304,18 @@ inside `BatchEngine.executeWithRetry`.
   `IN` branch or the lookup-table branch, `exists()` runs the **full** query (`SELECT *`, no `LIMIT`)
   and just checks `rows.isNotEmpty()` — meaningfully more expensive than the direct-CQL path for the
   same logical check.
+
+- **`findActive(allowFullScan = false)`** — only valid on entities with `@SoftDelete(markerProperty =
+  "...")`; throws `KandraSchemaException` at call time if the entity has no marker column configured.
+  If the marker column has `@SecondaryIndex`, queries it directly (`WHERE <marker> = false`), no
+  `ALLOW FILTERING`, `allowFullScan` is irrelevant. Without a `@SecondaryIndex` on the marker column,
+  `allowFullScan` defaults to `false` and the call throws `KandraQueryException` rather than silently
+  scanning — this is the one place in the repository API that can still emit `ALLOW FILTERING`, and as
+  of GH #12 / ISS-036 it requires an explicit opt-in (`allowFullScan = true`) instead of a silent
+  default; **this is a breaking change** from pre-0.5.0 behavior. With `allowFullScan = true` and no
+  index, runs `WHERE <marker> = false ALLOW FILTERING` and logs a WARN (scatter-gather). Soft-deleted
+  rows remain findable via `findById`/`@LookupIndex` until their own TTL expires — `findActive()` is
+  the only read path that filters them out.
 
 - **`raw(cql, vararg params)`** — prepares and binds `cql` directly (`session.prepare(cql).bind(*params)`),
   returns `rs.all()` (materializes every row). Logs a WARN if `params` is empty **and** `cql` contains
@@ -437,7 +468,9 @@ class BatchEngine(
 }
 ```
 
-- **Retry**: `executeWithRetry`/`executeWithRetrySuspend` wrap every batch/statement execution. On
+- **Retry**: `executeWithRetry`/`executeWithRetrySuspend` wrap every batch/statement execution *except*
+  the `@Version` LWT update statement (see `update`/`updateSuspend` above, which use `executeOnce`/
+  `executeOnceSuspend` instead — no retry loop, but the same inFlightCount/shutdown bookkeeping). On
   any `Throwable` whose class is in `retryConfig.retryOn` (default: `WriteTimeoutException`,
   `ReadTimeoutException`, `NoNodeAvailableException`), retries with linear backoff
   `min(backoffMillis * (attempt + 1), maxBackoffMillis)` up to `maxAttempts` times (default 3), using
@@ -447,7 +480,10 @@ class BatchEngine(
 - **Shutdown**: every execute call starts with `checkNotShuttingDown()` — throws
   `KandraQueryException("Kandra is shutting down — new queries are rejected")` if `isShuttingDown` is
   set. `inFlightCount` is incremented before and decremented after (in a `finally`) — used by graceful
-  shutdown to drain in-flight requests.
+  shutdown to drain in-flight requests. `fireEventual`/`fireEventualSuspend`/`fireEventualStatements`
+  (the `EVENTUAL`-consistency lookup-write helpers) route through this same `executeWithRetry`/
+  `executeWithRetrySuspend` path (GH-14/ISS-033), so they inherit retry, `inFlightCount` tracking, and
+  the shutdown gate too — they are no longer a way to bypass any of the above.
 - **Metrics/slow-query logging**: after a successful execute, if `debugConfig.logSlowQueriesMs > 0` and
   elapsed time exceeds it, logs a WARN; then calls `metricsRecorder?.record(tableName, operation, elapsed)`
   if `setMetrics` was called. Both happen only on success, not on a retried-then-failed call.
@@ -487,6 +523,12 @@ Builds every `BoundStatement`. Key behaviors:
   `StatementBuilder` but **not called** by `QueryExecutor.exists()` (which builds its own
   key-selecting SELECT inline via `resolveRows(limitOne = true, selectKeys = true)` instead); keep
   this in mind if you're tracing `exists()` behavior — the logic lives in `QueryExecutor`, not here.
+- **Strict Mode (GH #5)**: both `resolveWriteConsistency` and `resolveReadConsistency` end with a shared
+  `warnIfStrictModeViolation(schema, resolved)` check — if `consistencyConfig.strictMode &&
+  consistencyConfig.multiDcTopology` and `resolved` is `LOCAL_ONE` or `ONE`, logs a WARN naming the table
+  and the resolved level. Unconditional on every matching call (no "warn once" tracking, matching the
+  `QueryExecutor.findActive()` ALLOW FILTERING warning precedent) and never throws. `multiDcTopology` is
+  `@InternalKandraApi` and populated by `kandra-ktor`'s `Kandra.kt`, not user-set.
 
 ## Codec (`io.kandra.runtime.codec.KandraCodec`)
 
@@ -564,6 +606,13 @@ class ConsistencyConfig {
     var defaultRead: KandraConsistency = KandraConsistency.LOCAL_ONE
     var defaultWrite: KandraConsistency = KandraConsistency.LOCAL_QUORUM
     var defaultSerialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL   // not read anywhere in this module — saveIfNotExists takes serialConsistency as a direct param instead
+
+    // Strict Mode (GH #5) — opt-in, default false, WARN-only, never throws.
+    var strictMode: Boolean = false
+
+    // Not user-set — @InternalKandraApi. Populated automatically by the Kandra Ktor plugin's install
+    // path from `KandraConfig.loadBalancing.allowedRemoteDcs.isNotEmpty()`. See "Strict Mode" below.
+    @InternalKandraApi var multiDcTopology: Boolean = false
 }
 
 class DebugConfig {

@@ -15,7 +15,6 @@ import io.kandra.runtime.dsl.KandraRawQuery
 import io.kandra.runtime.dsl.QueryContext
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty1
-import kotlin.reflect.full.memberProperties
 
 /**
  * Blocking repository for performing CRUD operations on a ScyllaDB table.
@@ -136,10 +135,15 @@ class KandraRepository<T : Any>(
     /**
      * Returns all rows not yet soft-deleted. Requires `@SoftDelete(markerProperty = "...")`
      * on [T] — throws [KandraSchemaException] otherwise.
+     *
+     * If the marker column has no `@SecondaryIndex`, answering this query requires
+     * `ALLOW FILTERING`. Kandra does not emit that implicitly — this throws
+     * [io.kandra.core.exception.KandraQueryException] unless you pass `allowFullScan = true`
+     * to explicitly opt into the scatter-gather scan.
      */
-    fun findActive(): List<T> {
+    fun findActive(allowFullScan: Boolean = false): List<T> {
         checkNotShuttingDown()
-        return executor.findActive(entityClass)
+        return executor.findActive(entityClass, allowFullScan)
     }
 
     fun raw(cql: String, vararg params: Any?): List<Row> {
@@ -153,7 +157,7 @@ class KandraRepository<T : Any>(
     }
 
     private fun keyValuesOf(entity: T): List<Any> = (schema.partitionKeys + schema.clusteringKeys).map { key ->
-        entity::class.memberProperties.find { it.name == key.propertyName }?.call(entity)
+        schema.reflection.propertiesByName[key.propertyName]?.call(entity)
             ?: throw KandraQueryException("Key '${key.propertyName}' is null")
     }
 

@@ -175,6 +175,12 @@ val Kandra: ApplicationPlugin<KandraConfig> =
             SchemaMode.NONE -> logger.info { "Kandra: schemaMode=NONE — skipping all DDL." }
         }
 
+        // ── Strict Mode (GH #5) multi-DC topology signal ─────────────────────
+        // Not user-set — derived automatically from loadBalancing.allowedRemoteDcs so that setting
+        // consistency { strictMode = true } combines with the loadBalancing config a multi-DC deployment
+        // already sets for failover, with no separate flag for the user to remember.
+        config.consistency.multiDcTopology = config.loadBalancing.allowedRemoteDcs.isNotEmpty()
+
         // ── Build runtime ────────────────────────────────────────────────────
         // Bounded scope: eventual writes and credential refresh are tied to application lifetime.
         // Cancelled in ApplicationStopped after session.close(), so no coroutine can fire on a closed session.
