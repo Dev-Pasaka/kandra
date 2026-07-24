@@ -7,7 +7,9 @@ import io.kandra.core.KandraEventListener
 import io.kandra.core.annotations.LookupConsistency
 import io.kandra.core.exception.KandraQueryException
 import io.kandra.core.schema.ColumnSchema
+import io.kandra.core.schema.EntityReflection
 import io.kandra.core.schema.LookupTableSchema
+import io.kandra.core.schema.TableSchema
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +25,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.reflect.full.memberFunctions
+import kotlin.reflect.full.memberProperties
+import kotlin.reflect.full.primaryConstructor
 import kotlin.reflect.typeOf
 
 /**
@@ -45,6 +50,23 @@ class BatchEngineEventualWriteTest {
         consistency = LookupConsistency.EVENTUAL
     )
     private val widget = Widget(id = "w-1", email = "a@b.com")
+
+    /** Widget is a plain data class (no @ScyllaTable), so SchemaRegistry.register can't build this — assembled by hand. */
+    private val widgetSchema = TableSchema(
+        entityClass = Widget::class,
+        tableName = "widget",
+        partitionKeys = listOf(idCol),
+        clusteringKeys = emptyList(),
+        columns = listOf(idCol, emailCol),
+        lookupTables = listOf(lookupSchema),
+        reflection = EntityReflection(
+            copyFunction = Widget::class.memberFunctions.find { it.name == "copy" },
+            copyParameters = Widget::class.memberFunctions.find { it.name == "copy" }?.parameters ?: emptyList(),
+            propertiesByName = Widget::class.memberProperties.associateBy { it.name },
+            primaryConstructor = Widget::class.primaryConstructor,
+            constructorParameters = Widget::class.primaryConstructor?.parameters ?: emptyList()
+        )
+    )
 
     private val scopes = mutableListOf<CoroutineScope>()
 
@@ -84,15 +106,15 @@ class BatchEngineEventualWriteTest {
     )
 
     private fun invokeFireEventual(engine: BatchEngine, lookups: List<LookupTableSchema>, entity: Any) {
-        val m = BatchEngine::class.java.getDeclaredMethod("fireEventual", List::class.java, Any::class.java)
+        val m = BatchEngine::class.java.getDeclaredMethod("fireEventual", TableSchema::class.java, List::class.java, Any::class.java)
         m.isAccessible = true
-        m.invoke(engine, lookups, entity)
+        m.invoke(engine, widgetSchema, lookups, entity)
     }
 
     private fun invokeFireEventualSuspend(engine: BatchEngine, lookups: List<LookupTableSchema>, entity: Any) {
-        val m = BatchEngine::class.java.getDeclaredMethod("fireEventualSuspend", List::class.java, Any::class.java)
+        val m = BatchEngine::class.java.getDeclaredMethod("fireEventualSuspend", TableSchema::class.java, List::class.java, Any::class.java)
         m.isAccessible = true
-        m.invoke(engine, lookups, entity)
+        m.invoke(engine, widgetSchema, lookups, entity)
     }
 
     private fun invokeFireEventualStatements(engine: BatchEngine, stmts: List<BatchableStatement<*>>, entity: Any, context: String, tableName: String) {
@@ -165,7 +187,7 @@ class BatchEngineEventualWriteTest {
         }
         val listener = RecordingEventListener()
         val engine = newEngine(session, listener)
-        val stmt = StatementBuilder(session).insertLookup(lookupSchema, widget)
+        val stmt = StatementBuilder(session).insertLookup(widgetSchema, lookupSchema, widget)
 
         invokeFireEventualStatements(engine, listOf(stmt), widget, "(update)", "widget_by_email")
 
@@ -279,7 +301,7 @@ class BatchEngineEventualWriteTest {
         session.onExecute = { executeWasCalled = true; FakeEventualResultSet.empty() }
         val listener = RecordingEventListener()
         val engine = newEngine(session, listener)
-        val stmt = StatementBuilder(session).insertLookup(lookupSchema, widget)
+        val stmt = StatementBuilder(session).insertLookup(widgetSchema, lookupSchema, widget)
         engine.isShuttingDown.set(true)
 
         invokeFireEventualStatements(engine, listOf(stmt), widget, "(update)", "widget_by_email")
