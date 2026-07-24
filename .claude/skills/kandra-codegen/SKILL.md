@@ -34,13 +34,23 @@ override fun process(resolver: Resolver): List<KSAnnotated> {
     val symbols = resolver.getSymbolsWithAnnotation("io.kandra.core.annotations.ScyllaTable")
     val unprocessed = symbols.filter { !it.validate() }.toList()
 
+    // Classpath presence probes — resolved once per round, not once per entity. A null result
+    // just means that DI framework isn't on this compilation's classpath; that's the normal
+    // case, not an error.
+    val koinPresent = resolver.getClassDeclarationByName(KOIN_MARKER_FQN) != null
+    val kodeinPresent = resolver.getClassDeclarationByName(KODEIN_MARKER_FQN) != null
+
     symbols
         .filter { it is KSClassDeclaration && it.validate() }
-        .forEach { processClass(it as KSClassDeclaration) }
+        .forEach { processClass(it as KSClassDeclaration, koinPresent, kodeinPresent) }
 
     return unprocessed
 }
 ```
+
+(`KOIN_MARKER_FQN` = `"org.koin.core.component.KoinComponent"`, `KODEIN_MARKER_FQN` =
+`"org.kodein.di.DIAware"` — see [Typed Koin/Kodein DI accessors](#typed-koinkodein-di-accessors-since-047)
+below.)
 
 - `getSymbolsWithAnnotation` finds every declaration carrying `@ScyllaTable`. Since the annotation's
   `@Target` is `AnnotationTarget.CLASS`, in practice this is always a `KSClassDeclaration` — but note the
@@ -64,7 +74,7 @@ override fun process(resolver: Resolver): List<KSAnnotated> {
 ## `processClass(classDecl)` — the actual generation
 
 ```kotlin
-private fun processClass(classDecl: KSClassDeclaration) {
+private fun processClass(classDecl: KSClassDeclaration, koinPresent: Boolean, kodeinPresent: Boolean) {
     val packageName = classDecl.packageName.asString()
     val className = classDecl.simpleName.asString()
     val objectName = "${className}Table"
@@ -84,7 +94,11 @@ private fun processClass(classDecl: KSClassDeclaration) {
                 "val $propName = io.kandra.runtime.dsl.KandraColumnRef<$typeName>(\"$cqlName\")"
             }
         }
-    // ... build file, write it, log it
+    // ... build *Table file, write it, log it ...
+
+    // Since 0.4.7 — additive, does not change anything above:
+    if (koinPresent) emitKoinAccessors(classDecl, packageName, className)
+    if (kodeinPresent) emitKodeinAccessors(classDecl, packageName, className)
 }
 ```
 
@@ -278,19 +292,133 @@ logger.info("Kandra codegen: generated $objectName for $className")
   a "Kandra says X is wrong" message.
 - One `logger.info(...)` call per generated table, no other logging.
 
+## Typed Koin/Kodein DI accessors (since 0.4.7)
+
+In addition to the `*Table` object above, `KandraProcessor` now *conditionally* emits typed DI accessor
+functions per `@ScyllaTable` entity — one file for Koin, one for Kodein, each generated only if that
+framework is detected on **the consuming module's own compilation classpath**. This is GH-17: it replaces
+hand-typed `named("FooRepo")` / `tag = "Foo"` string lookups (see `kandra-koin`/`kandra-kodein` skills) with
+compile-time-checked accessor functions derived from the same entity name.
+
+### Detection — classpath presence probing, not a build dependency
+
+`kandra-codegen` still has **no compile dependency on `koin-core` or `kodein-di`** (check
+`kandra-codegen/build.gradle.kts` — only `kandra-core`, the KSP API, and logging, unchanged). Presence is
+probed once per KSP round via `Resolver.getClassDeclarationByName`, which returns `null` (not an exception)
+when the class doesn't resolve:
+
+```kotlin
+val koinPresent = resolver.getClassDeclarationByName("org.koin.core.component.KoinComponent") != null
+val kodeinPresent = resolver.getClassDeclarationByName("org.kodein.di.DIAware") != null
+```
+
+`org.koin.core.component.KoinComponent` and `org.kodein.di.DIAware` were picked as markers because both are
+stable, always-present marker interfaces in their respective libraries' core artifacts (`koin-core`,
+`kodein-di`) — not something that could be present-but-misleading (e.g. a transitive-only utility class).
+**A `null` result is the normal case, not an error or a warning** — most consumers have neither on the
+classpath (this repo's own module graph, `kandra-core`/`kandra-runtime`/`kandra-ktor`, is a real example: no
+Koin/Kodein accessor files are ever generated for entities declared there). Only `kandra-koin` and
+`kandra-kodein` themselves — and any consumer that adds `koin-core`/`kodein-di` alongside `kandra-codegen` —
+ever get these files.
+
+### Generated files and naming
+
+For an entity `Foo`, in addition to `FooTable.kt`:
+
+| Condition | File | Contents |
+|---|---|---|
+| Koin detected | `FooKoinDi.kt` | `fun KoinComponent.fooRepo(): KandraRepository<Foo>` and `fun KoinComponent.fooSuspendRepo(): KandraSuspendRepository<Foo>` |
+| Kodein detected | `FooKodeinDi.kt` | `fun DIAware.fooRepo(): KandraRepository<Foo>` and `fun DIAware.fooSuspendRepo(): KandraSuspendRepository<Foo>` |
+
+The accessor function name is `objectName`'s class name **decapitalized**, not snake_cased —
+`className.replaceFirstChar { it.lowercase() }` (e.g. `User` → `userRepo()`/`userSuspendRepo()`,
+`KoinDiWidget` → `koinDiWidgetRepo()`). Both files, when both are generated, live in the same package and can
+coexist without a name clash: `KoinComponent.fooRepo()` and `DIAware.fooRepo()` are different extension
+functions (different receiver type is part of the signature) even though they share a name.
+
+Actual generated output (`UserKoinDi.kt`, Koin detected):
+
+```kotlin
+// GENERATED BY KANDRA — DO NOT EDIT
+package com.example.app
+
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.get
+import org.koin.core.qualifier.named
+
+@Suppress("UNCHECKED_CAST")
+fun KoinComponent.userRepo(): io.kandra.runtime.repository.KandraRepository<User> =
+    get<io.kandra.runtime.repository.KandraRepository<*>>(named("UserRepo")) as io.kandra.runtime.repository.KandraRepository<User>
+
+@Suppress("UNCHECKED_CAST")
+fun KoinComponent.userSuspendRepo(): io.kandra.runtime.repository.KandraSuspendRepository<User> =
+    get<io.kandra.runtime.repository.KandraSuspendRepository<*>>(named("UserSuspendRepo")) as io.kandra.runtime.repository.KandraSuspendRepository<User>
+```
+
+`UserKodeinDi.kt` (Kodein detected):
+
+```kotlin
+// GENERATED BY KANDRA — DO NOT EDIT
+package com.example.app
+
+import org.kodein.di.DIAware
+import org.kodein.di.direct
+import org.kodein.di.instance
+
+@Suppress("UNCHECKED_CAST")
+fun DIAware.userRepo(): io.kandra.runtime.repository.KandraRepository<User> =
+    direct.instance<io.kandra.runtime.repository.KandraRepository<*>>(tag = "User") as io.kandra.runtime.repository.KandraRepository<User>
+
+@Suppress("UNCHECKED_CAST")
+fun DIAware.userSuspendRepo(): io.kandra.runtime.repository.KandraSuspendRepository<User> =
+    direct.instance<io.kandra.runtime.repository.KandraSuspendRepository<*>>(tag = "UserSuspend") as io.kandra.runtime.repository.KandraSuspendRepository<User>
+```
+
+Just like the `*Table` object, every referenced type (`KandraRepository`, `KandraSuspendRepository`) is
+spliced in as a fully-qualified string — no imports needed for Kandra's own types, only for the DI
+framework's (`KoinComponent`/`get`/`named`, or `DIAware`/`direct`/`instance`).
+
+### Why the generated code isn't the issue's literal pseudocode — real API gotchas
+
+The originating GH-17 issue's proposed snippet (`get(named("UserRepo")) as KandraRepository<User>`, no
+explicit type argument) does not actually compile: Koin's `KoinComponent.get<T>()` is `inline fun <reified T>`,
+and an `as` cast does **not** propagate an expected type backward into the callee it's cast from — `T` has
+nothing else to infer from, so the compiler can't resolve it. The generated code instead supplies the type
+argument explicitly (`get<KandraRepository<*>>(...)`) and then casts, matching the pattern the `kandra-koin`
+skill's own call-site examples already use.
+
+Kodein has a sharper version of the same trap: `DIAware.instance<T>(tag)` returns a `LazyDelegate<T>` meant
+for `by instance(...)` property delegation — **not** a directly usable `T`. An expression-bodied function
+needs a real value, so the generated code goes through `DIAware.direct` (a `DirectDI`, itself a `DirectDIAware`)
+whose `DirectDIAware.instance<T>(tag): T` returns the value immediately, no delegation needed. Using bare
+`instance<T>(tag)` here would be a type error (`LazyDelegate<KandraRepository<*>>` is not assignable to
+`KandraRepository<Foo>`), not merely non-idiomatic.
+
+### Qualifier/tag agreement — the entire point of the feature
+
+The generated `named("FooRepo")` / `named("FooSuspendRepo")` (Koin) and `tag = "Foo"` / `tag = "FooSuspend"`
+(Kodein) strings must match `kandra-koin`'s `KandraKoin.kt` and `kandra-kodein`'s `KandraKodein.kt` **exactly**
+— both sides are now derived from the same `entityClass.simpleName`-based convention, just independently at
+different times (binding side at Ktor app startup, accessor side at compile time), rather than one side being
+hand-typed. If `kandra-koin`/`kandra-kodein`'s suffix convention ever changes, this processor's
+`emitKoinAccessors`/`emitKodeinAccessors` must change with it — see those skills for the exact convention.
+
 ## Every declaration in `KandraProcessor.kt`
 
 | Declaration | Kind | Signature / role |
 |---|---|---|
 | `KandraProcessor` | `class ... : SymbolProcessor` | Constructor `(codeGenerator: CodeGenerator, logger: KSPLogger)`. Both params `private`. |
-| `KandraProcessor.process(resolver: Resolver): List<KSAnnotated>` | `override fun` | Entry point per KSP round; finds `@ScyllaTable` symbols, dispatches valid ones to `processClass`, returns invalid ones for deferral. |
-| `KandraProcessor.processClass(classDecl: KSClassDeclaration): Unit` | `private fun` | Builds and writes one `*Table.kt` file for one entity, as traced above. |
+| `KandraProcessor.process(resolver: Resolver): List<KSAnnotated>` | `override fun` | Entry point per KSP round; probes Koin/Kodein presence once, finds `@ScyllaTable` symbols, dispatches valid ones to `processClass`, returns invalid ones for deferral. |
+| `KandraProcessor.processClass(classDecl: KSClassDeclaration, koinPresent: Boolean, kodeinPresent: Boolean): Unit` | `private fun` | Builds and writes `*Table.kt`, then conditionally `*KoinDi.kt`/`*KodeinDi.kt`, for one entity. |
+| `KandraProcessor.emitKoinAccessors(classDecl, packageName, className): Unit` | `private fun` | Writes `*KoinDi.kt` — see above. |
+| `KandraProcessor.emitKodeinAccessors(classDecl, packageName, className): Unit` | `private fun` | Writes `*KodeinDi.kt` — see above. |
 | `KandraProcessor.resolveCqlName(prop: KSPropertyDeclaration): String` | `private fun` | `@Column` name override, else `camelToSnake` of the property name. |
 | `KandraProcessor.camelToSnake(name: String): String` | `private fun` | Per-character capital-letter → `_lowercase` regex substitution; see acronym gotcha above. |
+| `KandraProcessor.decapitalize(): String` | `private fun`, extension on `String` | `replaceFirstChar { it.lowercase() }` — used for the accessor function name (`User` → `user...`), not the CQL column path. |
 | `KandraProcessor.hasAnnotation(fqn: String): Boolean` | `private fun`, extension on `KSPropertyDeclaration` | Exact-match check: does any annotation on this property resolve to the given fully-qualified annotation class name. |
 | `KandraProcessorProvider` | `class ... : SymbolProcessorProvider` | `create(environment: SymbolProcessorEnvironment): SymbolProcessor` → `KandraProcessor(environment.codeGenerator, environment.logger)`. Ignores `environment.options`. |
 
-That's the entire module: one processor class with four private helpers plus the two entry functions, and
+That's the entire module: one processor class with its private helpers plus the two entry functions, and
 one trivial provider class. No other public API surface in `kandra-codegen`.
 
 ## Error conditions — what the processor actually raises
@@ -434,3 +562,13 @@ about how a predicate against `userId` vs. `email` actually gets executed is run
   hand (or add your own KSP-round build failure via other means) if something looks off; this processor won't
   tell you.
 - Unresolvable property types silently degrade to `KandraColumnRef<Any>(...)` rather than failing the build.
+- Since 0.4.7: `*KoinDi.kt`/`*KodeinDi.kt` are generated **only** when `koin-core`/`kodein-di` resolve on
+  *this compilation's* classpath — not when they're merely present somewhere else in the project's module
+  graph. A consumer module that depends on `kandra-koin` transitively but doesn't itself depend on
+  `koin-core` directly won't get accessors generated for its own entities (Kotlin/Gradle visibility of
+  transitive deps to KSP's resolver aside, the marker-class probe simply reflects what's resolvable in that
+  specific module's KSP round). Prefer generating these in the same module where you call `kandraKoin()`/
+  `kandraKodein()`, exactly as `kandra-koin`/`kandra-kodein` themselves do for their own test entities.
+- Neither Koin nor Kodein present is silent — no log line, no warning. Don't expect to see anything in the
+  KSP log confirming "accessors were skipped"; the absence of `*KoinDi.kt`/`*KodeinDi.kt` in the generated
+  sources directory is the only signal.
