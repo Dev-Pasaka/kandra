@@ -47,6 +47,7 @@ Docker before relying on them.
 | [ISS-034](ISS-034-uncached-entity-reflection.md) | Entity reflection (copy fn, properties, constructor) re-resolved uncached on every call |
 | [ISS-035](ISS-035-lookupindex-softdelete-storage-growth.md) | `@LookupIndex` + `@SoftDelete` storage-growth implication was undocumented |
 | [ISS-036](ISS-036-findactive-allow-filtering-scope.md) | `findActive()`'s `ALLOW FILTERING` was a silent default — now an explicit `allowFullScan` opt-in |
+| [ISS-037](ISS-037-consistency-strict-mode.md) | Consistency Strict Mode — warn on `LOCAL_ONE`/`ONE` in multi-DC deployments |
 
 ## Closed — not a bug
 
