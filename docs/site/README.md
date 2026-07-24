@@ -13,7 +13,7 @@ Keeping one file per version makes that drift visible instead of silent.
 
 | Version | Kind | File |
 |---|---|---|
-| 0.4.7 | Incremental update (in progress) | [build-prompt-0.4.7.md](build-prompt-0.4.7.md) — accumulates one section per fix/feature merged since 0.4.6; not yet a tagged release |
+| 0.4.7 | Incremental update | [build-prompt-0.4.7.md](build-prompt-0.4.7.md) — covers PRs #18–#25 merged since 0.4.6 (one section each); ready to hand off, not yet a tagged release |
 | 0.4.6 | Incremental update | [build-prompt-0.4.6.md](build-prompt-0.4.6.md) — adds `@GeneratedUuid`/`UuidStrategy`/`KandraUuid` coverage to specific pages only |
 | 0.4.5 | Full build | [build-prompt-0.4.5.md](build-prompt-0.4.5.md) — initial build prompt, full site scope, information architecture, and content requirements |
 

@@ -283,3 +283,66 @@ changes query behavior — purely observability.
 - The multi-DC page documents `strictMode`, its config surface, and exactly when it warns.
 - The consistency-config reference (if the site has one) lists `strictMode` as a field.
 - No other page changed for this section.
+
+---
+
+## PR #25 — `kandra-codegen` generates typed Koin/Kodein DI accessors (new opt-in feature, this is the last PR in the 0.4.7 batch)
+
+### 1. What shipped
+
+Both `kandra-koin` and `kandra-kodein` bind repositories under **star-projected** types
+(`KandraRepository<*>`) with string-based qualifiers (`named("FooRepo")` / `tag = "Foo"`) — JVM type
+erasure means neither DI framework can recover the entity type parameter, so every hand-written lookup
+site needed a hand-typed qualifier string plus an unchecked cast to `KandraRepository<Foo>`. A typo in
+the qualifier string, or an entity rename that isn't caught everywhere, fails at runtime
+(`NoDefinitionFoundException`/`DI.NotFoundException` on first resolution), not at compile time.
+
+`kandra-codegen`'s KSP processor now conditionally generates, per `@ScyllaTable` entity: `fooRepo()`/
+`fooSuspendRepo()` extension functions on `KoinComponent` (if `koin-core` is on the compiling module's
+classpath) and on `DIAware` (if `kodein-di` is) — each wrapping the exact `named()`/`tag` lookup
+`kandraKoin()`/`kandraKodein()` already bind under, with the cast done once inside the generated
+function. Detection is a KSP classpath probe, not a compile dependency of `kandra-codegen` itself;
+absence of either DI framework on the classpath is silent (the common case for most modules).
+
+### 2. Source of truth
+
+- `docs/features/di-integrations.md` — "Typed accessors (since 0.4.7)" section, already accurate and
+  complete: generated function signatures, detection mechanism, and the concrete win over hand-typed
+  lookups. Adapt directly.
+- `.claude/skills/kandra-codegen/SKILL.md` — "Typed Koin/Kodein DI accessors" section has the exact
+  detection/generation mechanics (KSP `Resolver.getClassDeclarationByName` probe) in more depth than
+  the features doc.
+- `.claude/skills/kandra-koin/SKILL.md` / `.claude/skills/kandra-kodein/SKILL.md` — each updated with
+  usage from that framework's side.
+- `docs/issues/ISS-038-typed-di-codegen-accessors.md` — original writeup.
+- `kandra-codegen/src/main/kotlin/io/kandra/codegen/KandraProcessor.kt` — the generation logic itself,
+  if a page needs to show real generated output for a specific entity shape.
+
+### 3. Exact edits, page by page
+
+- **`/modules/kandra-codegen`** (per 0.4.5 prompt's IA): add a "Typed DI accessors" subsection —
+  what's generated, the classpath-probe detection mechanism (opt-in by presence, not a flag), and the
+  exact generated signatures for both frameworks.
+- **`/modules/kandra-koin`** and **`/modules/kandra-kodein`**: each gets a short note that
+  `kandra-codegen` (if present on the classpath) generates `fooRepo()`/`fooSuspendRepo()` accessors as
+  the preferred alternative to the hand-typed `named()`/`tag` lookups those pages otherwise document —
+  cross-link to `/modules/kandra-codegen`'s fuller treatment rather than duplicating it.
+- **Everywhere else — leave unchanged.**
+
+### 4. Definition of done for this section
+
+- `/modules/kandra-codegen` documents the typed DI accessor generation, detection mechanism, and
+  signatures for both frameworks.
+- `/modules/kandra-koin` and `/modules/kandra-kodein` each note the generated accessors as the
+  preferred alternative, cross-linked to the fuller `kandra-codegen` treatment.
+- No other page changed for this section.
+
+---
+
+## Batch complete
+
+This file now covers every PR merged into `main` between 0.4.6 and this point (#18–#25). Once this
+prompt has been executed against the live site, this file's job is done — start a fresh
+`build-prompt-<next-version>.md` for whatever ships next, per the process in
+[`docs/site/README.md`](README.md#adding-a-prompt-for-a-new-kandra-release). Don't keep appending to
+this file after it's been handed off and acted on.
