@@ -521,6 +521,30 @@ install(Kandra) {
 
 Available levels: `ANY`, `ONE`, `TWO`, `THREE`, `QUORUM`, `ALL`, `LOCAL_QUORUM`, `EACH_QUORUM`, `LOCAL_ONE`, `LOCAL_SERIAL`, `SERIAL`.
 
+#### Strict Mode (multi-DC `LOCAL_ONE`/`ONE` warning)
+
+Opt-in, default `false`, **WARN-only — never throws**:
+
+```kotlin
+install(Kandra) {
+    consistency {
+        strictMode = true
+    }
+    loadBalancing {
+        allowedRemoteDcs = listOf("eu-west") // marks this deployment as multi-DC
+    }
+}
+```
+
+When `strictMode = true` *and* `loadBalancing.allowedRemoteDcs` is non-empty, Kandra logs a WARN every
+time a query resolves (after per-call override → `@ReadConsistency`/`@WriteConsistency` → these
+defaults) to `LOCAL_ONE` or `ONE`. In a multi-DC deployment those levels are satisfied by a single
+replica in a single datacenter, which is usually not what's intended — `LOCAL_QUORUM` is the normal
+default precisely so reads/writes are acknowledged across datacenters. This never blocks or fails the
+query; it only warns, so enabling it cannot break an existing deployment. The multi-DC signal
+(`allowedRemoteDcs` non-empty) is picked up automatically — there's nothing else to configure beyond
+`strictMode` and whatever `loadBalancing.allowedRemoteDcs` you'd already set for multi-DC failover.
+
 ---
 
 ### Retry Policy
