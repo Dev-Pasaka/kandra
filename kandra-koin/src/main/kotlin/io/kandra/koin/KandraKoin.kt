@@ -1,6 +1,7 @@
 package io.kandra.koin
 
 import io.kandra.core.SchemaRegistry
+import io.kandra.core.exception.KandraSchemaException
 import io.kandra.ktor.kandra
 import io.kandra.ktor.kandraSession
 import io.kandra.runtime.repository.KandraRepository
@@ -21,12 +22,31 @@ import org.koin.ktor.ext.getKoin
  * Named qualifiers follow the pattern:
  * - `"${EntityName}Repo"` for [KandraRepository]
  * - `"${EntityName}SuspendRepo"` for [KandraSuspendRepository]
+ *
+ * Qualifiers are derived purely from [Class.getSimpleName], so two `@ScyllaTable` entities that
+ * share a simple name (e.g. `billing.User` and `admin.User`) would otherwise collide and cause a
+ * confusing `DefinitionOverrideException` from Koin itself. To surface a clear cause instead, this
+ * checks for simple-name collisions across every registered entity *before* building any bindings
+ * and throws [KandraSchemaException] naming the colliding classes. See GH-35.
  */
 @Suppress("OPT_IN_USAGE")
 fun Application.kandraKoin() {
+    val registry = SchemaRegistry
+
+    registry.all()
+        .groupBy { it.entityClass.simpleName }
+        .filterValues { it.size > 1 }
+        .forEach { (simpleName, schemas) ->
+            val qualifiedNames = schemas.joinToString(", ") { it.entityClass.qualifiedName ?: it.entityClass.toString() }
+            throw KandraSchemaException(
+                "Multiple @ScyllaTable entities share the simple name '$simpleName', which would " +
+                    "produce colliding Koin qualifiers (\"${simpleName}Repo\" / \"${simpleName}SuspendRepo\"): " +
+                    "$qualifiedNames. Rename one of these classes so each entity has a unique simple name."
+            )
+        }
+
     val runtime = kandra                     // the plugin-installed KandraRuntime
     val session = kandraSession
-    val registry = SchemaRegistry
 
     val repoModule = module {
         registry.all().forEach { schema ->
