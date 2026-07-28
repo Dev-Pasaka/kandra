@@ -51,6 +51,7 @@ Docker before relying on them.
 | [ISS-038](ISS-038-typed-di-codegen-accessors.md) | `kandra-koin`/`kandra-kodein` qualifiers were hand-typed strings with no compile-time safety |
 | [ISS-039](ISS-039-migration-lwt-prerequisite.md) | Migration runner requires LWT support as an explicit prerequisite |
 | [ISS-040](ISS-040-fake-session-bind-unsupported.md) | `FakeKandraSession` couldn't execute any prepared statement — `bind()` always threw |
+| [ISS-041](ISS-041-di-qualifier-collision.md) | `kandra-koin`/`kandra-kodein` qualifiers collided for same-named entities in different packages |
 
 ## Closed — not a bug
 
