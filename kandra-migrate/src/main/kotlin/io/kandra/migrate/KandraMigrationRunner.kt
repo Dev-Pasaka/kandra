@@ -149,14 +149,22 @@ class KandraMigrationRunner(
      */
     private fun handleUnresolvedClaim(row: MigrationHistory, migration: KandraMigration) {
         val claimedAt = row.claimedAt ?: row.appliedAt
-        val ageSeconds = Duration.between(claimedAt, Instant.now()).seconds
+        val age = Duration.between(claimedAt, Instant.now())
+        // Only for display in the log/exception text below -- truncates to whole seconds, so it
+        // must never be used for the actual staleness comparison (a sub-second age would round
+        // down to 0 and compare equal to a Duration.ZERO threshold, silently forgiving anything).
+        val ageSeconds = age.seconds
         val description = "Migration v${migration.version} ('${migration.name}') is marked CLAIMED in " +
             "kandra_migrations but not yet APPLIED (claimed at $claimedAt, ${ageSeconds}s ago). This means " +
             "either another instance is actively applying it right now, or a previous instance crashed " +
             "(process kill, OOM, uncaught Error) after claiming it but before finishing. Kandra has no " +
             "lease/heartbeat mechanism to tell these two cases apart, so it refuses to guess."
 
-        if (ageSeconds > staleClaimThreshold.seconds) {
+        // Compare the Duration objects directly, not truncated .seconds Longs -- Duration is
+        // Comparable<Duration>, so this correctly treats any non-zero age (even sub-second) as
+        // exceeding a Duration.ZERO threshold, while still behaving correctly for the real
+        // multi-minute default case.
+        if (age > staleClaimThreshold) {
             throw KandraMigrationException(
                 "$description This exceeds the staleness threshold of ${staleClaimThreshold.seconds}s. " +
                 "Inspect the kandra_migrations table for version ${migration.version} and resolve it " +
