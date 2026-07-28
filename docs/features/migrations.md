@@ -1,5 +1,13 @@
 # Schema Migration (`kandra-migrate`)
 
+## Prerequisites
+
+The migration runner requires **LWT (lightweight transactions) support** on the cluster.
+`KandraMigrationRunner` claims each migration via an `INSERT ... IF NOT EXISTS` before running it, to lock
+against concurrent runner instances racing the same keyspace. If LWT is disabled or restricted on the
+cluster (some operators do this for performance reasons), the runner fails outright. Confirm LWT is
+available before adopting `kandra-migrate`.
+
 Versioned, checksum-validated migrations:
 
 ```kotlin
