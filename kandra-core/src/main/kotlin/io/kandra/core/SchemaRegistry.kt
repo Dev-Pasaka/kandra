@@ -62,6 +62,13 @@ object SchemaRegistry {
         val tableAnnotation = klass.findAnnotation<ScyllaTable>()
             ?: throw KandraSchemaException("Class '${klass.simpleName}' is missing @ScyllaTable annotation.")
         val tableName = tableAnnotation.name
+        if (!CqlNaming.isValidIdentifier(tableName)) {
+            throw KandraSchemaException(
+                "Class '${klass.simpleName}' has an invalid @ScyllaTable name '$tableName' — " +
+                    "table names must be non-blank, start with a letter or underscore, and contain " +
+                    "only letters, digits, and underscores."
+            )
+        }
         val ttlAnnotation = klass.findAnnotation<Ttl>()
 
         val properties = klass.memberProperties
@@ -79,7 +86,30 @@ object SchemaRegistry {
             val isSensitive = prop.findAnnotation<Sensitive>() != null
             val isVersion = prop.findAnnotation<Version>() != null
             val generatedUuidAnn = prop.findAnnotation<GeneratedUuid>()
-            val cqlName = columnAnn?.name ?: camelToSnake(prop.name)
+            val cqlName = CqlNaming.resolveColumnName(columnAnn?.name, prop.name)
+
+            // @PartitionKey and @ClusteringKey are mutually exclusive on the same property — a
+            // column that's both lands in both partitionKeys and clusteringKeys, and DdlGenerator
+            // would emit it on both sides of the PRIMARY KEY (...) clause, which ScyllaDB rejects
+            // at CREATE TABLE time. See GH-30.
+            if (partitionKeyAnn != null && clusteringKeyAnn != null) {
+                throw KandraSchemaException(
+                    "Property '${klass.simpleName}.${prop.name}' is annotated both @PartitionKey " +
+                        "and @ClusteringKey — a column cannot be both."
+                )
+            }
+
+            // Resolved cqlName must be a valid CQL identifier — this also catches a blank
+            // @Column("") name, since resolveColumnName already falls back to camelToSnake in
+            // that case, but a bad @Column override (leading digit, punctuation, etc.) still needs
+            // to be caught here. See GH-30.
+            if (!CqlNaming.isValidIdentifier(cqlName)) {
+                throw KandraSchemaException(
+                    "Property '${klass.simpleName}.${prop.name}' resolves to an invalid CQL column " +
+                        "name '$cqlName' — column names must be non-blank, start with a letter or " +
+                        "underscore, and contain only letters, digits, and underscores."
+                )
+            }
 
             // @CreatedAt / @UpdatedAt must be on Instant fields
             if (isCreatedAt || isUpdatedAt) {
@@ -98,6 +128,20 @@ object SchemaRegistry {
                 if (classifier != UUID::class) {
                     throw KandraSchemaException(
                         "@GeneratedUuid on '${klass.simpleName}.${prop.name}' must be a UUID field, got: ${prop.returnType}"
+                    )
+                }
+            }
+
+            // The composed lookup table name ("{tableName}_{tableSuffix}") is spliced directly
+            // into DDL by DdlGenerator.lookupTable, just like the primary tableName — validate it
+            // the same way. See GH-30.
+            if (lookupIndexAnn != null) {
+                val composedName = "${tableName}_${lookupIndexAnn.tableSuffix}"
+                if (!CqlNaming.isValidIdentifier(composedName)) {
+                    throw KandraSchemaException(
+                        "@LookupIndex on '${klass.simpleName}.${prop.name}' resolves to an invalid " +
+                            "lookup table name '$composedName' — table names must be non-blank, start " +
+                            "with a letter or underscore, and contain only letters, digits, and underscores."
                     )
                 }
             }
@@ -270,6 +314,5 @@ object SchemaRegistry {
         )
     }
 
-    internal fun camelToSnake(name: String): String =
-        name.replace(Regex("([A-Z])")) { "_${it.value.lowercase()}" }.trimStart('_')
+    internal fun camelToSnake(name: String): String = CqlNaming.camelToSnake(name)
 }

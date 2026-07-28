@@ -133,6 +133,43 @@ data class BadGeneratedUuidEntity(
     @GeneratedUuid val name: String = ""  // wrong type
 )
 
+// ── GH-30: annotation validation test entities ─────────────────────────────
+
+@ScyllaTable("both_pk_and_ck_entities")
+data class BothPartitionAndClusteringKeyEntity(
+    @PartitionKey
+    @ClusteringKey
+    val id: UUID,
+    val value: String
+)
+
+@ScyllaTable("blank_column_name_entities")
+data class BlankColumnNameEntity(
+    @PartitionKey val id: UUID,
+    @Column("")
+    val name: String
+)
+
+@ScyllaTable("bad_column_name_entities")
+data class BadColumnNameEntity(
+    @PartitionKey val id: UUID,
+    @Column("1bad-name")
+    val name: String
+)
+
+@ScyllaTable("1_invalid_table_name")
+data class InvalidTableNameEntity(
+    @PartitionKey val id: UUID,
+    val value: String
+)
+
+@ScyllaTable("invalid_lookup_suffix_entities")
+data class InvalidLookupSuffixEntity(
+    @PartitionKey val id: UUID,
+    @LookupIndex(tableSuffix = "bad suffix!")
+    val email: String
+)
+
 class SchemaRegistryTest {
 
     @AfterEach
@@ -372,6 +409,60 @@ class SchemaRegistryTest {
             first.reflection.propertiesByName === second.reflection.propertiesByName,
             "the cached property map itself must be reused, not recomputed"
         )
+    }
+
+    // ── GH-30: annotation validation ──────────────────────────────────────────
+
+    @Test
+    fun `property annotated both PartitionKey and ClusteringKey throws KandraSchemaException`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(BothPartitionAndClusteringKeyEntity::class)
+        }
+        assertTrue(ex.message!!.contains("@PartitionKey"))
+        assertTrue(ex.message!!.contains("@ClusteringKey"))
+    }
+
+    @Test
+    fun `blank Column name falls back to camelToSnake instead of producing a blank cqlName`() {
+        val schema = SchemaRegistry.register(BlankColumnNameEntity::class)
+        val nameCol = schema.columns.find { it.propertyName == "name" }
+        assertNotNull(nameCol)
+        assertEquals("name", nameCol!!.cqlName)
+    }
+
+    @Test
+    fun `invalid Column name throws KandraSchemaException`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(BadColumnNameEntity::class)
+        }
+        assertTrue(ex.message!!.contains("invalid CQL column name"))
+        assertTrue(ex.message!!.contains("1bad-name"))
+    }
+
+    @Test
+    fun `invalid ScyllaTable name throws KandraSchemaException`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(InvalidTableNameEntity::class)
+        }
+        assertTrue(ex.message!!.contains("invalid @ScyllaTable name"))
+        assertTrue(ex.message!!.contains("1_invalid_table_name"))
+    }
+
+    @Test
+    fun `invalid LookupIndex table suffix throws KandraSchemaException`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(InvalidLookupSuffixEntity::class)
+        }
+        assertTrue(ex.message!!.contains("invalid lookup table name"))
+    }
+
+    @Test
+    fun `valid entities with distinct PartitionKey and ClusteringKey properties still register`() {
+        // Regression guard for the mutual-exclusion check above: a normal entity with separate
+        // partition and clustering key properties must be unaffected.
+        val schema = SchemaRegistry.register(CompoundPkEntity::class)
+        assertEquals(1, schema.partitionKeys.size)
+        assertEquals(2, schema.clusteringKeys.size)
     }
 
     @Test
