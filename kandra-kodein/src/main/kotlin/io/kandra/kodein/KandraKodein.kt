@@ -4,6 +4,7 @@ package io.kandra.kodein
 import com.datastax.oss.driver.api.core.CqlSession
 import io.kandra.core.InternalKandraApi
 import io.kandra.core.SchemaRegistry
+import io.kandra.core.exception.KandraSchemaException
 import io.kandra.core.schema.TableSchema
 import io.kandra.ktor.kandra
 import io.kandra.ktor.kandraSession
@@ -30,12 +31,31 @@ import org.kodein.di.ktor.di
  * Repositories are bound by tag:
  * - `KandraRepository<*>` tagged with `"${EntityName}"`
  * - `KandraSuspendRepository<*>` tagged with `"${EntityName}Suspend"`
+ *
+ * Tags are derived purely from [Class.getSimpleName], so two `@ScyllaTable` entities that share a
+ * simple name (e.g. `billing.User` and `admin.User`) would otherwise collide and cause a confusing
+ * generic binding-override error from Kodein itself. To surface a clear cause instead, this checks
+ * for simple-name collisions across every registered entity *before* building any bindings and
+ * throws [KandraSchemaException] naming the colliding classes. See GH-35.
  */
 @Suppress("OPT_IN_USAGE")
 fun Application.kandraKodein() {
+    val registry = SchemaRegistry
+
+    registry.all()
+        .groupBy { it.entityClass.simpleName }
+        .filterValues { it.size > 1 }
+        .forEach { (simpleName, schemas) ->
+            val qualifiedNames = schemas.joinToString(", ") { it.entityClass.qualifiedName ?: it.entityClass.toString() }
+            throw KandraSchemaException(
+                "Multiple @ScyllaTable entities share the simple name '$simpleName', which would " +
+                    "produce colliding Kodein tags (\"$simpleName\" / \"${simpleName}Suspend\"): " +
+                    "$qualifiedNames. Rename one of these classes so each entity has a unique simple name."
+            )
+        }
+
     val runtime = kandra                     // the plugin-installed KandraRuntime
     val session = kandraSession
-    val registry = SchemaRegistry
 
     di {
         registry.all().forEach { schema ->
