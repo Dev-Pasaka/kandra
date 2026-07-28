@@ -323,7 +323,7 @@ class BatchEngine(
             BatchStatement.newInstance(DefaultBatchType.LOGGED).add(statementBuilder.insertPrimary(schema, stamped))
         ) { acc, stmt -> acc.add(stmt) }
         executeWithRetry(batch)
-        scope.launch { eventualStmts.forEach { runCatching { session.execute(it) }.onFailure { err -> logger.error(err) { "EVENTUAL updateForce failed" } } } }
+        fireEventualStatements(eventualStmts, entity, "(updateForce)", schema.tableName)
     }
 
     // ── Delete ───────────────────────────────────────────────────────────────
@@ -346,6 +346,22 @@ class BatchEngine(
         executeWithRetry(batch)
     }
 
+    /**
+     * Deletes a row by full primary key without looking up the entity first — used by
+     * [io.kandra.runtime.repository.KandraRepository.deleteById]'s "not found" branch (nothing to
+     * diff against, so there's no lookup-table cleanup possible here; unlike [delete] this never
+     * touches lookup rows). Routed through [executeWithRetry] so it gets the same shutdown gate,
+     * retry-on-transient-error, and [inFlightCount] tracking as every other write.
+     */
+    fun deleteById(schema: TableSchema, vararg keyValues: Any) {
+        executeWithRetry(statementBuilder.deleteById(schema, *keyValues), schema.tableName, "deleteById")
+    }
+
+    /** Suspend counterpart of [deleteById] — see its doc. */
+    suspend fun deleteByIdSuspend(schema: TableSchema, vararg keyValues: Any) {
+        executeWithRetrySuspend(statementBuilder.deleteById(schema, *keyValues), schema.tableName, "deleteById")
+    }
+
     fun deleteAll(schema: TableSchema, entities: List<Any>) {
         if (entities.isEmpty()) return
         if (entities.size > tombstoneWarnThreshold) {
@@ -357,6 +373,53 @@ class BatchEngine(
             }
         }
         entities.forEach { delete(schema, it) }
+    }
+
+    // ── Counter / collection mutations ────────────────────────────────────────
+    // append/remove/put/increment/decrement used to call session.execute/executeSuspend directly
+    // from the repository classes, bypassing checkNotShuttingDown(), inFlightCount tracking, and
+    // retry-on-transient-error entirely. Routed through executeWithRetry/executeWithRetrySuspend
+    // here so they get the same safety net as every other write.
+
+    fun append(schema: TableSchema, keyValues: List<Any>, columnName: String, values: Any, consistency: KandraConsistency? = null) {
+        executeWithRetry(statementBuilder.appendToCollection(schema, keyValues, columnName, values, consistency), schema.tableName, "append")
+    }
+
+    suspend fun appendSuspend(schema: TableSchema, keyValues: List<Any>, columnName: String, values: Any, consistency: KandraConsistency? = null) {
+        executeWithRetrySuspend(statementBuilder.appendToCollection(schema, keyValues, columnName, values, consistency), schema.tableName, "append")
+    }
+
+    fun remove(schema: TableSchema, keyValues: List<Any>, columnName: String, values: Any, consistency: KandraConsistency? = null) {
+        executeWithRetry(statementBuilder.removeFromCollection(schema, keyValues, columnName, values, consistency), schema.tableName, "remove")
+    }
+
+    suspend fun removeSuspend(schema: TableSchema, keyValues: List<Any>, columnName: String, values: Any, consistency: KandraConsistency? = null) {
+        executeWithRetrySuspend(statementBuilder.removeFromCollection(schema, keyValues, columnName, values, consistency), schema.tableName, "remove")
+    }
+
+    /** Despite the name, this is a map merge/overwrite-by-key (`col = col + ?`) — see [StatementBuilder.appendToCollection]'s doc. */
+    fun put(schema: TableSchema, keyValues: List<Any>, columnName: String, entries: Any, consistency: KandraConsistency? = null) {
+        executeWithRetry(statementBuilder.appendToCollection(schema, keyValues, columnName, entries, consistency), schema.tableName, "put")
+    }
+
+    suspend fun putSuspend(schema: TableSchema, keyValues: List<Any>, columnName: String, entries: Any, consistency: KandraConsistency? = null) {
+        executeWithRetrySuspend(statementBuilder.appendToCollection(schema, keyValues, columnName, entries, consistency), schema.tableName, "put")
+    }
+
+    fun increment(schema: TableSchema, columnName: String, partitionKeys: Map<String, Any>, by: Long, consistency: KandraConsistency? = null) {
+        executeWithRetry(statementBuilder.counterUpdate(schema, columnName, partitionKeys, by, consistency), schema.tableName, "increment")
+    }
+
+    suspend fun incrementSuspend(schema: TableSchema, columnName: String, partitionKeys: Map<String, Any>, by: Long, consistency: KandraConsistency? = null) {
+        executeWithRetrySuspend(statementBuilder.counterUpdate(schema, columnName, partitionKeys, by, consistency), schema.tableName, "increment")
+    }
+
+    fun decrement(schema: TableSchema, columnName: String, partitionKeys: Map<String, Any>, by: Long, consistency: KandraConsistency? = null) {
+        executeWithRetry(statementBuilder.counterUpdate(schema, columnName, partitionKeys, -by, consistency), schema.tableName, "decrement")
+    }
+
+    suspend fun decrementSuspend(schema: TableSchema, columnName: String, partitionKeys: Map<String, Any>, by: Long, consistency: KandraConsistency? = null) {
+        executeWithRetrySuspend(statementBuilder.counterUpdate(schema, columnName, partitionKeys, -by, consistency), schema.tableName, "decrement")
     }
 
     // ── saveAll ──────────────────────────────────────────────────────────────
@@ -422,6 +485,31 @@ class BatchEngine(
                 add(statementBuilder.deleteLookup(lookup, indexValue))
             }
         }
+    }
+
+    /**
+     * Executes a [KandraBatchScope]-collected list of statements as a single `LOGGED BATCH`,
+     * through [executeWithRetry] — used by [KandraBatchScope.execute] (invoked from
+     * [KandraRuntime.batchBlocking]) so a caller-controlled batch gets the same shutdown gate,
+     * retry-on-transient-error, and [inFlightCount] tracking as every other write, instead of
+     * calling `session.execute` directly.
+     */
+    internal fun executeBatchScope(statements: List<BatchableStatement<*>>) {
+        if (statements.isEmpty()) return
+        val batch = statements.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, s -> acc.add(s) }
+        executeWithRetry(batch)
+    }
+
+    /**
+     * Suspend counterpart of [executeBatchScope] — used by [KandraBatchScope.executeSuspend]
+     * (invoked from [KandraRuntime.batch]) so the final commit uses `session.executeSuspend`
+     * instead of blocking the calling coroutine's thread, while still getting the same
+     * shutdown gate / retry / [inFlightCount] tracking via [executeWithRetrySuspend].
+     */
+    internal suspend fun executeBatchScopeSuspend(statements: List<BatchableStatement<*>>) {
+        if (statements.isEmpty()) return
+        val batch = statements.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, s -> acc.add(s) }
+        executeWithRetrySuspend(batch)
     }
 
     // ── Suspend variants ─────────────────────────────────────────────────────
@@ -498,18 +586,7 @@ class BatchEngine(
             BatchStatement.newInstance(DefaultBatchType.LOGGED).add(statementBuilder.insertPrimary(schema, stamped))
         ) { acc, stmt -> acc.add(stmt) }
         executeWithRetrySuspend(batch)
-        if (eventualStmts.isNotEmpty()) {
-            scope.launch {
-                eventualStmts.forEach { stmt ->
-                    runCatching { session.executeSuspend(stmt) }
-                        .onFailure { err ->
-                            logger.error(err) { "EVENTUAL lookup update failed" }
-                            @OptIn(ExperimentalKandraApi::class)
-                            eventListener?.onEventualWriteFailed("(update)", new, err)
-                        }
-                }
-            }
-        }
+        fireEventualStatementsSuspend(eventualStmts, new, "(update)", schema.tableName)
     }
 
     suspend fun updateForceSuspend(schema: TableSchema, entity: Any) {
@@ -519,7 +596,7 @@ class BatchEngine(
             BatchStatement.newInstance(DefaultBatchType.LOGGED).add(statementBuilder.insertPrimary(schema, stamped))
         ) { acc, stmt -> acc.add(stmt) }
         executeWithRetrySuspend(batch)
-        scope.launch { eventualStmts.forEach { runCatching { session.executeSuspend(it) }.onFailure { err -> logger.error(err) { "EVENTUAL updateForce failed" } } } }
+        fireEventualStatementsSuspend(eventualStmts, entity, "(updateForce)", schema.tableName)
     }
 
     suspend fun deleteSuspend(schema: TableSchema, entity: Any) {
@@ -767,14 +844,7 @@ class BatchEngine(
             val batch = batchStmts.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, s -> acc.add(s) }
             executeWithRetrySuspend(batch)
         }
-        if (eventualStmts.isNotEmpty()) {
-            scope.launch {
-                eventualStmts.forEach { s ->
-                    runCatching { session.executeSuspend(s) }
-                        .onFailure { err -> logger.error(err) { "EVENTUAL lookup update failed" } }
-                }
-            }
-        }
+        fireEventualStatementsSuspend(eventualStmts, new, "(version update)", schema.tableName)
     }
 
     // ── Eventual write helpers ────────────────────────────────────────────────
@@ -812,6 +882,24 @@ class BatchEngine(
         scope.launch {
             stmts.forEach { stmt ->
                 runCatching { executeWithRetry(stmt, tableName, context) }
+                    .onFailure { err ->
+                        logger.error(err) { "EVENTUAL lookup $context failed" }
+                        @OptIn(ExperimentalKandraApi::class)
+                        eventListener?.onEventualWriteFailed(context, entity, err)
+                    }
+            }
+        }
+    }
+
+    /** Suspend counterpart of [fireEventualStatements] — see its doc. Used by [updateSuspend],
+     *  [updateLookupsSuspend], and [updateForceSuspend] for their EVENTUAL-consistency lookup writes,
+     *  so those inherit retry-on-transient-error, [inFlightCount] tracking, and the shutdown gate the
+     *  same way the blocking counterparts already do. */
+    private suspend fun fireEventualStatementsSuspend(stmts: List<BatchableStatement<*>>, entity: Any, context: String, tableName: String = "unknown") {
+        if (stmts.isEmpty()) return
+        scope.launch {
+            stmts.forEach { stmt ->
+                runCatching { executeWithRetrySuspend(stmt, tableName, context) }
                     .onFailure { err ->
                         logger.error(err) { "EVENTUAL lookup $context failed" }
                         @OptIn(ExperimentalKandraApi::class)

@@ -57,6 +57,7 @@ Docker before relying on them.
 | [ISS-044](ISS-044-schema-registry-validation-gaps.md) | `SchemaRegistry` didn't validate several illegal annotation states at registration time |
 | [ISS-045](ISS-045-ddl-generator-invalid-cql.md) | `DdlGenerator` could silently produce invalid or data-losing CQL |
 | [ISS-046](ISS-046-codegen-content-assertion-tests.md) | `kandra-codegen`'s test suite never asserted on generated file content |
+| [ISS-047](ISS-047-batchengine-safety-bypass.md) | Several write paths bypassed `BatchEngine`'s shutdown gate, retry, and in-flight tracking |
 
 ## Closed — not a bug
 

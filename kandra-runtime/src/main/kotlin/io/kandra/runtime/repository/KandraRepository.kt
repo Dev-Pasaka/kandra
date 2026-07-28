@@ -91,7 +91,7 @@ class KandraRepository<T : Any>(
             batchEngine.delete(schema, entity)
             cache.invalidate(if (keyValues.size == 1) keyValues[0] else keyValues.toList())
         } else {
-            session.execute(statementBuilder.deleteById(schema, *keyValues))
+            batchEngine.deleteById(schema, *keyValues)
         }
     }
 
@@ -164,28 +164,28 @@ class KandraRepository<T : Any>(
     fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        session.execute(statementBuilder.appendToCollection(schema, keyValuesOf(entity), col.cqlName, values, consistency))
+        batchEngine.append(schema, keyValuesOf(entity), col.cqlName, values, consistency)
     }
 
     fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        session.execute(statementBuilder.removeFromCollection(schema, keyValuesOf(entity), col.cqlName, values, consistency))
+        batchEngine.remove(schema, keyValuesOf(entity), col.cqlName, values, consistency)
     }
 
     fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        session.execute(statementBuilder.appendToCollection(schema, keyValuesOf(entity), col.cqlName, entries, consistency))
+        batchEngine.put(schema, keyValuesOf(entity), col.cqlName, entries, consistency)
     }
 
     fun increment(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {
         if (!schema.isCounterTable) throw KandraSchemaException("increment() is only valid on counter tables.")
-        session.execute(statementBuilder.counterUpdate(schema, field.name, partitionKeys, by, consistency))
+        batchEngine.increment(schema, field.name, partitionKeys, by, consistency)
     }
 
     fun decrement(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {
         if (!schema.isCounterTable) throw KandraSchemaException("decrement() is only valid on counter tables.")
-        session.execute(statementBuilder.counterUpdate(schema, field.name, partitionKeys, -by, consistency))
+        batchEngine.decrement(schema, field.name, partitionKeys, by, consistency)
     }
 }

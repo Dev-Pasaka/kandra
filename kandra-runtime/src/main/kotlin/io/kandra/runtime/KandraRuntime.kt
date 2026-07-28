@@ -56,9 +56,9 @@ class KandraRuntime(
     @ExperimentalKandraApi
     suspend fun batch(block: suspend KandraBatchScope.() -> Unit) {
         checkNotShuttingDown()
-        val scope = KandraBatchScope(session, batchEngine)
+        val scope = KandraBatchScope(batchEngine)
         scope.block()
-        scope.execute()
+        scope.executeSuspend()
     }
 
     /**
@@ -67,7 +67,7 @@ class KandraRuntime(
     @ExperimentalKandraApi
     fun batchBlocking(block: KandraBatchScope.() -> Unit) {
         checkNotShuttingDown()
-        val scope = KandraBatchScope(session, batchEngine)
+        val scope = KandraBatchScope(batchEngine)
         scope.block()
         scope.execute()
     }
