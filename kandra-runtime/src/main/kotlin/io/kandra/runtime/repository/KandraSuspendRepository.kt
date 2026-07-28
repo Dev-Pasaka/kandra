@@ -9,7 +9,6 @@ import io.kandra.core.schema.TableSchema
 import io.kandra.runtime.BatchEngine
 import io.kandra.runtime.QueryExecutor
 import io.kandra.runtime.StatementBuilder
-import io.kandra.runtime.driver.executeSuspend
 import io.kandra.runtime.cache.KandraCache
 import io.kandra.runtime.dsl.KandraPage
 import io.kandra.runtime.dsl.KandraRawQuery
@@ -95,7 +94,7 @@ class KandraSuspendRepository<T : Any>(
             batchEngine.deleteSuspend(schema, entity)
             cache.invalidate(if (keyValues.size == 1) keyValues[0] else keyValues.toList())
         } else {
-            session.executeSuspend(statementBuilder.deleteById(schema, *keyValues))
+            batchEngine.deleteByIdSuspend(schema, *keyValues)
         }
     }
 
@@ -171,28 +170,28 @@ class KandraSuspendRepository<T : Any>(
     suspend fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        session.executeSuspend(statementBuilder.appendToCollection(schema, keyValuesOf(entity), col.cqlName, values, consistency))
+        batchEngine.appendSuspend(schema, keyValuesOf(entity), col.cqlName, values, consistency)
     }
 
     suspend fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        session.executeSuspend(statementBuilder.removeFromCollection(schema, keyValuesOf(entity), col.cqlName, values, consistency))
+        batchEngine.removeSuspend(schema, keyValuesOf(entity), col.cqlName, values, consistency)
     }
 
     suspend fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
             ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
-        session.executeSuspend(statementBuilder.appendToCollection(schema, keyValuesOf(entity), col.cqlName, entries, consistency))
+        batchEngine.putSuspend(schema, keyValuesOf(entity), col.cqlName, entries, consistency)
     }
 
     suspend fun increment(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {
         if (!schema.isCounterTable) throw KandraSchemaException("increment() is only valid on counter tables.")
-        session.executeSuspend(statementBuilder.counterUpdate(schema, field.name, partitionKeys, by, consistency))
+        batchEngine.incrementSuspend(schema, field.name, partitionKeys, by, consistency)
     }
 
     suspend fun decrement(field: KProperty1<T, Long?>, partitionKeys: Map<String, Any>, by: Long = 1L, consistency: KandraConsistency? = null) {
         if (!schema.isCounterTable) throw KandraSchemaException("decrement() is only valid on counter tables.")
-        session.executeSuspend(statementBuilder.counterUpdate(schema, field.name, partitionKeys, -by, consistency))
+        batchEngine.decrementSuspend(schema, field.name, partitionKeys, by, consistency)
     }
 }
