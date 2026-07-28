@@ -13,5 +13,8 @@ dependencies {
     implementation(libs.slf4j.simple)
 
     testImplementation(libs.junit)
+    testImplementation(project(":kandra-test"))
+    testImplementation(libs.testcontainers.cassandra)
+    testImplementation(libs.testcontainers.junit)
     testRuntimeOnly(libs.junit.launcher)
 }

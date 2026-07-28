@@ -53,6 +53,7 @@ Docker before relying on them.
 | [ISS-040](ISS-040-fake-session-bind-unsupported.md) | `FakeKandraSession` couldn't execute any prepared statement — `bind()` always threw |
 | [ISS-041](ISS-041-di-qualifier-collision.md) | `kandra-koin`/`kandra-kodein` qualifiers collided for same-named entities in different packages |
 | [ISS-042](ISS-042-shutdown-drain-busy-wait.md) | Graceful shutdown drain busy-waited with `Thread.sleep` instead of suspending |
+| [ISS-043](ISS-043-migration-crash-safety.md) | Interrupted or racing migration runs could leave a migration marked applied before it completes |
 
 ## Closed — not a bug
 
