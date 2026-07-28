@@ -20,22 +20,33 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * In-memory drop-in replacement for [CqlSession] — no ScyllaDB connection required.
  *
- * Captures [BatchStatement] executions so tests can assert batch behaviour.
- * Use via [KandraTestUtils.inMemory] to wire a full repository stack without Testcontainers.
+ * `prepare(cql).bind(...)` returns a [FakePreparedStatement]/[FakeBoundStatement] pair that
+ * records the CQL string and positional bound values without touching a real driver session, so
+ * the full `KandraRepository`/`KandraSuspendRepository` surface (`save`, `findById`, `delete`,
+ * `update`, batch writes, ...) can run against this fake end-to-end. [execute] captures every
+ * [Statement] it's handed (see [capturedStatements]), with [capturedBatches] as a convenience
+ * filter for just the [BatchStatement]s (`save`/`delete`/`update`/`saveAll` all route through a
+ * `LOGGED` batch). Use via [KandraTestUtils.inMemory] to wire a full repository stack without
+ * Testcontainers.
  *
- * Note: Because the DataStax driver's `BoundStatement` is final, the fake session
- * does not simulate actual query routing. Use it to verify structural behaviour
- * (batch composition, save/delete ordering) rather than data round-trips.
+ * Note: this performs no real CQL type encoding/decoding or query semantics — `execute()` always
+ * returns an empty, `wasApplied() == true` result set, regardless of the statement. Use this fake
+ * to verify structural behaviour (batch composition, save/delete ordering, what was bound to what)
+ * rather than actual data round-trips or LWT applied/not-applied semantics; for those, use
+ * [KandraTestcontainers] instead.
  */
 class FakeKandraSession : CqlSession {
 
-    private val capturedBatchStatements = mutableListOf<BatchStatement>()
+    private val capturedStatementsList = mutableListOf<Statement<*>>()
+
+    /** Returns every [Statement] executed synchronously via [execute], in call order. */
+    fun capturedStatements(): List<Statement<*>> = capturedStatementsList.toList()
 
     /** Returns all [BatchStatement] instances that were executed via [execute]. */
-    fun capturedBatches(): List<BatchStatement> = capturedBatchStatements.toList()
+    fun capturedBatches(): List<BatchStatement> = capturedStatementsList.filterIsInstance<BatchStatement>()
 
-    /** Clears all captured batches. */
-    fun reset() = capturedBatchStatements.clear()
+    /** Clears all captured statements/batches. */
+    fun reset() = capturedStatementsList.clear()
 
     /** Returns an empty in-memory table contents list (structural test placeholder). */
     fun tableContents(tableName: String): List<Map<String, Any?>> = emptyList()
@@ -48,7 +59,7 @@ class FakeKandraSession : CqlSession {
     }
 
     override fun execute(statement: Statement<*>): ResultSet {
-        if (statement is BatchStatement) capturedBatchStatements.add(statement)
+        capturedStatementsList.add(statement)
         return FakeResultSet.empty()
     }
 
