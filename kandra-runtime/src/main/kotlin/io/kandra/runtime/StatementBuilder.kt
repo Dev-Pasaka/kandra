@@ -122,6 +122,12 @@ class StatementBuilder(
         timestampMicros: Long? = null,
         consistency: KandraConsistency? = null
     ): BoundStatement {
+        // SchemaRegistry.buildSchema (GH-31) now throws at registration time for any two distinct
+        // properties resolving to the same cqlName, so this distinctBy can no longer silently drop a
+        // genuinely-different colliding column. It's still required, though: @LookupIndex columns
+        // are deliberately listed twice here (once via `columns`, once via
+        // `lookupTables.map { it.indexColumn }`), and this is what de-dupes that intentional overlap
+        // rather than binding/inserting the same column value twice.
         val allCols = buildList {
             addAll(schema.partitionKeys)
             addAll(schema.clusteringKeys)
@@ -181,6 +187,12 @@ class StatementBuilder(
         timestampMicros: Long? = null,
         consistency: KandraConsistency? = null
     ): BoundStatement {
+        // SchemaRegistry.buildSchema (GH-31) now throws at registration time for any two distinct
+        // properties resolving to the same cqlName, so this distinctBy can no longer silently drop a
+        // genuinely-different colliding column. It's still required, though: @LookupIndex columns
+        // are deliberately listed twice here (once via `columns`, once via
+        // `lookupTables.map { it.indexColumn }`), and this is what de-dupes that intentional overlap
+        // rather than binding/inserting the same column value twice.
         val allCols = buildList {
             addAll(schema.partitionKeys)
             addAll(schema.clusteringKeys)

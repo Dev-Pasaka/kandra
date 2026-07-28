@@ -240,6 +240,26 @@ object SchemaRegistry {
             !col.isPartitionKey && col.clusteringKey == null && !col.isTransient
         }
 
+        // ── Duplicate cqlName validation (GH-31) ──────────────────────────────
+        // partitionKeys + clusteringKeys + regularColumns is exactly the full set of columns that
+        // ends up spliced into DDL/DML (regularColumns already includes @LookupIndex columns —
+        // they're excluded only from partitionKeys/clusteringKeys, not from "regular"). Two columns
+        // resolving to the same cqlName — a typo'd @Column override, or camelToSnake's
+        // trimStart('_') colliding two differently-named properties (e.g. `_archived` and
+        // `archived` both becoming `archived`) — must fail loudly here, rather than being silently
+        // dropped later by the `.distinctBy { it.cqlName }` calls in DdlGenerator/StatementBuilder,
+        // which exist to de-duplicate the *same* lookup column appearing twice in a list
+        // construction, not to arbitrate between two genuinely different colliding properties.
+        val fullColumnSet = partitionKeys + clusteringKeys + regularColumns
+        val duplicateCqlNameGroups = fullColumnSet.groupBy { it.cqlName }.filter { it.value.size > 1 }
+        duplicateCqlNameGroups.entries.firstOrNull()?.let { (cqlName, cols) ->
+            throw KandraSchemaException(
+                "Class '${klass.simpleName}' has duplicate CQL column name '$cqlName' — properties " +
+                    "${cols.joinToString(", ") { it.propertyName }} all resolve to the same column " +
+                    "name. Rename one via @Column(name = \"...\") or rename the property."
+            )
+        }
+
         val lookupTables = lookupColumns.map { col ->
             LookupTableSchema(
                 tableName = col.lookupIndex!!.tableName,
