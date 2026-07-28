@@ -170,6 +170,27 @@ data class InvalidLookupSuffixEntity(
     val email: String
 )
 
+// ── GH-31: duplicate cqlName validation test entities ──────────────────────
+
+@ScyllaTable("explicit_duplicate_column_entities")
+data class ExplicitDuplicateColumnEntity(
+    @PartitionKey val id: UUID,
+    @Column("value")
+    val a: String,
+    @Column("value")
+    val b: String
+)
+
+@ScyllaTable("camel_to_snake_collision_entities")
+data class CamelToSnakeCollisionEntity(
+    @PartitionKey val id: UUID,
+    // camelToSnake("_archived") -> "_archived" -> trimStart('_') -> "archived"
+    // camelToSnake("archived")  -> "archived"  -> trimStart('_') -> "archived"
+    // Two differently-named properties silently colliding on the same cqlName.
+    val _archived: Boolean,
+    val archived: Boolean
+)
+
 class SchemaRegistryTest {
 
     @AfterEach
@@ -463,6 +484,29 @@ class SchemaRegistryTest {
         val schema = SchemaRegistry.register(CompoundPkEntity::class)
         assertEquals(1, schema.partitionKeys.size)
         assertEquals(2, schema.clusteringKeys.size)
+    }
+
+    // ── GH-31: duplicate cqlName validation ────────────────────────────────────
+
+    @Test
+    fun `two properties with the same explicit Column name throw KandraSchemaException`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(ExplicitDuplicateColumnEntity::class)
+        }
+        assertTrue(ex.message!!.contains("duplicate CQL column name"))
+        assertTrue(ex.message!!.contains("value"))
+        assertTrue(ex.message!!.contains("a"))
+        assertTrue(ex.message!!.contains("b"))
+    }
+
+    @Test
+    fun `camelToSnake trimStart collision between differently-named properties throws KandraSchemaException`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(CamelToSnakeCollisionEntity::class)
+        }
+        assertTrue(ex.message!!.contains("duplicate CQL column name 'archived'"))
+        assertTrue(ex.message!!.contains("_archived"))
+        assertTrue(ex.message!!.contains("archived"))
     }
 
     @Test

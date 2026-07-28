@@ -55,6 +55,7 @@ Docker before relying on them.
 | [ISS-042](ISS-042-shutdown-drain-busy-wait.md) | Graceful shutdown drain busy-waited with `Thread.sleep` instead of suspending |
 | [ISS-043](ISS-043-migration-crash-safety.md) | Interrupted or racing migration runs could leave a migration marked applied before it completes |
 | [ISS-044](ISS-044-schema-registry-validation-gaps.md) | `SchemaRegistry` didn't validate several illegal annotation states at registration time |
+| [ISS-045](ISS-045-ddl-generator-invalid-cql.md) | `DdlGenerator` could silently produce invalid or data-losing CQL |
 
 ## Closed — not a bug
 

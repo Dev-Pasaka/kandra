@@ -1,6 +1,10 @@
 package io.kandra.core
 
+import io.kandra.core.annotations.ClusteringKey
 import io.kandra.core.annotations.ClusteringOrder
+import io.kandra.core.annotations.LookupIndex
+import io.kandra.core.annotations.PartitionKey
+import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.exception.KandraSchemaException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -13,6 +17,39 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.reflect.typeOf
+
+// ── GH-31: frozen<> collection test entities ────────────────────────────────
+
+@ScyllaTable("collection_pk_entities")
+data class CollectionPartitionKeyEntity(
+    @PartitionKey val tags: Set<String>,
+    val value: String
+)
+
+@ScyllaTable("collection_ck_entities")
+data class CollectionClusteringKeyEntity(
+    @PartitionKey val id: UUID,
+    @ClusteringKey val history: List<String>
+)
+
+@ScyllaTable("regular_collection_entities")
+data class RegularCollectionEntity(
+    @PartitionKey val id: UUID,
+    val tags: Set<String>
+)
+
+@ScyllaTable("nested_collection_entities")
+data class NestedCollectionEntity(
+    @PartitionKey val id: UUID,
+    val metadata: Map<String, List<String>>
+)
+
+@ScyllaTable("collection_lookup_index_entities")
+data class CollectionLookupIndexEntity(
+    @PartitionKey val id: UUID,
+    @LookupIndex(tableSuffix = "by_tags")
+    val tags: Set<String>
+)
 
 class DdlGeneratorTest {
 
@@ -112,5 +149,70 @@ class DdlGeneratorTest {
         assertThrows<KandraSchemaException> {
             DdlGenerator.kotlinTypeToCql(typeOf<Exception>())
         }
+    }
+
+    // ── GH-31: frozen<> collection support ─────────────────────────────────
+
+    @Test
+    fun `Map value type that is itself a List is wrapped in FROZEN (nested collection)`() =
+        assertEquals(
+            "MAP<TEXT, FROZEN<LIST<TEXT>>>",
+            DdlGenerator.kotlinTypeToCql(typeOf<Map<String, List<String>>>())
+        )
+
+    @Test
+    fun `List of Set is rendered with the inner Set frozen`() =
+        assertEquals(
+            "LIST<FROZEN<SET<TEXT>>>",
+            DdlGenerator.kotlinTypeToCql(typeOf<List<Set<String>>>())
+        )
+
+    @Test
+    fun `top-level List is not frozen on its own (only nested collections are)`() =
+        assertEquals("LIST<TEXT>", DdlGenerator.kotlinTypeToCql(typeOf<List<String>>()))
+
+    @Test
+    fun `collection-typed partition key wraps the column type in FROZEN in primary table DDL`() {
+        val schema = SchemaRegistry.register(CollectionPartitionKeyEntity::class)
+        val ddl = DdlGenerator.primaryTable(schema)
+        assertTrue(ddl.contains("tags FROZEN<SET<TEXT>>"), "Expected FROZEN-wrapped collection PK in: $ddl")
+    }
+
+    @Test
+    fun `collection-typed clustering key wraps the column type in FROZEN in primary table DDL`() {
+        val schema = SchemaRegistry.register(CollectionClusteringKeyEntity::class)
+        val ddl = DdlGenerator.primaryTable(schema)
+        assertTrue(
+            ddl.contains("history FROZEN<LIST<TEXT>>"),
+            "Expected FROZEN-wrapped collection clustering key in: $ddl"
+        )
+    }
+
+    @Test
+    fun `regular non-key collection column is NOT wrapped in FROZEN`() {
+        val schema = SchemaRegistry.register(RegularCollectionEntity::class)
+        val ddl = DdlGenerator.primaryTable(schema)
+        assertTrue(ddl.contains("tags SET<TEXT>"), "Expected plain SET<TEXT> in: $ddl")
+        assertFalse(ddl.contains("FROZEN"), "A non-key collection column must not be frozen: $ddl")
+    }
+
+    @Test
+    fun `Map column with a nested List value is wrapped in FROZEN in primary table DDL`() {
+        val schema = SchemaRegistry.register(NestedCollectionEntity::class)
+        val ddl = DdlGenerator.primaryTable(schema)
+        assertTrue(
+            ddl.contains("metadata MAP<TEXT, FROZEN<LIST<TEXT>>>"),
+            "Expected nested collection frozen in: $ddl"
+        )
+    }
+
+    @Test
+    fun `LookupIndex column that is a collection type is frozen in the lookup table DDL`() {
+        // The indexColumn becomes the lookup table's own PRIMARY KEY, regardless of whether it was
+        // a partition/clustering key on the primary table's schema.
+        val schema = SchemaRegistry.register(CollectionLookupIndexEntity::class)
+        val lookup = schema.lookupTables.first()
+        val ddl = DdlGenerator.lookupTable(lookup)
+        assertTrue(ddl.contains("tags FROZEN<SET<TEXT>>"), "Expected FROZEN indexColumn in: $ddl")
     }
 }
