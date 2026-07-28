@@ -34,6 +34,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val logger = KotlinLogging.logger {}
 
@@ -251,14 +252,31 @@ val Kandra: ApplicationPlugin<KandraConfig> =
             }
         }
 
-        // ── Graceful shutdown ────────────────────────────────────────────────
+        // ── Graceful shutdown (GH #34) ────────────────────────────────────────
+        // `monitor.subscribe(ApplicationStopping) { ... }` registers a plain, non-suspend
+        // `(Application) -> Unit` handler (see io.ktor.events.Events — EventHandler<T> = (T) -> Unit)
+        // that Ktor's `Events.raise` invokes synchronously, in subscription order, on the
+        // shutdown-triggering thread. Because of that contract, this hook must still occupy the
+        // calling thread until the drain finishes or times out — ApplicationStopped (which closes
+        // the session) must not run until this returns, and there's no suspend-aware variant of
+        // this hook in Ktor 2.3.13's monitor API to restructure onto instead.
+        //
+        // What we control is *how* we occupy the thread while waiting: rather than a raw
+        // `Thread.sleep(50)` busy-wait loop with a manually computed deadline, poll with suspending
+        // `delay` inside `withTimeoutOrNull` (a proper timeout construct — no manual deadline math)
+        // and run it via `runBlocking` on `pluginScope`'s own context (SupervisorJob + Dispatchers.IO,
+        // already scoped to application lifetime — not an ad-hoc GlobalScope) instead of spinning a
+        // raw thread-sleep loop.
         application.environment.monitor.subscribe(ApplicationStopping) {
             if (config.shutdown.graceful) {
                 runtime.isShuttingDown.set(true)
                 logger.info { "Kandra: shutdown signalled — draining in-flight queries (timeout ${config.shutdown.drainTimeoutMs}ms)" }
-                val deadline = System.currentTimeMillis() + config.shutdown.drainTimeoutMs
-                while (runtime.inFlightCount.get() > 0 && System.currentTimeMillis() < deadline) {
-                    Thread.sleep(50)
+                runBlocking(pluginScope.coroutineContext) {
+                    withTimeoutOrNull(config.shutdown.drainTimeoutMs) {
+                        while (runtime.inFlightCount.get() > 0) {
+                            delay(50)
+                        }
+                    }
                 }
                 if (runtime.inFlightCount.get() > 0) {
                     logger.warn {

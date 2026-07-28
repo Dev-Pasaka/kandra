@@ -52,6 +52,7 @@ Docker before relying on them.
 | [ISS-039](ISS-039-migration-lwt-prerequisite.md) | Migration runner requires LWT support as an explicit prerequisite |
 | [ISS-040](ISS-040-fake-session-bind-unsupported.md) | `FakeKandraSession` couldn't execute any prepared statement — `bind()` always threw |
 | [ISS-041](ISS-041-di-qualifier-collision.md) | `kandra-koin`/`kandra-kodein` qualifiers collided for same-named entities in different packages |
+| [ISS-042](ISS-042-shutdown-drain-busy-wait.md) | Graceful shutdown drain busy-waited with `Thread.sleep` instead of suspending |
 
 ## Closed — not a bug
 
