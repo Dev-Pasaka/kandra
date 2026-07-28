@@ -1,9 +1,6 @@
 package io.kandra.runtime
 
-import com.datastax.oss.driver.api.core.CqlSession
-import com.datastax.oss.driver.api.core.cql.BatchStatement
 import com.datastax.oss.driver.api.core.cql.BatchableStatement
-import com.datastax.oss.driver.api.core.cql.DefaultBatchType
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.InternalKandraApi
 import io.kandra.core.exception.KandraQueryException
@@ -33,7 +30,6 @@ import io.kandra.runtime.repository.KandraSuspendRepository
  */
 @ExperimentalKandraApi
 class KandraBatchScope internal constructor(
-    private val session: CqlSession,
     private val batchEngine: BatchEngine
 ) {
     private val statements = mutableListOf<BatchableStatement<*>>()
@@ -76,9 +72,25 @@ class KandraBatchScope internal constructor(
             "mixed with non-LWT statements in the same LOGGED BATCH."
         )
 
+    /**
+     * Executes the collected statements as a single `LOGGED BATCH` — used by
+     * [KandraRuntime.batchBlocking]. Routed through [BatchEngine.executeBatchScope] so this
+     * caller-controlled batch gets the same shutdown gate, retry-on-transient-error, and
+     * in-flight tracking as every other write, instead of calling `session.execute` directly.
+     */
     internal fun execute() {
-        if (statements.isEmpty()) return
-        val batch = statements.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, s -> acc.add(s) }
-        session.execute(batch)
+        @OptIn(InternalKandraApi::class)
+        batchEngine.executeBatchScope(statements)
+    }
+
+    /**
+     * Suspend counterpart of [execute] — used by [KandraRuntime.batch], which is itself a
+     * `suspend fun`. Routed through [BatchEngine.executeBatchScopeSuspend], which uses
+     * `session.executeSuspend` for the final commit instead of blocking the calling coroutine's
+     * thread, while still applying the same shutdown gate / retry / in-flight tracking.
+     */
+    internal suspend fun executeSuspend() {
+        @OptIn(InternalKandraApi::class)
+        batchEngine.executeBatchScopeSuspend(statements)
     }
 }
