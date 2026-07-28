@@ -13,6 +13,7 @@ import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.validate
+import io.kandra.core.CqlNaming
 
 /**
  * KSP processor that generates a type-safe `*Table` object for every `@ScyllaTable` class, and —
@@ -236,20 +237,21 @@ fun DIAware.${entityVar}SuspendRepo(): io.kandra.runtime.repository.KandraSuspen
         return "$qualifiedName<$argNames>"
     }
 
+    /**
+     * Delegates to [CqlNaming.resolveColumnName] (kandra-core) so this compile-time resolution
+     * stays IDENTICAL to `SchemaRegistry`'s runtime resolution — see GH-30. Previously this method
+     * re-implemented the blank-name fallback independently, which meant a `@Column("")` field could
+     * resolve to a different cqlName here than in the runtime schema for the very same entity.
+     */
     private fun resolveCqlName(prop: KSPropertyDeclaration): String {
         val columnAnnotation = prop.annotations.find {
             it.annotationType.resolve().declaration.qualifiedName?.asString() == "io.kandra.core.annotations.Column"
         }
-        if (columnAnnotation != null) {
-            val nameArg = columnAnnotation.arguments.find { it.name?.asString() == "name" }
-            val value = nameArg?.value as? String
-            if (!value.isNullOrBlank()) return value
-        }
-        return camelToSnake(prop.simpleName.asString())
+        val columnName = columnAnnotation?.arguments
+            ?.find { it.name?.asString() == "name" }
+            ?.value as? String
+        return CqlNaming.resolveColumnName(columnName, prop.simpleName.asString())
     }
-
-    private fun camelToSnake(name: String): String =
-        name.replace(Regex("([A-Z])")) { "_${it.value.lowercase()}" }.trimStart('_')
 
     private fun String.decapitalize(): String =
         replaceFirstChar { it.lowercase() }
