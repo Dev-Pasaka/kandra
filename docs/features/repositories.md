@@ -14,13 +14,13 @@ users.updateForce(user)            // skip @Version check
 users.delete(user)                 // respects @SoftDelete
 users.deleteAll(entities)          // warns if > tombstoneWarnThreshold
 users.deleteById(uuid)             // also respects @SoftDelete
-users.deleteBy { where { "email" eq "x@y.com" } }
+users.deleteBy { UserTable.email eq "x@y.com" }
 
 users.findById(uuid)
-users.find { where { "email" eq "x@y.com" } }
-users.findAll { where { "status" eq "active" } }
+users.find { UserTable.email eq "x@y.com" }
+users.findAll { UserTable.status eq "active" }
 users.findPage(pageSize = 20, pageToken = token) { ... }
-users.exists { where { "email" eq "x@y.com" } }
+users.exists { UserTable.email eq "x@y.com" }
 users.findActive()                 // see below — @SoftDelete(markerProperty = "...") only
 users.findActive(allowFullScan = true)  // opt in to ALLOW FILTERING when there's no @SecondaryIndex
 
@@ -30,8 +30,16 @@ users.rawQuery(KandraRawQuery.cql("SELECT * FROM users WHERE status = ?").bind("
 users.append(user, User::tags, setOf("new-tag"))
 users.remove(user, User::tags, setOf("old-tag"))
 users.put(user, User::meta, mapOf("k" to "v"))
-users.increment(UserStat::views, mapOf("userId" to id), by = 1)
+
+// increment()/decrement() are only valid on a counter-table repository — a separate repo, since
+// increment()'s `field` must be a KProperty1 of *that* repository's own entity type:
+val stats = application.kandra.repository<PostStats>()
+stats.increment(PostStats::views, mapOf("postId" to id), by = 1)
 ```
+
+`UserTable`/`PostStats` above are the `kandra-codegen`-generated type-safe column-reference objects
+— predicates are written directly as `Table.column eq value` inside the query block; there is no
+`where { }` wrapper and no raw string column names anywhere in the query DSL.
 
 ### `KandraSuspendRepository<T>` (coroutines — preferred in Ktor routes)
 
@@ -72,12 +80,15 @@ See [ISS-036](../issues/ISS-036-findactive-allow-filtering-scope.md) for the ful
 
 ## Batch scope
 
-Collect multiple saves and deletes into a single LOGGED batch:
+Collect multiple saves and deletes into a single LOGGED batch, using `saveInBatch`/`deleteInBatch`
+— **not** `save()`/`delete()`, which would silently execute immediately instead of joining the
+batch (Kotlin always resolves a repository's own real `save`/`delete` member over a same-named
+extension, even inside the batch scope itself):
 
 ```kotlin
 application.kandra.batch {
-    userRepo.save(user)
-    walletRepo.save(wallet)
+    userRepo.saveInBatch(user)
+    walletRepo.saveInBatch(wallet)
 }
 ```
 

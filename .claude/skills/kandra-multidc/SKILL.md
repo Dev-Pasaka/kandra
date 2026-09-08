@@ -365,6 +365,14 @@ Guidance on the trade-offs, per the source doc comments:
 val registered = userRepo.saveIfNotExists(user, serialConsistency = KandraConsistency.SERIAL)
 ```
 
+**Read-your-writes requires `R + W ≥ RF`.** The library's own defaults (`LOCAL_ONE` read / `LOCAL_QUORUM`
+write, `1 + 2 = 3`) only satisfy this for `RF ≤ 3` — a keyspace with `RF = 5` (plausible for the
+"Multi-DC active-active" row above) silently stops guaranteeing read-your-writes on the plain defaults.
+Strict Mode (below) does **not** catch this — it only warns on `LOCAL_ONE`/`ONE` usage, never checks RF
+against R+W directly. If your keyspace's RF exceeds 3, raise `defaultRead` accordingly (e.g. to
+`LOCAL_QUORUM`, as the guide above already recommends for multi-DC active-active). See
+`docs/issues/ISS-075-strict-mode-rf-consistency-math.md`.
+
 ## Gotchas worth double-checking in review
 
 - `kandra-multidc` is not where multi-DC config lives — `loadBalancing { }`, `failover { }`,

@@ -17,12 +17,12 @@ guessed — load the matching module skill instead once you know which module th
 | Skill | Covers |
 |---|---|
 | `kandra-core` | Annotations, schema model, DDL generation, exceptions, auth/consistency/metrics/validator/timestamp types |
-| `kandra-runtime` | `KandraRepository`/`KandraSuspendRepository` (all 18 methods each), `BatchEngine`, `StatementBuilder`, `QueryExecutor`, query DSL, codec, caching |
+| `kandra-runtime` | `KandraRepository`/`KandraSuspendRepository` (all 23 methods each), `BatchEngine`, `StatementBuilder`, `QueryExecutor`, query DSL, codec, caching |
 | `kandra-ktor` | The `Kandra` plugin, `KandraConfig` and every nested config block, install lifecycle, `SchemaMode` |
 | `kandra-kodein` | `kandraKodein()`, `bindKandraRepository<T>()` |
 | `kandra-koin` | `kandraKoin()` |
 | `kandra-codegen` | The KSP processor — exactly which annotations affect generated `*Table` objects (fewer than you'd expect) |
-| `kandra-test` | `FakeKandraSession`, `KandraTestUtils`, `KandraTestcontainers` — including a known limitation with fake-session repository calls |
+| `kandra-test` | `FakeKandraSession`, `KandraTestUtils`, `KandraTestcontainers` — fake-session repository calls now run end-to-end (structurally, not real CQL semantics) |
 | `kandra-multidc` | `KandraMultiDc.describe()`, plus where the real multi-DC config actually lives (`kandra-ktor`) |
 | `kandra-migrate` | `KandraMigration`, `KandraMigrationRunner`, checksum/versioning semantics |
 
@@ -55,12 +55,12 @@ Both `KandraRepository<T>` (blocking) and `KandraSuspendRepository<T>` (suspend,
 
 ```kotlin
 fun save(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null)
-fun saveWithNulls(entity: T, ttlSeconds: Int? = null)     // writes explicit NULL, not UNSET — causes tombstones
+fun saveWithNulls(entity: T, ttlSeconds: Int? = null, consistency: KandraConsistency? = null)   // writes explicit NULL, not UNSET — causes tombstones
 fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = LOCAL_SERIAL): Boolean   // LWT
-fun saveAll(entities: List<T>, useBatch: Boolean = true)   // auto-chunks per batchMaxChunkSize/batchAutoChunk
+fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null)   // auto-chunks per batchMaxChunkSize/batchAutoChunk
 
-fun update(old: T, new: T)     // ⚠️ TWO args — not update(new). LWT IF version=? when @Version present
-fun updateForce(entity: T)     // bypasses the @Version check entirely
+fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null)     // ⚠️ TWO entity args — not update(new). LWT IF version=? when @Version present; ttlSeconds re-applies USING TTL or the row's TTL silently clears (ISS-058)
+fun updateForce(entity: T, consistency: KandraConsistency? = null)     // bypasses the @Version check entirely
 
 fun delete(entity: T)          // TTL-only if @SoftDelete, else DELETE
 fun deleteAll(entities: List<T>)

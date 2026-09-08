@@ -209,7 +209,6 @@ replicationStrategy = ReplicationStrategy.NetworkTopologyStrategy(
 
 ```kotlin
 class PoolConfig {
-    var localRequestsPerConnection: Int = 1024
     var maxRequestsPerConnection: Int = 32768   // -> DefaultDriverOption.CONNECTION_MAX_REQUESTS
     var heartbeatIntervalSeconds: Int = 30      // -> DefaultDriverOption.HEARTBEAT_INTERVAL
     var requestTimeoutMillis: Long = 5000       // -> DefaultDriverOption.REQUEST_TIMEOUT (driver default is 2000ms)
@@ -217,10 +216,10 @@ class PoolConfig {
 }
 ```
 
-Note: `localRequestsPerConnection` is declared but **not actually applied** in `buildDriverConfig()` — only
-`maxRequestsPerConnection`, `requestTimeoutMillis`, `connectionTimeoutMillis`, and
-`heartbeatIntervalSeconds` are wired to `DefaultDriverOption`s (`CqlSessionBuilder.kt:94-99`). Set it if you
-like for documentation purposes, but it currently has no effect on the driver.
+Note: an earlier version of this class also had `localRequestsPerConnection`, which was dead
+(declared but never applied). It has since been **removed entirely** (`docs/issues/ISS-068-localrequestsperconnection-dead-config.md`, GH #69) rather than left as a no-op field — don't expect it to exist. All four fields above are wired to `DefaultDriverOption`s in `buildDriverConfig()`. There is
+still no Kandra-level knob for connection-**pool size** (`CONNECTION_POOL_LOCAL_SIZE`/`REMOTE_SIZE`) —
+see `docs/issues/ISS-072-connection-pool-size-unconfigurable.md`.
 
 ```kotlin
 pool {
@@ -247,10 +246,14 @@ class AuthConfig {
   (dev/test only — never production), `custom { KandraCredentials(...) }` (Vault, AWS Secrets Manager, etc.).
 - `refreshIntervalSeconds`: when non-null, the plugin starts a background loop on `pluginScope` (step 10 in
   the install lifecycle above) that re-fetches credentials on this interval — supports rolling credential
-  rotation without an app restart. **The fetched credentials are not currently re-applied to the live
-  `CqlSession`'s auth** — `getCredentials()` is called to validate/refresh whatever cache the provider itself
-  maintains and to fire the `onCredentialRefreshed`/`onAuthFailed` callbacks; wire your provider's caching
-  accordingly if you need the driver connection itself to pick up new creds.
+  rotation without an app restart. The session is built with a `ProgrammaticPlainTextAuthProvider` (not the
+  simpler `withAuthCredentials(...)`) specifically so a live reference can be retained
+  (`CqlSessionHandle.liveAuthProvider`); on each refresh tick, the rotation loop calls `setUsername`/
+  `setPassword` directly on that live provider (GH #61 / ISS-060 — an earlier version of this plugin fetched
+  refreshed credentials but never applied them to the live session, making rotation a no-op; that has been
+  fixed). The driver picks up the new values on every subsequent authentication (new connections,
+  reconnects) — no session rebuild needed. `liveAuthProvider` is `null` (nothing to rotate) only when the
+  session was opened with no auth at all, i.e. the configured provider returned a blank username at startup.
 - Failures during initial `getCredentials()` call in `buildCqlSession` wrap into `KandraAuthException` unless
   already one.
 
@@ -306,7 +309,7 @@ class LoadBalancingConfig {
     var tokenAware: Boolean = true                    // declared; not read in CqlSessionBuilder — driver's default token-aware LBP applies regardless
     var dcAwareFailover: Boolean = false
     var allowedRemoteDcs: List<String> = emptyList()
-    var maxRemoteNodesPerRemoteDc: Int = 1             // declared; not read in CqlSessionBuilder
+    var maxRemoteNodesPerRemoteDc: Int = 1             // -> DefaultDriverOption.LOAD_BALANCING_DC_FAILOVER_MAX_NODES_PER_REMOTE_DC, when dc-failover is actually enabled (see below)
 }
 ```
 
@@ -315,8 +318,17 @@ class LoadBalancingConfig {
 - Also cross-validated against `failover.onLocalDcUnavailable`: if that's `RETRY_REMOTE_DC` but
   `allowedRemoteDcs` is empty, throws `KandraSchemaException` too — this check fires independently of
   `dcAwareFailover`.
-- `tokenAware` and `maxRemoteNodesPerRemoteDc` are declared config surface but **not currently consumed** by
-  `buildDriverConfig`/`buildCqlSession` — no driver option is set from them.
+- `tokenAware` is declared config surface but **not currently consumed** by `buildDriverConfig`/
+  `buildCqlSession` — the driver's `DefaultLoadBalancingPolicy` is token-aware unconditionally (no driver
+  toggle exists to disable it), so this flag only documents the recommended posture.
+- `maxRemoteNodesPerRemoteDc` **is** wired (GH #58 / ISS-057 — an earlier version of this plugin validated
+  and documented the multi-DC failover config but never actually enabled the driver's native failover
+  mechanism; that has been fixed) — see `failover { }` below for the full picture, since it only takes
+  effect once dc-failover is actually enabled by both `dcAwareFailover = true` **and**
+  `failover.onLocalDcUnavailable = RETRY_REMOTE_DC`. Separately, `allowedRemoteDcs` itself is enforced as an
+  allow-list via a registered `NodeDistanceEvaluator` (`AllowedDcNodeDistanceEvaluator` in
+  `CqlSessionBuilder.kt`): any node whose DC isn't local and isn't in `allowedRemoteDcs` is forced to
+  `NodeDistance.IGNORED` — the driver never connects to it, regardless of `maxRemoteNodesPerRemoteDc`.
 
 ```kotlin
 loadBalancing {
@@ -343,9 +355,27 @@ class FailoverConfig {
 ```
 
 `RETRY_REMOTE_DC` requires `loadBalancing.allowedRemoteDcs` to be non-empty or install throws at session-build
-time (see above). `remoteRetryDelayMs` is present in the config class but there's no code path in
-`CqlSessionBuilder.kt` or `Kandra.kt` that reads it — the actual DC-failover retry mechanics live in the
-driver's load-balancing policy configuration, not in an explicit delay loop in this module.
+time (see above). When both `loadBalancing.dcAwareFailover = true` **and**
+`failover.onLocalDcUnavailable = RETRY_REMOTE_DC` are set together, `buildDriverConfig` genuinely enables the
+driver's native cross-DC failover (GH #58 / ISS-057 — an earlier version of this plugin validated this
+two-knob combination at startup but never actually wired it into the driver, so a real local-DC outage
+behaved identically to `THROW`; that has been fixed):
+- Sets `DefaultDriverOption.LOAD_BALANCING_DC_FAILOVER_MAX_NODES_PER_REMOTE_DC` from
+  `loadBalancing.maxRemoteNodesPerRemoteDc`.
+- Sets `DefaultDriverOption.LOAD_BALANCING_DC_FAILOVER_ALLOW_FOR_LOCAL_CONSISTENCY_LEVELS = true` — forced on
+  whenever failover is enabled, since Kandra's own consistency defaults (`LOCAL_ONE`/`LOCAL_QUORUM`/
+  `LOCAL_SERIAL`) are all "local" levels; leaving this at the driver's own default (`false`) would make
+  failover a no-op for the vast majority of Kandra's traffic.
+- The driver considers nodes from every DC in `allowedRemoteDcs` once local-DC nodes are exhausted; there is
+  no priority/ordering across multiple allowed remote DCs.
+
+Setting only one of the two knobs (`dcAwareFailover` without `RETRY_REMOTE_DC`, or vice versa) leaves failover
+inert by design — both must be set together.
+
+`remoteRetryDelayMs` is still present in the config class but **not read anywhere** — the driver's native
+dc-failover mechanism has no artificial pre-failover delay concept (once local-DC nodes are exhausted for a
+request, eligible remote-DC nodes are used immediately), so this field is declared for potential future use
+only.
 
 ## `speculativeExecution { }` — `SpeculativeExecutionConfig`
 
@@ -460,12 +490,15 @@ class RetryConfig {
     var retryOn: Set<KClass<out Throwable>> = setOf(
         WriteTimeoutException::class, ReadTimeoutException::class, NoNodeAvailableException::class
     )
+    var jitter: Boolean = true   // randomizes backoff ("equal jitter") so concurrent retries don't lock-step
 }
 ```
 
-Retries with linear backoff on the configured exception set, up to `maxAttempts`, before giving up and
-throwing `KandraQueryException`. Add your own retryable types via `retryOn = retryOn + MyException::class`
-(it's a plain `Set`, not append-only).
+Retries with linear backoff (`backoffMillis * (attempt + 1)`, capped at `maxBackoffMillis`) on the configured
+exception set — and only for statements marked idempotent — up to `maxAttempts`, before giving up and
+throwing `KandraQueryException`. With `jitter = true` (the default), the actual delay used is randomized:
+half of the computed backoff, plus a random amount up to the other half. Add your own retryable types via
+`retryOn = retryOn + MyException::class` (it's a plain `Set`, not append-only).
 
 ## `debug { }` — `DebugConfig` (from `kandra-runtime`)
 
@@ -487,6 +520,7 @@ class ConsistencyConfig {
     var defaultRead: KandraConsistency = KandraConsistency.LOCAL_ONE
     var defaultWrite: KandraConsistency = KandraConsistency.LOCAL_QUORUM
     var defaultSerialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    var strictMode: Boolean = false   // opt-in, WARN-only — see below
 }
 ```
 
@@ -494,6 +528,14 @@ Resolution order (highest priority first): per-call `consistency` argument on a 
 `@ReadConsistency`/`@WriteConsistency` on the entity class > these defaults. `KandraConsistency` values:
 `ONE, TWO, THREE, QUORUM, ALL, LOCAL_ONE, LOCAL_QUORUM, EACH_QUORUM, LOCAL_SERIAL, SERIAL` (`isSerial` is
 `true` for `LOCAL_SERIAL`/`SERIAL`, used for LWT operations like `saveIfNotExists`).
+
+**Read-your-writes above RF 3**: the defaults (`LOCAL_ONE` read / `LOCAL_QUORUM` write) only satisfy
+`R + W ≥ RF` for `RF ≤ 3`. A keyspace with `RF = 5` (plausible for a larger multi-DC deployment) silently
+stops guaranteeing read-your-writes on these defaults — raise `defaultRead` accordingly. `strictMode` (opt-in,
+default `false`) only warns when a query resolves to `LOCAL_ONE`/`ONE` in a multi-DC topology
+(`loadBalancing.allowedRemoteDcs.isNotEmpty()`, auto-detected) — it does **not** check RF against R+W
+directly, so it won't catch the RF>3 case above. See
+`docs/issues/ISS-075-strict-mode-rf-consistency-math.md`.
 
 ## `codec: KandraCodec` (from `kandra-runtime.codec`)
 
@@ -542,7 +584,10 @@ Internal (non-public) functions, but their behavior directly explains what confi
 - `buildSslContext(ssl): SSLContext` — loads trust/key stores, always constructs `SSLContext.getInstance("TLS")`
   (hardcoded protocol string, `minimumTlsVersion`/`cipherSuites` are not applied here).
 - `keyspaceDdl(keyspace, strategy): String` — renders the `CREATE KEYSPACE IF NOT EXISTS` statement for either
-  `ReplicationStrategy` variant; only called when `autoCreateKeyspace = true`.
+  `ReplicationStrategy` variant; only called when `autoCreateKeyspace = true`. Validates `keyspace` (and, for
+  `NetworkTopologyStrategy`, every key of `dcReplicationMap`) against `CqlNaming.isValidIdentifier` before
+  splicing them into the DDL string, throwing `KandraSchemaException` on an invalid identifier (GH #65 /
+  ISS-064 — an earlier version spliced both unvalidated).
 
 ## `Kandra` plugin — public surface
 
@@ -580,10 +625,15 @@ routing {
 - `autoCreateKeyspace = false` by default — if you rely on it in one environment (e.g. local dev) but not
   another (staging/prod), a missing keyspace in the non-auto-create environment throws from the driver
   connect call, not from a Kandra-specific check.
-- `PoolConfig.localRequestsPerConnection`, `SslConfig.requireEncryption`/`minimumTlsVersion`/`cipherSuites`,
-  `LoadBalancingConfig.tokenAware`/`maxRemoteNodesPerRemoteDc`, and `FailoverConfig.remoteRetryDelayMs` are
-  all declared config fields that are **not currently read** by `CqlSessionBuilder.kt`. Setting them changes
-  nothing today — don't assume they're load-bearing just because they exist on the config class.
+- `SslConfig.requireEncryption`/`minimumTlsVersion`/`cipherSuites`, `LoadBalancingConfig.tokenAware`, and
+  `FailoverConfig.remoteRetryDelayMs` are declared config fields that are **still not currently read** by
+  `CqlSessionBuilder.kt` — setting them changes nothing today (see `docs/issues/ISS-070-ssl-config-dead-fields.md`
+  for the SSL ones specifically). `LoadBalancingConfig.maxRemoteNodesPerRemoteDc` and
+  `PoolConfig.localRequestsPerConnection` used to be in this same "declared but dead" category — the former
+  is now wired (GH #58), and the latter was removed from the class entirely (GH #69) rather than left dead.
+  Don't assume a field is load-bearing just because it exists on the config class; don't assume the list
+  above is exhaustive either — verify against current source for anything not covered explicitly in this
+  file.
 - `dcAwareFailover = true` or `failover.onLocalDcUnavailable = RETRY_REMOTE_DC` both independently require
   `loadBalancing.allowedRemoteDcs` to be non-empty, or install throws `KandraSchemaException` before any
   connection is attempted — check both together when reviewing multi-DC config.
@@ -597,10 +647,9 @@ routing {
   sequence for up to `drainTimeoutMs`.
 - `metrics.enabled = true` without a `recorder` doesn't fail installation — it just silently no-ops with a
   WARN log. Easy to miss in review since nothing breaks.
-- `auth.refreshIntervalSeconds` refreshing credentials does not automatically push new credentials into the
-  live `CqlSession`'s auth mechanism — the loop calls `getCredentials()` (to validate/refresh whatever the
-  provider itself caches) and fires callbacks, but there's no explicit re-auth call against the open session
-  in this file.
+- `auth.refreshIntervalSeconds` **does** push new credentials into the live session (GH #61) via
+  `liveAuthProvider.setUsername`/`setPassword` — this used to be a no-op (fetched but never applied) in an
+  earlier version; don't assume it's still inert.
 - `contactPoints` port parsing splits on the *last* colon per comma-separated entry — safe for IPv6 literals
   with a trailing port, but malformed entries without a numeric suffix after the last colon will throw a
   `NumberFormatException` from `.toInt()`, not a Kandra-specific error.

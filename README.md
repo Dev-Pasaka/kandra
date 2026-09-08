@@ -47,7 +47,7 @@ This README covers the common cases end-to-end. For everything else:
 | [`docs/changelog/`](docs/changelog/README.md) | What changed in each version, one file per version |
 | [`docs/features/`](docs/features/README.md) | Feature-by-feature reference, one file per area |
 | [`docs/issues/`](docs/issues/README.md) | Known gaps and issues — open, fixed, and closed — with the reasoning behind each |
-| [`docs/reviews/`](docs/reviews/2026-09-08-pre-multidc-cluster-review.md) | Critical library-wide reviews (security, performance, consistency, scalability, DX) — start here before experimental testing against a real cluster |
+| [`docs/reviews/`](docs/reviews/README.md) | Critical, source-verified reviews — library-wide (security/performance/consistency/scalability/DX) and documentation-reality-check passes |
 | [`docs/test-plan/`](docs/test-plan/README.md) | Step-by-step plan for building a real Ktor app against the published artifact and a real ScyllaDB cluster, with an exhaustive functional/edge-case coverage matrix and scoring rubric |
 | [`docs/history/`](docs/history/) | The original build specs used to generate each version (0.1.0 → 0.4.0) — historical context, not current docs |
 | [`docs/site/`](docs/site/README.md) | Build prompts for the separate documentation website project, one file per Kandra version |
@@ -164,7 +164,7 @@ fun Application.configureDatabase() {
         auth {
             provider = KandraAuth.fromEnv()          // production default
             // provider = KandraAuth.static("cassandra", "cassandra")  // local dev
-            // provider = KandraAuth.fromFile("/run/secrets/db-creds")  // k8s secrets
+            // provider = KandraAuth.fromFile("/run/secrets/db-user", "/run/secrets/db-pass")  // k8s secrets
             refreshIntervalSeconds = 3600            // optional credential rotation
         }
 
@@ -570,8 +570,8 @@ JAVA_HOME=<jdk-21-path> ./gradlew build
 KandraAuth.fromEnv()                                  // reads SCYLLA_USERNAME, SCYLLA_PASSWORD
 KandraAuth.fromEnv("DB_USER", "DB_PASS")             // custom var names
 
-// From a file (Kubernetes secrets, Docker secrets)
-KandraAuth.fromFile("/run/secrets/scylla-credentials") // JSON {"username":"…","password":"…"}
+// From files (Kubernetes secrets, Docker secrets) — two plain-text files, not one JSON file
+KandraAuth.fromFile("/run/secrets/scylla-username", "/run/secrets/scylla-password")
 
 // Hardcoded — for local dev only
 KandraAuth.static("cassandra", "cassandra")

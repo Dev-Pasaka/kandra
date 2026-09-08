@@ -9,10 +9,15 @@ Test support module for Kandra, `io.kandra.test.*` (module `kandra-test`). Two t
 
 | Style | Entry point | Backing | Speed | What it actually exercises |
 |---|---|---|---|---|
-| Fake-session unit test | `KandraTestUtils.inMemory(...)` | `FakeKandraSession` (in-process, no network) | instant | **Only** hand-built `BatchStatement`/`SimpleStatement` execution and capture — see the "Known limitation" section below. Repository CRUD calls currently throw. |
+| Fake-session unit test | `KandraTestUtils.inMemory(...)` | `FakeKandraSession` (in-process, no network) | instant | The full `KandraRepository`/`KandraSuspendRepository` CRUD surface, **structurally** — real statement-building/binding logic, no real CQL semantics (see below). |
 | Testcontainers integration test | `KandraTestcontainers.freshKeyspace(...)` | real `cassandra:4.1` container via Testcontainers | slow (container start + real CQL) | The full, real `KandraRepository`/`KandraSuspendRepository` API against real DDL/DML |
 
-Read this whole file before picking a style — the fake-session path is **not** a drop-in replacement for the container path today; it's narrower than its own KDoc claims.
+Read this whole file before picking a style. As of GH #28 / ISS-040, the fake-session path runs the entire
+repository surface end-to-end (an earlier version of `FakePreparedStatement.bind()` unconditionally threw
+`UnsupportedOperationException`, which meant every real repository call — `save`, `findById`, `delete`,
+`update`, batch writes — failed immediately; that has been fixed). What it still does *not* give you is real
+CQL semantics: no actual encoding/decoding, no real LWT applied/not-applied result, no real data round-trip.
+For those, use `KandraTestcontainers`.
 
 ## FakeKandraSession (`io.kandra.test.FakeKandraSession`)
 
@@ -20,13 +25,14 @@ Read this whole file before picking a style — the fake-session path is **not**
 
 | Member | Signature | Behavior (verified from source) |
 |---|---|---|
-| `capturedBatches()` | `fun capturedBatches(): List<BatchStatement>` | Snapshot copy of every `BatchStatement` passed through the **synchronous** `execute(Statement<*>)` overload. |
-| `reset()` | `fun reset()` | Clears the captured-batches list. Nothing else is stateful, so this is the only thing to reset between assertions. |
-| `tableContents(tableName)` | `fun tableContents(tableName: String): List<Map<String, Any?>>` | **Always returns `emptyList()`** — literally `= emptyList()` in the source, regardless of `tableName` or anything previously executed. Despite the name, it does **not** track rows written via `execute()`. Don't use it to assert "what got saved." |
-| `execute(statement)` | `override fun execute(statement: Statement<*>): ResultSet` | If `statement is BatchStatement`, appends it to the internal list (this is what `capturedBatches()` reads). **Always returns `FakeResultSet.empty()`** no matter the statement — an empty result set with `wasApplied() == true`, `one() == null`, `all() == emptyList()`. |
-| `execute(request, resultType)` | `override fun <RequestT: Request, ResultT: Any> execute(...): ResultT?` | If `request is Statement<*>`, delegates to `execute(statement)` purely for the batch-capture side effect — **the result is discarded and this overload always returns `null`.** |
-| `executeAsync(statement)` | `override fun executeAsync(...): CompletionStage<AsyncResultSet>` | Always completes with an empty `FakeAsyncResultSet`. **Does not append to `capturedBatches()`** even for a `BatchStatement` — only the synchronous `execute(Statement<*>)` path captures. |
-| `prepare(query: String)` | `override fun prepare(query: String): PreparedStatement` | Returns `FakePreparedStatement(query)`. Calling `.bind(...)` on the result **always throws** `UnsupportedOperationException("FakePreparedStatement.bind() not supported in FakeKandraSession.")` — see below. |
+| `capturedStatements()` | `fun capturedStatements(): List<Statement<*>>` | Snapshot copy of **every** `Statement` (batch or not) passed through the **synchronous** `execute(Statement<*>)` overload, in call order. |
+| `capturedBatches()` | `fun capturedBatches(): List<BatchStatement>` | `capturedStatements().filterIsInstance<BatchStatement>()` — a filtered view, not a separately-tracked list. |
+| `reset()` | `fun reset()` | Clears `capturedStatements()`/`capturedBatches()`. Nothing else is stateful, so this is the only thing to reset between assertions. |
+| `tableContents(tableName)` | `fun tableContents(tableName: String): List<Map<String, Any?>>` | **Always returns `emptyList()`** — literally `= emptyList()` in the source, regardless of `tableName` or anything previously executed. Despite the name, it does **not** track rows written via `execute()`. Don't use it to assert "what got saved" — use `capturedStatements()`/`capturedBatches()` and inspect each `FakeBoundStatement.boundValues()` instead (see below). |
+| `execute(statement)` | `override fun execute(statement: Statement<*>): ResultSet` | Appends `statement` to `capturedStatementsList` (this is what `capturedStatements()`/`capturedBatches()` read). **Always returns `FakeResultSet.empty()`** no matter the statement — an empty result set with `wasApplied() == true`, `one() == null`, `all() == emptyList()`. |
+| `execute(request, resultType)` | `override fun <RequestT: Request, ResultT: Any> execute(...): ResultT?` | If `request is Statement<*>`, delegates to `execute(statement)` purely for the capture side effect — **the result is discarded and this overload always returns `null`.** |
+| `executeAsync(statement)` | `override fun executeAsync(...): CompletionStage<AsyncResultSet>` | Always completes with an empty `FakeAsyncResultSet`. **Does not append to `capturedStatements()`** — only the synchronous `execute(Statement<*>)` path captures. |
+| `prepare(query: String)` | `override fun prepare(query: String): PreparedStatement` | Returns `FakePreparedStatement(query)`. Calling `.bind(...)` on the result returns a working `FakeBoundStatement` (see below) — this used to unconditionally throw `UnsupportedOperationException` (GH #28 / ISS-040); that has been fixed. |
 | `prepare(statement: SimpleStatement)` | same | Same fake, built from `statement.query`. |
 | `getName()` | → `"FakeKandraSession"` | |
 | `getMetadata()` | throws `UnsupportedOperationException` | |
@@ -50,17 +56,31 @@ All three types in this file are `internal` — implementation details of `FakeK
 |---|---|---|
 | `FakeResultSet` | `internal class ... : ResultSet` | Private constructor; companion factories `empty()` and `of(rows: List<Row>)`. `iterator()`/`one()`/`all()` read from the wrapped row list; `wasApplied()` is hardcoded `true`; `getExecutionInfo()`/`getColumnDefinitions()` throw `UnsupportedOperationException`. **Only `empty()` is ever called** from `FakeKandraSession` — `of(rows)` exists but nothing in the module wires real rows into it, so results are always empty in practice. |
 | `FakeAsyncResultSet` | `internal class ... : AsyncResultSet` | `currentPage()` is always `emptyList()`, `hasMorePages()` is always `false`, `fetchNextPage()` resolves to a fresh empty instance, `wasApplied()` is hardcoded `true`. |
-| `FakePreparedStatement(query: String)` | `internal class ... : PreparedStatement` | `getQuery()` returns the original CQL string; `getId()` returns `ByteBuffer.wrap(query.toByteArray())`. **`bind(vararg values)` unconditionally throws** `UnsupportedOperationException`, regardless of how many arguments are passed (including zero — `prepared.bind()` still throws). `boundStatementBuilder(...)`, `getVariableDefinitions()`, `getResultSetDefinitions()` also throw. |
+| `FakePreparedStatement(query: String)` | `internal class ... : PreparedStatement` | `getQuery()` returns the original CQL string; `getId()` returns `ByteBuffer.wrap(query.toByteArray())`. `bind(vararg values)` constructs and seeds a `FakeBoundStatement` (see below) — this used to unconditionally throw `UnsupportedOperationException`; fixed in GH #28 / ISS-040. `boundStatementBuilder(...)`, `getVariableDefinitions()`, `getResultSetDefinitions()` still throw `UnsupportedOperationException` — only `bind()` was fixed. |
+| `FakeBoundStatement(preparedStatementRef, query)` | `internal class ... : BoundStatement` | The piece that makes repository calls actually work end-to-end. A minimal, structural stand-in — **no real CQL type encoding/validation/protocol serialization** — that records positionally-bound values verbatim. `set(i, v, targetClass)` stores `v` at index `i`; `setBytesUnsafe(i, v)` stores Kotlin `null` at index `i` (the tombstone-write path — `saveWithNulls`); `unset(i)` stores the `FakeUnset` sentinel at index `i` (the no-tombstone/"leave unchanged" path — a `null`-valued nullable field on a plain `save()`). `boundValues(): List<Any?>` is the test-facing accessor — an index never touched, or explicitly `unset`, reads back as `FakeUnset`, not Kotlin `null`; distinguishing those two is the whole point (they're different CQL writes). Everything else on the large `BoundStatement`/`Statement` interface (routing keys/tokens, execution profiles, consistency levels, paging state, ...) is stored in a plain field and returned faithfully via its setter/getter pair, but never interpreted — this is a recorder, not a real statement. `getBytesUnsafe`, `getType`, `firstIndexOf`, `codecRegistry`, `protocolVersion` all throw `UnsupportedOperationException` (no real byte/type layer exists to answer them). |
+| `FakeUnset` | `internal object` | Sentinel distinguishing "never bound / explicitly unset" from a real bound `null` in `FakeBoundStatement.boundValues()`. `toString()` → `"FakeUnset"`, useful when an assertion failure prints the list. |
 
-### Known limitation: repository calls throw under `FakeKandraSession` today
+### Repository calls work end-to-end under `FakeKandraSession` (fixed — GH #28 / ISS-040)
 
 Traced from `KandraRepository`/`KandraSuspendRepository` → `StatementBuilder`/`QueryExecutor` in `kandra-runtime`:
 
 - **Every** statement-building path — `insertPrimary`, `insertPrimaryWithNulls`, `insertLookup`, `deleteLookup`, `deleteById`, `selectById`, `selectByLookup`, the versioned-`UPDATE ... IF version = ?` LWT builder, `counterUpdate`, `rawQuery`, `findPage` — calls `session.prepare(cql)` and then `prepared.bind(...)` to produce the `BoundStatement` it actually executes.
-- Under `FakeKandraSession`, `prepare(cql)` succeeds (returns a `FakePreparedStatement`), but the very next call, `.bind(...)`, **always throws** `UnsupportedOperationException`.
-- So `repo.save(entity)`, `repo.delete(entity)`, `repo.update(old, new)`, `repo.findById(...)`, `repo.saveAll(...)`, `repo.raw(...)` — effectively the entire `KandraRepository`/`KandraSuspendRepository` surface — throw `UnsupportedOperationException: FakePreparedStatement.bind() not supported in FakeKandraSession.` when called through a runtime built by `KandraTestUtils.inMemory(...)`.
+- Under `FakeKandraSession`, `prepare(cql)` returns a `FakePreparedStatement`, and `.bind(...)` now returns a working `FakeBoundStatement` that records every positionally-bound value (see `FakeBoundStatement` above).
+- So `repo.save(entity)`, `repo.delete(entity)`, `repo.update(old, new)`, `repo.findById(...)`, `repo.saveAll(...)`, `repo.raw(...)` — the full `KandraRepository`/`KandraSuspendRepository` surface — run to completion through a runtime built by `KandraTestUtils.inMemory(...)`, exercising the real `StatementBuilder`/`BatchEngine` code paths.
 
-This directly contradicts `FakeKandraSession`'s own KDoc ("wire a full repository stack without Testcontainers") and the class-level example on `KandraTestUtils.inMemory`. As of the current source, `FakeKandraSession` is only useful for asserting on **statements you build and execute yourself** (`SimpleStatement`s don't need `prepare()`/`bind()` — only `PreparedStatement`s do), not for exercising Kandra's own repository code paths end to end. For anything that calls into an actual `KandraRepository`/`KandraSuspendRepository`, use `KandraTestcontainers` instead.
+**An earlier version of `FakePreparedStatement.bind()` unconditionally threw `UnsupportedOperationException`**,
+which meant every real repository operation failed immediately — contradicting `FakeKandraSession`'s own KDoc
+("wire a full repository stack without Testcontainers"). That has been fixed; don't assume repository calls
+still throw under the fake session.
+
+**What's still not real, even after the fix:** `FakeBoundStatement`/`FakeResultSet` perform no actual CQL type
+encoding/decoding, no query semantics, and no real data storage — `execute()` always returns an empty,
+`wasApplied() == true` result regardless of the statement (see "No configurable behavior exists" above). So
+`FakeKandraSession` is genuinely useful for **structural** assertions — did `save()` build the batch you
+expect, in what order, with what values bound (via `capturedStatements()`/`capturedBatches()` and each
+statement's `boundValues()`) — but not for asserting on actual round-tripped data, real LWT applied/not-applied
+outcomes, or `KandraOptimisticLockException`/`saveIfNotExists() == false` paths. For those, use
+`KandraTestcontainers`.
 
 ## KandraTestUtils / `io.kandra.test.KandraRuntime`
 
@@ -132,10 +152,12 @@ class KandraRuntimeHandle(
 
 ## Example: FakeKandraSession-based unit test
 
-Because of the "Known limitation" above, a realistic fake-session test targets statements you build yourself, not a live `KandraRepository` call:
+Real repository calls run to completion under the fake session — assert on the structural shape of what got
+built (which statements, in what order, what values), not on real data or real LWT outcomes:
 
 ```kotlin
 import io.kandra.test.FakeKandraSession
+import io.kandra.test.FakeBoundStatement
 import com.datastax.oss.driver.api.core.cql.BatchStatement
 import com.datastax.oss.driver.api.core.cql.DefaultBatchType
 import com.datastax.oss.driver.api.core.cql.SimpleStatement
@@ -167,16 +189,16 @@ class FakeKandraSessionCaptureTest {
     }
 
     @Test
-    fun `repository calls currently throw through the fake session`() {
+    fun `save builds and binds the expected LOGGED batch`() {
         val runtime = KandraTestUtils.inMemory(User::class)
         val repo = runtime.repository(User::class)
 
-        // Documented as working in KandraRuntime's KDoc, but StatementBuilder always
-        // goes through session.prepare(cql).bind(...), and FakePreparedStatement.bind()
-        // unconditionally throws — verified in StatementBuilder.insertPrimary().
-        org.junit.jupiter.api.assertThrows<UnsupportedOperationException> {
-            repo.save(User(id = "u1", name = "Ada"))
-        }
+        repo.save(User(id = "u1", name = "Ada", email = "ada@example.com"))
+
+        val batch = fakeSession.capturedBatches().single()
+        // Inspect exactly what was bound to the primary INSERT (positional, matching column order):
+        val primaryStatement = batch.first() as FakeBoundStatement
+        assertEquals(listOf("u1", "Ada", "ada@example.com"), primaryStatement.boundValues())
 
         runtime.close()
         SchemaRegistry.clear() // schema registration is process-global — reset between tests
@@ -229,10 +251,10 @@ class UserRepositoryIntegrationTest {
 
 ## Gotchas worth double-checking in review
 
-- **`repo.save()`/`repo.findById()`/etc. throw under `KandraTestUtils.inMemory()` today.** Every statement `StatementBuilder`/`QueryExecutor` build goes through `session.prepare(cql).bind(...)`, and `FakePreparedStatement.bind()` unconditionally throws `UnsupportedOperationException`. `FakeKandraSession` currently only supports asserting on hand-built `BatchStatement`/`SimpleStatement` execution, despite its KDoc claiming to "wire a full repository stack."
-- **`tableContents(tableName)` always returns `emptyList()`.** It is not backed by anything captured — don't use it to assert on saved data.
+- **`repo.save()`/`repo.findById()`/etc. now run to completion under `KandraTestUtils.inMemory()`** — an earlier version of `FakePreparedStatement.bind()` unconditionally threw `UnsupportedOperationException`, breaking the entire repository surface; that's fixed (GH #28 / ISS-040). Don't assume the fake session only supports hand-built `BatchStatement`/`SimpleStatement` execution — real repository calls work, structurally.
+- **`tableContents(tableName)` always returns `emptyList()`.** It is not backed by anything captured — don't use it to assert on saved data; use `capturedStatements()`/`capturedBatches()` plus each statement's `boundValues()` (if it's a `FakeBoundStatement`) instead.
 - **No way to simulate a failed LWT / optimistic-lock conflict via `FakeKandraSession`.** `FakeResultSet.wasApplied()` is hardcoded `true`; there's no seam to flip it. Test `KandraOptimisticLockException`/`saveIfNotExists() == false` paths against Testcontainers.
-- **`executeAsync(...)` does not populate `capturedBatches()`** — only the synchronous `execute(Statement<*>)` overload captures. If the code under test uses the async driver API, `capturedBatches()` will stay empty even though statements were "executed."
+- **`executeAsync(...)` does not populate `capturedStatements()`/`capturedBatches()`** — only the synchronous `execute(Statement<*>)` overload captures. If the code under test uses the async driver API, both will stay empty even though statements were "executed."
 - **Two different `KandraRuntime` classes, two different repository call conventions.** `io.kandra.test.KandraRuntime.repository(User::class)` (explicit `KClass` arg) vs. `KandraRuntimeHandle.repository<User>()` (reified, no arg, delegates to production `io.kandra.runtime.KandraRuntime`). Mixing up the call style across the two test styles is a common copy-paste mistake.
 - **`SchemaRegistry` is process-global and neither test style clears it for you.** `inMemory()` and `freshKeyspace()` both call the additive `SchemaRegistry.register(...)`; `KandraRuntime.close()` / `KandraRuntimeHandle.close()` never call `SchemaRegistry.clear()`. Call it yourself in `@AfterEach` if a test depends on a clean registry (e.g. asserting a schema-validation failure).
 - **The Testcontainers container is a JVM-wide singleton that is never explicitly stopped.** `KandraTestcontainers.container` starts once (blocking, on first access, from whichever test class hits it first) and is reused by every subsequent `freshKeyspace()` call in the same JVM run; only the per-call keyspace is isolated and dropped in `close()`. Expect the first integration test in a run to be noticeably slower than the rest.
