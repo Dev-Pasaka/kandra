@@ -63,6 +63,7 @@ Docker before relying on them.
 | [ISS-050](ISS-050-raw-query-injection-guard.md) | `raw()`/`rawQuery()`'s CQL-injection guard only fired under a narrow condition and never blocked execution |
 | [ISS-051](ISS-051-columnref-cqlname-validation.md) | `KandraColumnRef`'s public constructor accepted an unvalidated `cqlName` |
 | [ISS-052](ISS-052-jakarta-codegen-health-polish.md) | Assorted polish — Jakarta validator factory reuse, codegen nullability, health endpoint debounce |
+| [ISS-065](ISS-065-credentials-tostring-leak.md) | `KandraCredentials`' auto-generated `toString()` would print the plaintext password |
 
 ## Closed — not a bug
 
