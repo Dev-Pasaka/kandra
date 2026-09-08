@@ -20,6 +20,22 @@ The last open item from the 2026-09-08 review batch (GH #54-#70) — needs an AP
 `KandraBatchScope`/`KandraRuntime` (differentiating `batch { }` from `batchBlocking { }` at the
 `saveInBatch`/`deleteInBatch` call sites) that deserves its own focused pass rather than being rushed.
 
+Filed 2026-09-08 from a second, critical library-wide review (security, performance, consistency,
+scalability, developer experience) done specifically ahead of experimental testing against a real
+**multi-cluster DC** topology. These form the pre-multi-DC-testing checklist — see
+[docs/reviews/2026-09-08-pre-multidc-cluster-review.md](../reviews/2026-09-08-pre-multidc-cluster-review.md)
+for the full write-up.
+
+| ID | GH | Severity | Title |
+|---|---|---|---|
+| [ISS-070](ISS-070-ssl-config-dead-fields.md) | [#78](https://github.com/Dev-Pasaka/kandra/issues/78) | High | `SslConfig.requireEncryption`/`minimumTlsVersion`/`cipherSuites` are declared but never applied |
+| [ISS-071](ISS-071-concurrent-ddl-bootstrap-race.md) | [#79](https://github.com/Dev-Pasaka/kandra/issues/79) | High | Schema DDL bootstrap has no coordination guard across concurrently-starting instances |
+| [ISS-072](ISS-072-connection-pool-size-unconfigurable.md) | [#80](https://github.com/Dev-Pasaka/kandra/issues/80) | Medium | Connection-pool size (local/remote) has no Kandra-level configuration |
+| [ISS-073](ISS-073-no-backpressure-admission-control.md) | [#81](https://github.com/Dev-Pasaka/kandra/issues/81) | Medium | No backpressure/admission-control knob for in-flight requests |
+| [ISS-074](ISS-074-metrics-success-path-only.md) | [#82](https://github.com/Dev-Pasaka/kandra/issues/82) | Medium | `KandraMetrics.record()` is only ever called on the success path |
+| [ISS-075](ISS-075-strict-mode-rf-consistency-math.md) | [#83](https://github.com/Dev-Pasaka/kandra/issues/83) | Medium | Strict Mode warns on LOCAL_ONE/ONE but never checks RF vs (R+W) directly |
+| [ISS-076](ISS-076-ktor-migrate-test-coverage-gaps.md) | [#84](https://github.com/Dev-Pasaka/kandra/issues/84) | Low | `kandra-ktor` (SSL/pool/failover) and `kandra-migrate` have thin test coverage relative to their risk surface |
+
 ## Fixed — pending live-cluster verification
 
 These compile and pass unit tests, but haven't yet been run against a real Testcontainers-backed
