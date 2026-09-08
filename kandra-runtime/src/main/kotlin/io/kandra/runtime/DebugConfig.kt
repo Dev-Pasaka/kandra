@@ -15,4 +15,19 @@ class DebugConfig {
 
     /** Log full batch contents at DEBUG before execution. */
     var logBatches: Boolean = false
+
+    /**
+     * Fail closed instead of warning when [QueryExecutor.raw]/[QueryExecutor.rawSuspend]/
+     * [QueryExecutor.rawQuery]/[QueryExecutor.rawQuerySuspend] detect a CQL string that looks like it
+     * has a string literal spliced directly into it (see [QueryExecutor] for the exact heuristic).
+     *
+     * Default `false`: the heuristic only logs a WARN, matching pre-existing behavior. Set to `true`
+     * for a strict/CI environment where any raw CQL that isn't fully parameterized should throw
+     * [io.kandra.core.exception.KandraQueryException] instead of merely being logged.
+     *
+     * Note this is a heuristic, not a parser — it can neither catch every injection shape (e.g.
+     * quote-less numeric-context or keyword injection) nor guarantee zero false positives on CQL that
+     * legitimately embeds a literal (e.g. a fixed non-user-supplied constant). Enable with that in mind.
+     */
+    var rawQueryStrictMode: Boolean = false
 }
