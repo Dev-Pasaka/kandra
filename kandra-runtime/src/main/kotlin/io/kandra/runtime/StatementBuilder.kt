@@ -14,6 +14,7 @@ import io.kandra.core.schema.LookupTableSchema
 import io.kandra.core.schema.TableSchema
 import io.kandra.runtime.codec.KandraCodec
 import io.kandra.runtime.codec.KandraUnset
+import io.kandra.runtime.driver.prepareSuspend
 import java.util.Collections
 import kotlin.reflect.KClass
 import kotlin.reflect.full.findAnnotation
@@ -50,6 +51,25 @@ class StatementBuilder(
     private fun prepare(cql: String): PreparedStatement {
         if (debugConfig.logQueries) logger.debug { "Kandra CQL: $cql" }
         return cache.getOrPut(cql) { session.prepare(cql) }
+    }
+
+    /**
+     * Suspend counterpart of [prepare] (GH #27 / ISS-049) — uses [CqlSession.prepareSuspend]
+     * (`prepareAsync` under the hood) instead of the blocking `session.prepare`, so a cache miss
+     * on the *first* call for a given CQL string (or after an LRU eviction) never blocks the
+     * calling coroutine dispatcher thread for a full driver round-trip.
+     *
+     * The cache is checked up front (fast path on a hit — no suspension needed at all), and
+     * `getOrPut` is used only to insert the freshly-prepared statement, so a race between two
+     * coroutines preparing the same CQL concurrently still converges on a single cached
+     * [PreparedStatement] instance (whichever `getOrPut` call wins) rather than each coroutine
+     * keeping its own.
+     */
+    private suspend fun prepareSuspend(cql: String): PreparedStatement {
+        if (debugConfig.logQueries) logger.debug { "Kandra CQL: $cql" }
+        cache[cql]?.let { return it }
+        val prepared = session.prepareSuspend(cql)
+        return cache.getOrPut(cql) { prepared }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -175,6 +195,60 @@ class StatementBuilder(
         return stmt
     }
 
+    /** Suspend counterpart of [insertPrimary] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun insertPrimarySuspend(
+        schema: TableSchema,
+        entity: Any,
+        ttlSeconds: Int? = null,
+        ifNotExists: Boolean = false,
+        timestampMicros: Long? = null,
+        consistency: KandraConsistency? = null
+    ): BoundStatement {
+        val allCols = buildList {
+            addAll(schema.partitionKeys)
+            addAll(schema.clusteringKeys)
+            addAll(schema.columns)
+            addAll(schema.lookupTables.map { it.indexColumn })
+        }.distinctBy { it.cqlName }
+
+        val colNames = allCols.joinToString(", ") { it.cqlName }
+        val placeholders = allCols.joinToString(", ") { "?" }
+
+        val effectiveTtl = ttlSeconds ?: schema.defaultTtl
+        val modifiers = buildList<String> {
+            if (effectiveTtl != null) add("TTL $effectiveTtl")
+            if (timestampMicros != null) add("TIMESTAMP $timestampMicros")
+        }
+        val usingClause = if (modifiers.isNotEmpty()) " USING ${modifiers.joinToString(" AND ")}" else ""
+        val ifClause = if (ifNotExists) " IF NOT EXISTS" else ""
+
+        val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
+        val prepared = prepareSuspend(cql)
+
+        val props = schema.reflection.propertiesByName
+        var stmt = prepared.bind()
+        allCols.forEachIndexed { idx, col ->
+            val prop = props[col.propertyName]
+            val value = prop?.call(entity)
+            val encoded = codec.encode(value, col.type)
+            if (encoded === KandraUnset) {
+                if (col.isPartitionKey || col.clusteringKey != null) {
+                    throw KandraSchemaException(
+                        "Primary/clustering key column '${col.propertyName}' cannot be UNSET (null). " +
+                            "Partition keys must always have a value."
+                    )
+                }
+                stmt = stmt.unset(idx)
+            } else {
+                stmt = stmt.setEncoded(idx, encoded!!)
+            }
+        }
+
+        stmt = stmt.setIdempotent(ifNotExists)
+        stmt = stmt.setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
+        return stmt
+    }
+
     /**
      * Same as [insertPrimary] but binds null as actual null (creates tombstones).
      * Use when the caller explicitly wants to clear optional columns.
@@ -231,6 +305,52 @@ class StatementBuilder(
         return stmt
     }
 
+    /** Suspend counterpart of [insertPrimaryWithNulls] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun insertPrimaryWithNullsSuspend(
+        schema: TableSchema,
+        entity: Any,
+        ttlSeconds: Int? = null,
+        ifNotExists: Boolean = false,
+        timestampMicros: Long? = null,
+        consistency: KandraConsistency? = null
+    ): BoundStatement {
+        val allCols = buildList {
+            addAll(schema.partitionKeys)
+            addAll(schema.clusteringKeys)
+            addAll(schema.columns)
+            addAll(schema.lookupTables.map { it.indexColumn })
+        }.distinctBy { it.cqlName }
+
+        val colNames = allCols.joinToString(", ") { it.cqlName }
+        val placeholders = allCols.joinToString(", ") { "?" }
+        val effectiveTtl = ttlSeconds ?: schema.defaultTtl
+        val modifiers = buildList<String> {
+            if (effectiveTtl != null) add("TTL $effectiveTtl")
+            if (timestampMicros != null) add("TIMESTAMP $timestampMicros")
+        }
+        val usingClause = if (modifiers.isNotEmpty()) " USING ${modifiers.joinToString(" AND ")}" else ""
+        val ifClause = if (ifNotExists) " IF NOT EXISTS" else ""
+        val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
+        val prepared = prepareSuspend(cql)
+
+        val props = schema.reflection.propertiesByName
+        var stmt = prepared.bind()
+        allCols.forEachIndexed { idx, col ->
+            val prop = props[col.propertyName]
+            val value = prop?.call(entity)
+            val encoded: Any? = if (value == null) null
+            else codec.encode(value, col.type).let { if (it === KandraUnset) null else it }
+            if (encoded == null) {
+                stmt = stmt.setBytesUnsafe(idx, null)
+            } else {
+                stmt = stmt.setEncoded(idx, encoded)
+            }
+        }
+        stmt = stmt.setIdempotent(ifNotExists)
+        stmt = stmt.setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
+        return stmt
+    }
+
     /**
      * [schema] is only needed to source the entity's cached [io.kandra.core.schema.EntityReflection]
      * property map (resolved once at [io.kandra.core.SchemaRegistry.register] time) — [entity] is
@@ -255,9 +375,37 @@ class StatementBuilder(
         return stmt.setIdempotent(false) // lookup inserts are not idempotent
     }
 
+    /** Suspend counterpart of [insertLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun insertLookupSuspend(schema: TableSchema, lookup: LookupTableSchema, entity: Any): BoundStatement {
+        val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns + lookup.clusteringKeyColumns
+        val colNames = cols.joinToString(", ") { it.cqlName }
+        val placeholders = cols.joinToString(", ") { "?" }
+        val cql = "INSERT INTO ${lookup.tableName} ($colNames) VALUES ($placeholders)"
+        val prepared = prepareSuspend(cql)
+
+        val props = schema.reflection.propertiesByName
+        var stmt = prepared.bind()
+        cols.forEachIndexed { idx, col ->
+            val prop = props[col.propertyName]
+            val value = prop?.call(entity)
+            val encoded = codec.encode(value, col.type)
+            stmt = if (encoded === KandraUnset) stmt.unset(idx)
+                   else stmt.setEncoded(idx, encoded!!)
+        }
+        return stmt.setIdempotent(false) // lookup inserts are not idempotent
+    }
+
     fun deleteLookup(lookup: LookupTableSchema, indexValue: Any): BoundStatement {
         val cql = "DELETE FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
         val prepared = prepare(cql)
+        return prepared.bind(codec.encode(indexValue, lookup.indexColumn.type))
+            .setIdempotent(true) // delete is idempotent
+    }
+
+    /** Suspend counterpart of [deleteLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun deleteLookupSuspend(lookup: LookupTableSchema, indexValue: Any): BoundStatement {
+        val cql = "DELETE FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val prepared = prepareSuspend(cql)
         return prepared.bind(codec.encode(indexValue, lookup.indexColumn.type))
             .setIdempotent(true) // delete is idempotent
     }
@@ -267,6 +415,20 @@ class StatementBuilder(
         requireFullKey(schema, keyCols, idValues.size, "selectById")
         val cql = "SELECT * FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
+        val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
+            codec.encode(v, col.type)
+        }
+        return prepared.bind(*encodedValues.toTypedArray())
+            .setIdempotent(true)
+            .setConsistencyLevel(resolveReadConsistency(schema, consistency).toDriverLevel())
+    }
+
+    /** Suspend counterpart of [selectById] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun selectByIdSuspend(schema: TableSchema, vararg idValues: Any, consistency: KandraConsistency? = null): BoundStatement {
+        val keyCols = schema.primaryKeyColumns()
+        requireFullKey(schema, keyCols, idValues.size, "selectById")
+        val cql = "SELECT * FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
+        val prepared = prepareSuspend(cql)
         val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
             codec.encode(v, col.type)
         }
@@ -286,6 +448,15 @@ class StatementBuilder(
             .setIdempotent(true)
     }
 
+    /** Suspend counterpart of [selectByLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun selectByLookupSuspend(lookup: LookupTableSchema, value: Any, consistency: KandraConsistency? = null): BoundStatement {
+        val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlName }
+        val cql = "SELECT $keyCols FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val prepared = prepareSuspend(cql)
+        return prepared.bind(codec.encode(value, lookup.indexColumn.type))
+            .setIdempotent(true)
+    }
+
     fun selectByPartitionKeyIn(schema: TableSchema, ids: List<Any>, consistency: KandraConsistency? = null): BoundStatement {
         if (schema.partitionKeys.size != 1) throw KandraSchemaException(
             "IN on partition key is only supported for single-column partition keys. " +
@@ -300,11 +471,39 @@ class StatementBuilder(
             .setConsistencyLevel(resolveReadConsistency(schema, consistency).toDriverLevel())
     }
 
+    /** Suspend counterpart of [selectByPartitionKeyIn] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun selectByPartitionKeyInSuspend(schema: TableSchema, ids: List<Any>, consistency: KandraConsistency? = null): BoundStatement {
+        if (schema.partitionKeys.size != 1) throw KandraSchemaException(
+            "IN on partition key is only supported for single-column partition keys. " +
+            "Table '${schema.tableName}' has a composite partition key."
+        )
+        val pkCol = schema.partitionKeys.first()
+        val cql = "SELECT * FROM ${schema.tableName} WHERE ${pkCol.cqlName} IN ?"
+        val prepared = prepareSuspend(cql)
+        val encoded = ids.map { codec.encode(it, pkCol.type) }
+        return prepared.bind(encoded)
+            .setIdempotent(true)
+            .setConsistencyLevel(resolveReadConsistency(schema, consistency).toDriverLevel())
+    }
+
     fun deleteById(schema: TableSchema, vararg idValues: Any): BoundStatement {
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, idValues.size, "deleteById")
         val cql = "DELETE FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
+        val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
+            codec.encode(v, col.type)
+        }
+        return prepared.bind(*encodedValues.toTypedArray())
+            .setIdempotent(true) // delete is idempotent
+    }
+
+    /** Suspend counterpart of [deleteById] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun deleteByIdSuspend(schema: TableSchema, vararg idValues: Any): BoundStatement {
+        val keyCols = schema.primaryKeyColumns()
+        requireFullKey(schema, keyCols, idValues.size, "deleteById")
+        val cql = "DELETE FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
+        val prepared = prepareSuspend(cql)
         val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
             codec.encode(v, col.type)
         }
@@ -337,6 +536,29 @@ class StatementBuilder(
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
 
+    /** Suspend counterpart of [appendToCollection] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun appendToCollectionSuspend(
+        schema: TableSchema,
+        keyValues: List<Any>,
+        columnName: String,
+        values: Any,
+        consistency: KandraConsistency? = null
+    ): BoundStatement {
+        val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
+            .find { it.cqlName == columnName || it.propertyName == columnName }
+            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.tableName}'")
+        val keyCols = schema.primaryKeyColumns()
+        requireFullKey(schema, keyCols, keyValues.size, "append")
+        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE ${schema.primaryKeyWhereClause()}"
+        val prepared = prepareSuspend(cql)
+        val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
+            codec.encode(v, keyCol.type)
+        }
+        return prepared.bind(values, *encodedKeys.toTypedArray())
+            .setIdempotent(false)
+            .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
+    }
+
     fun removeFromCollection(
         schema: TableSchema,
         keyValues: List<Any>,
@@ -359,6 +581,48 @@ class StatementBuilder(
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
 
+    /** Suspend counterpart of [removeFromCollection] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun removeFromCollectionSuspend(
+        schema: TableSchema,
+        keyValues: List<Any>,
+        columnName: String,
+        values: Any,
+        consistency: KandraConsistency? = null
+    ): BoundStatement {
+        val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
+            .find { it.cqlName == columnName || it.propertyName == columnName }
+            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.tableName}'")
+        val keyCols = schema.primaryKeyColumns()
+        requireFullKey(schema, keyCols, keyValues.size, "remove")
+        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE ${schema.primaryKeyWhereClause()}"
+        val prepared = prepareSuspend(cql)
+        val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
+            codec.encode(v, keyCol.type)
+        }
+        return prepared.bind(values, *encodedKeys.toTypedArray())
+            .setIdempotent(false)
+            .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
+    }
+
+    /**
+     * `Math.abs(Long.MIN_VALUE)` overflows back to `Long.MIN_VALUE` itself (two's-complement has no
+     * positive representation for it), which would silently flip a `decrement(by = Long.MIN_VALUE)`
+     * into binding a negative delta with a `+` operator baked into the CQL — i.e. it would actually
+     * *decrement* the counter while claiming to increment it (or vice versa), with no error at all.
+     * Guarded explicitly here (GH #36 item 3 / ISS-049) rather than left to `Math.abs`'s silent wrap.
+     */
+    private fun safeAbsoluteDelta(delta: Long, schema: TableSchema, columnName: String): Long {
+        if (delta == Long.MIN_VALUE) {
+            throw KandraSchemaException(
+                "counterUpdate on '${schema.tableName}.$columnName' received delta = Long.MIN_VALUE " +
+                "(${Long.MIN_VALUE}), which cannot be negated/absolute-valued without overflowing back " +
+                "to itself (two's-complement has no positive counterpart for Long.MIN_VALUE). Use a " +
+                "delta in [Long.MIN_VALUE + 1, Long.MAX_VALUE]."
+            )
+        }
+        return Math.abs(delta)
+    }
+
     fun counterUpdate(
         schema: TableSchema,
         columnName: String,
@@ -368,6 +632,7 @@ class StatementBuilder(
     ): BoundStatement {
         val col = schema.columns.find { it.propertyName == columnName || it.cqlName == columnName }
             ?: throw KandraSchemaException("Counter column '$columnName' not found in '${schema.tableName}'")
+        val absDelta = safeAbsoluteDelta(delta, schema, columnName)
         val keyCols = schema.primaryKeyColumns()
         val op = if (delta >= 0) "+" else "-"
         val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
@@ -376,7 +641,31 @@ class StatementBuilder(
             partitionKeys[key.propertyName] ?: partitionKeys[key.cqlName]
                 ?: throw KandraSchemaException("Missing key value for '${key.cqlName}'")
         }
-        return prepared.bind(Math.abs(delta), *keyValues.toTypedArray())
+        return prepared.bind(absDelta, *keyValues.toTypedArray())
+            .setIdempotent(false)
+            .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
+    }
+
+    /** Suspend counterpart of [counterUpdate] (GH #27 / ISS-049) — see [prepareSuspend]. */
+    suspend fun counterUpdateSuspend(
+        schema: TableSchema,
+        columnName: String,
+        partitionKeys: Map<String, Any>,
+        delta: Long,
+        consistency: KandraConsistency? = null
+    ): BoundStatement {
+        val col = schema.columns.find { it.propertyName == columnName || it.cqlName == columnName }
+            ?: throw KandraSchemaException("Counter column '$columnName' not found in '${schema.tableName}'")
+        val absDelta = safeAbsoluteDelta(delta, schema, columnName)
+        val keyCols = schema.primaryKeyColumns()
+        val op = if (delta >= 0) "+" else "-"
+        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
+        val prepared = prepareSuspend(cql)
+        val keyValues = keyCols.map { key ->
+            partitionKeys[key.propertyName] ?: partitionKeys[key.cqlName]
+                ?: throw KandraSchemaException("Missing key value for '${key.cqlName}'")
+        }
+        return prepared.bind(absDelta, *keyValues.toTypedArray())
             .setIdempotent(false)
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }

@@ -154,7 +154,7 @@ class QueryExecutor(
     // ── Suspend variants — same logic, never block the calling coroutine dispatcher ──
 
     suspend fun <T : Any> findByIdSuspend(entityClass: KClass<T>, vararg idValues: Any, consistency: KandraConsistency? = null): T? {
-        val rs = session.executeSuspend(statementBuilder.selectById(schema, *idValues, consistency = consistency))
+        val rs = session.executeSuspend(statementBuilder.selectByIdSuspend(schema, *idValues, consistency = consistency))
         val row = rs.one() ?: return null
         return decodeEntity(row, entityClass)
     }
@@ -184,7 +184,7 @@ class QueryExecutor(
             val lookup = schema.lookupTables.first { it.indexColumn.cqlName == lookupColName }
             val lookupValue = (lookupPredicate as? KandraPredicate.Eq)?.value
                 ?: throw KandraQueryException("Lookup table pagination only supports equality predicates.")
-            val lookupRow = session.executeSuspend(statementBuilder.selectByLookup(lookup, lookupValue!!))
+            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(lookup, lookupValue!!))
                 .one() ?: return KandraPage(emptyList(), null, false)
 
             // Full key (partition + clustering), not partition-only -- a lookup value maps to exactly
@@ -420,7 +420,7 @@ class QueryExecutor(
             logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
 
             val encodedIds = inPredicate.values.filterNotNull()
-            return session.executeSuspendAll(statementBuilder.selectByPartitionKeyIn(schema, encodedIds))
+            return session.executeSuspendAll(statementBuilder.selectByPartitionKeyInSuspend(schema, encodedIds))
         }
 
         // ── Lookup table predicate ────────────────────────────────────────────
@@ -436,7 +436,7 @@ class QueryExecutor(
                 else -> throw KandraQueryException("Lookup table queries only support equality predicates.")
             } ?: throw KandraQueryException("Lookup predicate value must not be null.")
 
-            val lookupRow = session.executeSuspend(statementBuilder.selectByLookup(lookup, lookupValue))
+            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(lookup, lookupValue))
                 .one() ?: return emptyList()
 
             // Full key (partition + clustering) -- selectById requires all of it (see ISS-029).
@@ -444,7 +444,7 @@ class QueryExecutor(
                 lookupRow.getObject(keyCol.cqlName)
                     ?: throw KandraQueryException("Null key column '${keyCol.cqlName}' from lookup table")
             }
-            return session.executeSuspendAll(statementBuilder.selectById(schema, *keyValues.toTypedArray()))
+            return session.executeSuspendAll(statementBuilder.selectByIdSuspend(schema, *keyValues.toTypedArray()))
         }
 
         // ── @SecondaryIndex predicate ─────────────────────────────────────────
