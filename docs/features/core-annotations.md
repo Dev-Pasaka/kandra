@@ -5,8 +5,8 @@ Maps a Kotlin data class to a ScyllaDB/Cassandra table.
 
 ```kotlin
 @ScyllaTable(
-    tableName = "users",
-    gcGraceSeconds = 86400   // optional; sets gc_grace_seconds in DDL
+    name = "users",
+    gcGraceSeconds = 86400   // optional; -1 (default) means "use ScyllaDB's own default"
 )
 data class User(...)
 ```
@@ -158,16 +158,38 @@ val id = KandraUuid.timeOrdered()
 
 [KandraUuid]: ../../kandra-core/src/main/kotlin/io/kandra/core/KandraUuid.kt
 
-### `@LookupTable`
-Declares a denormalised lookup table on a secondary field with configurable consistency (`BATCH` or `EVENTUAL`).
+### `@LookupIndex`
+Declares a denormalised lookup table keyed by the annotated property. Unlike the other annotations
+on this page, it goes on the **property** itself, not the class — the property's own value becomes
+the lookup table's key.
 
 ```kotlin
-@LookupTable(
-    tableName = "users_by_email",
-    indexField = "email",
-    consistency = LookupConsistency.BATCH
+@ScyllaTable("users")
+data class User(
+    @PartitionKey val id: UUID,
+    @LookupIndex(tableSuffix = "by_email", consistency = LookupConsistency.BATCH) val email: String,
+    @LookupIndex(tableSuffix = "by_phone", consistency = LookupConsistency.EVENTUAL) val phone: String?,
+    val name: String
 )
 ```
+
+`tableSuffix` is appended to the primary table's name to form the generated table's name — the
+example above generates `users_by_email` and `users_by_phone`, each `PRIMARY KEY` on the annotated
+column, storing just enough of the primary key to resolve back to the primary row (see
+`repositories.md` for how `findAll { UserTable.email eq "..." }` resolves through it).
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `tableSuffix` | `String` | required | Appended to the primary table's name to form the lookup table's name |
+| `consistency` | `LookupConsistency` | `BATCH` | `BATCH` = same `LOGGED BATCH` as the primary write (atomic); `EVENTUAL` = written asynchronously after the primary commit |
+
+> **When to use `EVENTUAL`:** for high-write-throughput tables where strict atomicity between primary
+> and lookup is not required. Failed eventual writes are forwarded to
+> `KandraEventListener.onEventualWriteFailed`.
+>
+> `EVENTUAL` only relaxes *atomicity* with the primary write, not durability guarantees: the write
+> still retries on transient errors per `retry { }`'s `retryOn` set, counts toward `inFlightCount`,
+> and is rejected once graceful shutdown begins — the same protections every other write gets.
 
 **With `@SoftDelete`:** a lookup row is not removed when the entity is soft-deleted — it remains
 until the entity's own soft-delete TTL expires, matching how `findById` still resolves a soft-deleted
@@ -175,7 +197,37 @@ row. On high-churn tables combining both annotations, this means the lookup tabl
 faster than the primary table's over time; this is expected, not a leak. See
 [`@SoftDelete`](#softdelete) above and
 [docs/issues/ISS-030-soft-delete-removes-lookup-rows.md](../issues/ISS-030-soft-delete-removes-lookup-rows.md).
+See also [Health check & Graceful shutdown](operations.md) for the `inFlightCount`/shutdown-drain
+mechanics referenced above.
 
-`EVENTUAL` only defers the lookup write until after the primary batch commits — it still retries on
-transient errors, counts toward graceful shutdown's `inFlightCount` drain, and is rejected once
-shutdown begins, the same as `BATCH`. See [Health check & Graceful shutdown](operations.md).
+### `@SecondaryIndex`
+Creates a native ScyllaDB `CREATE INDEX` on the annotated column, answered directly by the index
+(no two-step lookup like `@LookupIndex`). Uses scatter-gather across all nodes — only use it for
+low-cardinality fields (e.g. `accountStatus`, `isVerified`) and non-hot-path queries. Kandra logs a
+WARN every time a query against a `@SecondaryIndex` column executes, as a running reminder of the
+cost.
+
+```kotlin
+data class User(
+    @PartitionKey val id: UUID,
+    @SecondaryIndex val accountStatus: String,   // CREATE INDEX IF NOT EXISTS ON users(account_status)
+    val email: String
+)
+```
+
+For a high-cardinality field (e.g. `email`, `userId`), use [`@LookupIndex`](#lookupindex) instead.
+
+### `@ReadConsistency` / `@WriteConsistency`
+Overrides the plugin's default read/write consistency level for every operation against this
+entity's table. A per-call `consistency` parameter still wins over these; these still win over the
+plugin's `consistency { defaultRead / defaultWrite }` config.
+
+```kotlin
+@ReadConsistency(KandraConsistency.LOCAL_QUORUM)
+@WriteConsistency(KandraConsistency.EACH_QUORUM)
+@ScyllaTable("critical_balances")
+data class Balance(@PartitionKey val id: UUID, val amountCents: Long)
+```
+
+Resolution order (highest priority first): per-call parameter → `@ReadConsistency`/`@WriteConsistency`
+→ `ConsistencyConfig` defaults. See [multidc.md](multidc.md) for the full consistency-level guide.

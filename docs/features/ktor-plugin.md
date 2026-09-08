@@ -29,13 +29,13 @@ install(Kandra) {
     }
 
     auth {
-        provider            = KandraAuth.plainText("user", "pass")
+        provider            = KandraAuth.static("user", "pass")   // local dev only — see below
         refreshIntervalSeconds = 3600
     }
 
     consistency {
-        read  = KandraConsistency.LOCAL_QUORUM
-        write = KandraConsistency.LOCAL_QUORUM
+        defaultRead  = KandraConsistency.LOCAL_QUORUM
+        defaultWrite = KandraConsistency.LOCAL_QUORUM
     }
 
     retry {

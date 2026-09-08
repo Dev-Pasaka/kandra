@@ -47,6 +47,7 @@ This README covers the common cases end-to-end. For everything else:
 | [`docs/changelog/`](docs/changelog/README.md) | What changed in each version, one file per version |
 | [`docs/features/`](docs/features/README.md) | Feature-by-feature reference, one file per area |
 | [`docs/issues/`](docs/issues/README.md) | Known gaps and issues — open, fixed, and closed — with the reasoning behind each |
+| [`docs/reviews/`](docs/reviews/README.md) | Critical, source-verified reviews — library-wide (security/performance/consistency/scalability/DX) and documentation-reality-check passes |
 | [`docs/test-plan/`](docs/test-plan/README.md) | Step-by-step plan for building a real Ktor app against the published artifact and a real ScyllaDB cluster, with an exhaustive functional/edge-case coverage matrix and scoring rubric |
 | [`docs/history/`](docs/history/) | The original build specs used to generate each version (0.1.0 → 0.4.0) — historical context, not current docs |
 | [`docs/site/`](docs/site/README.md) | Build prompts for the separate documentation website project, one file per Kandra version |
@@ -163,7 +164,7 @@ fun Application.configureDatabase() {
         auth {
             provider = KandraAuth.fromEnv()          // production default
             // provider = KandraAuth.static("cassandra", "cassandra")  // local dev
-            // provider = KandraAuth.fromFile("/run/secrets/db-creds")  // k8s secrets
+            // provider = KandraAuth.fromFile("/run/secrets/db-user", "/run/secrets/db-pass")  // k8s secrets
             refreshIntervalSeconds = 3600            // optional credential rotation
         }
 
@@ -569,8 +570,8 @@ JAVA_HOME=<jdk-21-path> ./gradlew build
 KandraAuth.fromEnv()                                  // reads SCYLLA_USERNAME, SCYLLA_PASSWORD
 KandraAuth.fromEnv("DB_USER", "DB_PASS")             // custom var names
 
-// From a file (Kubernetes secrets, Docker secrets)
-KandraAuth.fromFile("/run/secrets/scylla-credentials") // JSON {"username":"…","password":"…"}
+// From files (Kubernetes secrets, Docker secrets) — two plain-text files, not one JSON file
+KandraAuth.fromFile("/run/secrets/scylla-username", "/run/secrets/scylla-password")
 
 // Hardcoded — for local dev only
 KandraAuth.static("cassandra", "cassandra")
@@ -621,6 +622,11 @@ ssl {
 ```
 
 SSL handshake failures are wrapped as `KandraAuthException`. Keyspace permission validation runs at startup — disable with `validatePermissions = false` in restricted environments.
+
+> `SslConfig` also declares `requireEncryption`, `minimumTlsVersion`, and `cipherSuites` fields —
+> these are not yet wired into the driver/`SSLContext` and currently have no effect
+> ([ISS-070](docs/issues/ISS-070-ssl-config-dead-fields.md)). Only `enabled`, `hostnameVerification`,
+> and the trust/key store settings shown above are live.
 
 ---
 
@@ -694,6 +700,22 @@ Logs a WARN whenever a query resolves to `LOCAL_ONE`/`ONE` **and** the deploymen
 (auto-derived from `loadBalancing.allowedRemoteDcs.isNotEmpty()`, not a separate setting). Purely
 observability — never changes query behavior. See [`docs/features/multidc.md`](docs/features/multidc.md)
 and [ISS-037](docs/issues/ISS-037-consistency-strict-mode.md).
+
+**Before testing against a real multi-cluster DC topology**, read
+[`docs/reviews/2026-09-08-pre-multidc-cluster-review.md`](docs/reviews/2026-09-08-pre-multidc-cluster-review.md).
+In short:
+- The `LOCAL_ONE`/`LOCAL_QUORUM` defaults only guarantee read-your-writes for `RF ≤ 3`
+  (`R + W ≥ RF`) — raise `defaultRead` (e.g. to `LOCAL_QUORUM`) if your keyspace's replication
+  factor is higher, since Strict Mode does not currently check this for you
+  ([ISS-075](docs/issues/ISS-075-strict-mode-rf-consistency-math.md)).
+- `SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE` run DDL from every instance at every startup with no
+  coordination guard — safe for a single instance, a real risk if several replicas start
+  concurrently against the same keyspace
+  ([ISS-071](docs/issues/ISS-071-concurrent-ddl-bootstrap-race.md)).
+- Connection-pool size and request backpressure are not yet configurable through Kandra
+  ([ISS-072](docs/issues/ISS-072-connection-pool-size-unconfigurable.md),
+  [ISS-073](docs/issues/ISS-073-no-backpressure-admission-control.md)) — worth knowing before load
+  testing.
 
 ---
 

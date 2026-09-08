@@ -16,7 +16,7 @@ import io.kandra.core.annotations.*
 import java.time.Instant
 import java.util.UUID
 
-@ScyllaTable(tableName = "users", gcGraceSeconds = 864000)
+@ScyllaTable(name = "users", gcGraceSeconds = 864000)
 @SoftDelete(ttlSeconds = 2_592_000, markerProperty = "isDeleted")   // 30 days
 @CacheResult(ttlSeconds = 60, maxSize = 10_000)                      // findById cache
 data class User(
@@ -42,7 +42,7 @@ data class User(
     @UpdatedAt val updatedAt: Instant = Instant.EPOCH
 )
 
-@ScyllaTable(tableName = "transactions_by_user")
+@ScyllaTable(name = "transactions_by_user")
 data class Transaction(
     @PartitionKey(index = 0) val userId: UUID,
     @ClusteringKey(order = ClusteringOrder.DESC, index = 0) val createdAt: Instant,
@@ -109,11 +109,10 @@ fun Application.configureDatabase() {
             drainTimeoutMs = 5000
         }
 
-        batch {
-            warnThresholdKb = 5
-            maxChunkSize = 100
-            autoChunk = true
-        }
+        // Batch limits — flat top-level fields, not a nested `batch { }` block
+        batchWarnThresholdKb = 5
+        batchMaxChunkSize = 100
+        batchAutoChunk = true
 
         eventListener = object : KandraEventListener {
             override fun onEventualWriteFailed(tableName: String, entity: Any, error: Throwable) {
@@ -160,7 +159,7 @@ call `application.kandra.suspendRepository<User>()` inline instead?
 
 ```kotlin
 import io.kandra.core.exception.KandraOptimisticLockException
-import io.kandra.core.exception.KandraValidationException
+import io.kandra.core.KandraValidationException
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*

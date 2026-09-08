@@ -64,8 +64,8 @@ Both are constructed with `(session, schema, entityClass, batchEngine)` and inte
 ```kotlin
 fun save(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null)
 fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean
-fun saveWithNulls(entity: T, ttlSeconds: Int? = null)
-fun saveAll(entities: List<T>, useBatch: Boolean = true)
+fun saveWithNulls(entity: T, ttlSeconds: Int? = null, consistency: KandraConsistency? = null)
+fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null)
 ```
 (suspend repo: identical signatures, `suspend fun`)
 
@@ -120,17 +120,24 @@ userRepo.saveAll(users, useBatch = true)                   // chunks at 100 by d
 ### Update family
 
 ```kotlin
-fun update(old: T, new: T)
-fun updateForce(entity: T)
+fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null)
+fun updateForce(entity: T, consistency: KandraConsistency? = null)
 ```
 
-- **`update(old, new)`** — validates `new`. **If `schema.versionColumn` is present** (`@Version`
-  field): reads `old`'s current version value via reflection (throws `KandraQueryException` if it's
-  `null`), computes the next version (`+1` for `Long`, `Instant.now()` for `Instant` — anything else
-  throws `KandraQueryException("@Version field must be Long or Instant")`), and issues
-  `UPDATE <table> SET col=?, ... WHERE pk=? [AND pk2=?...] IF <versionCol> = ?` with
-  `setSerialConsistencyLevel(LOCAL_SERIAL)` (hardcoded, not configurable via `RetryConfig`/consistency
-  params). **This statement is executed exactly once — not through `executeWithRetry`/
+- **`update(old, new, consistency, ttlSeconds)`** — validates `new`. **If `schema.versionColumn` is
+  present** (`@Version` field): reads `old`'s current version value via reflection (throws
+  `KandraQueryException` if it's `null`), computes the next version (`+1` for `Long`, `Instant.now()`
+  for `Instant` — anything else throws `KandraQueryException("@Version field must be Long or Instant")`),
+  and issues `UPDATE <table>[ USING TTL x] SET col=?, ... WHERE pk=? [AND pk2=?...] IF <versionCol> = ?`.
+  `consistency` (resolved via `resolveWriteConsistency` — per-call → `@WriteConsistency` → configured
+  default, same as every other write) sets the statement's **regular** consistency level
+  (`setConsistencyLevel`); the **serial** consistency for the `IF` check itself is
+  `setSerialConsistencyLevel(LOCAL_SERIAL)`, hardcoded and **not** affected by `consistency` — there is
+  no way to request `SERIAL` (cross-DC Paxos) for a versioned `update()` through this parameter.
+  `ttlSeconds` (falling back to `schema.defaultTtl`/`@Ttl` if not passed) is applied via `USING TTL` —
+  without it, an `UPDATE` with no `USING TTL` writes its touched cells with no expiry, silently
+  clearing a `@Ttl`-annotated row's TTL on the first `update()` after `save()` (see
+  `docs/issues/ISS-058-versioned-update-drops-ttl.md`). **This statement is executed exactly once — not through `executeWithRetry`/
   `executeWithRetrySuspend`, but through `executeOnce`/`executeOnceSuspend`, which keep the
   `inFlightCount`/`checkNotShuttingDown` bookkeeping but skip the catch-matching-exception-and-retry
   loop.** A transient exception (`WriteTimeoutException`, etc.) propagates to the caller as-is instead
@@ -235,14 +242,18 @@ userRepo.deleteBy { UserTable.email eq "x@example.com" }
 
 ```kotlin
 fun findById(vararg idValues: Any, consistency: KandraConsistency? = null): T?
-fun find(block: QueryContext.() -> Unit): T?
-fun findAll(limit: Int? = null, block: QueryContext.() -> Unit): List<T>
-fun findPage(pageSize: Int, pageToken: String? = null, block: QueryContext.() -> Unit = {}): KandraPage<T>
-fun exists(block: QueryContext.() -> Unit): Boolean
+fun find(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T?
+fun findAll(limit: Int? = null, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): List<T>
+fun findPage(pageSize: Int, pageToken: String? = null, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit = {}): KandraPage<T>
+fun exists(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): Boolean
 fun findActive(allowFullScan: Boolean = false): List<T>
 fun raw(cql: String, vararg params: Any?): List<Row>
 fun rawQuery(query: KandraRawQuery): List<Row>
 ```
+
+(`consistency` on `find`/`findAll`/`findPage`/`exists` reaches `QueryExecutor`'s `resolveReadConsistency`
+the same way `findById`'s does — added alongside `findById`'s to close the gap where generic reads
+ignored the configured/per-call read consistency; see `docs/issues/ISS-054-generic-reads-ignore-read-consistency.md`.)
 
 All of these first call `checkNotShuttingDown()` (throws `KandraQueryException` if
 `batchEngine.isShuttingDown` is set) — this is a repository-level check, separate from the one
@@ -472,11 +483,18 @@ class BatchEngine(
   the `@Version` LWT update statement (see `update`/`updateSuspend` above, which use `executeOnce`/
   `executeOnceSuspend` instead — no retry loop, but the same inFlightCount/shutdown bookkeeping). On
   any `Throwable` whose class is in `retryConfig.retryOn` (default: `WriteTimeoutException`,
-  `ReadTimeoutException`, `NoNodeAvailableException`), retries with linear backoff
-  `min(backoffMillis * (attempt + 1), maxBackoffMillis)` up to `maxAttempts` times (default 3), using
-  `Thread.sleep` on the blocking path and `kotlinx.coroutines.delay` on the suspend path. Any
-  exception **not** in `retryOn` is rethrown immediately (no retry). After exhausting `maxAttempts`,
-  throws `KandraQueryException("Query failed after N attempts", lastError)`.
+  `ReadTimeoutException`, `NoNodeAvailableException`) — **and** only if the statement is marked
+  idempotent (`statement.isIdempotent() == true`; a non-idempotent statement rethrows immediately even
+  if its exception type matches `retryOn`, since a blind retry could double-apply it — see
+  `docs/issues/ISS-055-retry-ignores-idempotency.md`) — retries up to `maxAttempts` times (default 3).
+  The delay before each retry is computed as linear backoff, `min(backoffMillis * (attempt + 1),
+  maxBackoffMillis)`, then — when `retryConfig.jitter` is `true` (the default) — randomized via "equal
+  jitter": half of that computed delay, plus a random amount up to the other half, so many concurrent
+  callers retrying the same transient failure don't retry in lockstep and turn a transient blip into a
+  self-inflicted retry burst. With `jitter = false`, the computed delay is used exactly as-is. Sleeps
+  via `Thread.sleep` on the blocking path and `kotlinx.coroutines.delay` on the suspend path. Any
+  exception **not** in `retryOn` (or not idempotent) is rethrown immediately (no retry). After
+  exhausting `maxAttempts`, throws `KandraQueryException("Query failed after N attempts", lastError)`.
 - **Shutdown**: every execute call starts with `checkNotShuttingDown()` — throws
   `KandraQueryException("Kandra is shutting down — new queries are rejected")` if `isShuttingDown` is
   set. `inFlightCount` is incremented before and decremented after (in a `finally`) — used by graceful
@@ -603,6 +621,11 @@ package-private) — resolving via the interface keeps the `Method`'s declaring 
 
 ```kotlin
 class ConsistencyConfig {
+    // Read-your-writes requires R + W >= RF. These defaults (1 + 2 = 3) only satisfy that for RF <= 3 —
+    // a keyspace with RF = 5 (plausible in a larger multi-DC deployment) silently stops guaranteeing
+    // read-your-writes on these defaults, with no warning from Strict Mode (below), which only checks
+    // for LOCAL_ONE/ONE usage, not RF vs R+W directly. Raise defaultRead (e.g. to LOCAL_QUORUM) if your
+    // keyspace's RF exceeds 3. See docs/issues/ISS-075-strict-mode-rf-consistency-math.md.
     var defaultRead: KandraConsistency = KandraConsistency.LOCAL_ONE
     var defaultWrite: KandraConsistency = KandraConsistency.LOCAL_QUORUM
     var defaultSerialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL   // not read anywhere in this module — saveIfNotExists takes serialConsistency as a direct param instead
@@ -626,6 +649,7 @@ class RetryConfig {
     var backoffMillis: Long = 100
     var maxBackoffMillis: Long = 2000
     var retryOn: Set<KClass<out Throwable>> = setOf(WriteTimeoutException::class, ReadTimeoutException::class, NoNodeAvailableException::class)
+    var jitter: Boolean = true   // "equal jitter" randomization of the computed backoff — see below
 }
 ```
 

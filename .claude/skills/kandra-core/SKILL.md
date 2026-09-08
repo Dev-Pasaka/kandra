@@ -34,7 +34,7 @@ All are `RUNTIME` retention, read via `kotlin.reflect.full.findAnnotation` in `S
 | `@SecondaryIndex` | Property | no args | Native CQL `CREATE INDEX`. Collected into `TableSchema.secondaryIndexes` (excluding `@Transient` properties). |
 | `@ReadConsistency` / `@WriteConsistency` | Class | `(level: KandraConsistency)` | Not read by `SchemaRegistry` or `DdlGenerator` at all — these two files only declare the annotations. Consumed elsewhere (the Ktor/repository layer) for consistency resolution. |
 | `@Version` | Property (`Long` or `Instant`) | no args | Must be `Long` or `Instant` — any other type throws `KandraSchemaException` with the actual `KType` in the message. At most one per class. |
-| `@SoftDelete` | Class | `(ttlSeconds: Int = 86400)` | Sets `TableSchema.isSoftDelete = true` and `softDeleteTtlSeconds`. `kandra-core` only records this flag; the actual "TTL instead of DELETE" behavior is implemented by the repository layer in another module. |
+| `@SoftDelete` | Class | `(ttlSeconds: Int = 86400, markerProperty: String = "")` | Sets `TableSchema.isSoftDelete = true` and `softDeleteTtlSeconds`. `kandra-core` only records this flag; the actual "TTL instead of DELETE" behavior is implemented by the repository layer in another module. `markerProperty` names a `Boolean` property that's written permanently (no TTL) on soft-delete, enabling `findActive()` in `kandra-runtime` — without it, `findActive()` throws. |
 | `@Sensitive` | Property | no args | Sets `ColumnSchema.isSensitive = true`. `kandra-core` does not do any masking itself — that's a consumer (logger) concern. |
 | `@CacheResult` | Class | `(ttlSeconds: Int = 60, maxSize: Long = 1000)` | Populates `TableSchema.cacheConfig` as a `CacheResultConfig(ttlSeconds, maxSize)`. No Caffeine dependency here — just the config record. |
 
@@ -271,7 +271,9 @@ modules — `kandra-core` only defines the enum and the two annotations.
 ## `KandraAuth` — `io.kandra.core.KandraAuth` (`@ExperimentalKandraApi`)
 
 ```kotlin
-data class KandraCredentials(val username: String, val password: String)
+data class KandraCredentials(val username: String, val password: String) {
+    override fun toString(): String = "KandraCredentials(username=$username, password=***)"
+}
 
 @ExperimentalKandraApi
 fun interface KandraAuthProvider {
@@ -286,6 +288,12 @@ object KandraAuth {
     fun custom(provider: () -> KandraCredentials): KandraAuthProvider
 }
 ```
+
+`KandraCredentials.toString()` deliberately redacts `password` (GH #66 / ISS-065 — an earlier version used
+the data class's auto-generated `toString()`, which printed the plaintext password; any accidental logging,
+debugger watch, or exception message that interpolated the object leaked the credential) — `equals`/
+`hashCode` remain the data class defaults and still consider `password`, so legitimate equality comparisons
+are unaffected.
 
 All four factory functions return a `KandraAuthProvider` — a SAM (`fun interface`), so any of them can be
 replaced inline with a lambda if needed. `getCredentials()` implementations must be thread-safe per the
