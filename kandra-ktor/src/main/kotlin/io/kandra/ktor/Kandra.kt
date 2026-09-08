@@ -2,6 +2,7 @@ package io.kandra.ktor
 
 import com.datastax.oss.driver.api.core.CqlSession
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.kandra.core.CqlNaming
 import io.kandra.core.DdlGenerator
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.InternalKandraApi
@@ -65,16 +66,41 @@ val Kandra: ApplicationPlugin<KandraConfig> =
         if (config.keyspace.isBlank()) throw KandraSchemaException(
             "Kandra: 'keyspace' must be set in the plugin configuration."
         )
+        // GH #65: config.keyspace was previously only blank-checked before being spliced into CQL
+        // as both an unquoted identifier (`USE <keyspace>`) and a string literal
+        // (`... WHERE keyspace_name = '<keyspace>'`). Validate it as a CQL identifier up front, the
+        // same way SchemaRegistry validates table/column names, so a malformed or malicious value
+        // fails fast here rather than reaching interpolated CQL below.
+        if (!CqlNaming.isValidIdentifier(config.keyspace)) throw KandraSchemaException(
+            "Kandra: keyspace '${config.keyspace}' is not a valid CQL identifier. Identifiers must " +
+            "start with a letter or underscore and contain only letters, digits, and underscores."
+        )
+        // GH #65: validate NetworkTopologyStrategy's DC-name keys up front too, before any
+        // connection is attempted -- they get spliced into the CREATE KEYSPACE replication map
+        // literal (keyspaceDdl, CqlSessionBuilder.kt) once autoCreateKeyspace runs below.
+        val strategy = config.replicationStrategy
+        if (config.autoCreateKeyspace && strategy is ReplicationStrategy.NetworkTopologyStrategy) {
+            strategy.dcReplicationMap.keys.forEach { dc ->
+                if (!CqlNaming.isValidIdentifier(dc)) throw KandraSchemaException(
+                    "Kandra: replicationStrategy datacenter name '$dc' is not a valid CQL identifier. " +
+                    "Identifiers must start with a letter or underscore and contain only letters, " +
+                    "digits, and underscores."
+                )
+            }
+        }
 
-        val session = if (config.autoCreateKeyspace) {
-            val bootstrapSession = buildCqlSession(config, withKeyspace = false)
-            bootstrapSession.execute(keyspaceDdl(config.keyspace, config.replicationStrategy))
-            bootstrapSession.execute("USE ${config.keyspace}")
+        val sessionHandle = if (config.autoCreateKeyspace) {
+            val bootstrapHandle = buildCqlSession(config, withKeyspace = false)
+            // keyspaceDdl (CqlSessionBuilder.kt) also validates dcReplicationMap's DC-name keys
+            // before splicing them into the CREATE KEYSPACE literal (GH #65).
+            bootstrapHandle.session.execute(keyspaceDdl(config.keyspace, config.replicationStrategy))
+            bootstrapHandle.session.execute("USE ${config.keyspace}")
             logger.info { "Kandra: keyspace '${config.keyspace}' ensured." }
-            bootstrapSession
+            bootstrapHandle
         } else {
             buildCqlSession(config)
         }
+        val session = sessionHandle.session
 
         config.eventListener?.onConnectionEstablished(config.contactPoints)
         logger.info { "Kandra: connected to ${config.contactPoints}, keyspace=${config.keyspace}" }
@@ -106,8 +132,11 @@ val Kandra: ApplicationPlugin<KandraConfig> =
                         logger.debug { "Kandra: DDL executed: $ddl" }
                     }
                     // Step 2: Diff entity vs Scylla columns and ALTER TABLE ADD for new ones
+                    // GH #65: bound params instead of a string-interpolated literal -- keyspace_name
+                    // was previously spliced directly into a single-quoted CQL string literal.
                     val rs = session.execute(
-                        "SELECT column_name, type FROM system_schema.columns WHERE keyspace_name = '${config.keyspace}' AND table_name = '${schema.tableName}'"
+                        "SELECT column_name, type FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
+                        config.keyspace, schema.tableName
                     )
                     val existingColumns = rs.all().associate { row ->
                         row.getString("column_name")!! to row.getString("type")!!
@@ -151,8 +180,10 @@ val Kandra: ApplicationPlugin<KandraConfig> =
             }
             SchemaMode.VALIDATE -> {
                 SchemaRegistry.all().forEach { schema ->
+                    // GH #65: bound params instead of a string-interpolated literal.
                     val rs = session.execute(
-                        "SELECT column_name FROM system_schema.columns WHERE keyspace_name = '${config.keyspace}' AND table_name = '${schema.tableName}'"
+                        "SELECT column_name FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
+                        config.keyspace, schema.tableName
                     )
                     val existingColumns = rs.all().map { row -> row.getString("column_name") }.toSet()
                     val entityColumns = buildList {
@@ -244,16 +275,40 @@ val Kandra: ApplicationPlugin<KandraConfig> =
             }
         }
 
-        // ── Credential rotation ──────────────────────────────────────────────
+        // ── Credential rotation (GH #61) ─────────────────────────────────────
+        // Previously this loop called config.auth.provider.getCredentials() and discarded the
+        // result -- nothing pushed the refreshed username/password into the live CqlSession, so
+        // onCredentialRefreshed()/the success log fired while the session kept using its
+        // startup-time credentials indefinitely. sessionHandle.liveAuthProvider (set in
+        // buildCqlSession, CqlSessionBuilder.kt) is the ProgrammaticPlainTextAuthProvider actually
+        // backing the session's auth -- pushing new values into it via setUsername/setPassword is
+        // picked up by the driver on every subsequent authentication (new connections, reconnects),
+        // without a session rebuild.
         if (config.auth.refreshIntervalSeconds != null) {
             val intervalMs = config.auth.refreshIntervalSeconds!! * 1000
+            val liveAuthProvider = sessionHandle.liveAuthProvider
             pluginScope.launch {
                 while (true) {
                     delay(intervalMs)
                     try {
-                        config.auth.provider.getCredentials()
-                        config.eventListener?.onCredentialRefreshed()
-                        logger.info { "Kandra: credentials refreshed successfully." }
+                        val creds = config.auth.provider.getCredentials()
+                        if (liveAuthProvider != null) {
+                            liveAuthProvider.setUsername(creds.username)
+                            liveAuthProvider.setPassword(creds.password)
+                            config.eventListener?.onCredentialRefreshed()
+                            logger.info { "Kandra: credentials refreshed successfully." }
+                        } else {
+                            // The session was opened without an active auth provider (the provider
+                            // returned a blank username at startup, e.g. AllowAllAuthenticator) --
+                            // there is no live session auth to update, so refreshing here would be
+                            // a no-op. Say so explicitly instead of firing a misleading success event.
+                            logger.warn {
+                                "Kandra: credential refresh fetched new credentials, but the session " +
+                                "was opened without an active auth provider (initial credentials were " +
+                                "blank) -- there is no live session auth to update. Restart with " +
+                                "non-blank initial credentials for rotation to take effect."
+                            }
+                        }
                     } catch (e: Exception) {
                         logger.error(e) { "Kandra: credential refresh failed." }
                         config.eventListener?.onAuthFailed(config.contactPoints, e)

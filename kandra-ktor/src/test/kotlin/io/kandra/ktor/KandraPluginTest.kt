@@ -1,11 +1,17 @@
 package io.kandra.ktor
 
 import com.datastax.oss.driver.api.core.CqlSession
+import com.datastax.oss.driver.api.core.auth.ProgrammaticPlainTextAuthProvider
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.KandraAuth
+import io.kandra.core.KandraAuthProvider
+import io.kandra.core.KandraCredentials
+import io.kandra.core.KandraEventListener
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
+import io.kandra.core.exception.KandraSchemaException
 import io.kandra.test.KandraTestcontainers
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -17,7 +23,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -325,6 +333,266 @@ class KandraPluginTest {
             val response = client.get("/kandra/health")
             assertEquals(HttpStatusCode.OK, response.status)
             assertEquals(2, cache.probeCount.get(), "a hit after the TTL elapsed should trigger a fresh cluster query")
+        }
+    }
+
+    /**
+     * GH #65 — `config.keyspace` was previously only blank-checked before being spliced into CQL as
+     * both an unquoted identifier and a string literal. Install must now fail fast, before any
+     * connection is attempted (`contactPoints` below is never actually reachable/used).
+     */
+    @Test
+    fun `install throws when keyspace is not a valid CQL identifier`() {
+        val ex = assertThrows(KandraSchemaException::class.java) {
+            testApplication {
+                application {
+                    install(Kandra) {
+                        contactPoints = "localhost:19999"
+                        localDatacenter = "dc1"
+                        keyspace = "bad keyspace; DROP KEYSPACE other"
+                    }
+                }
+            }
+        }
+        assertTrue(ex.message!!.contains("not a valid CQL identifier"))
+    }
+
+    /**
+     * GH #65 companion: `ReplicationStrategy.NetworkTopologyStrategy`'s `dcReplicationMap` keys are
+     * spliced into the `CREATE KEYSPACE ... replication = {...}` literal unvalidated. Must also fail
+     * fast at install time, before any bootstrap connection is attempted.
+     */
+    @Test
+    fun `install throws when a NetworkTopologyStrategy DC name is not a valid CQL identifier`() {
+        val ex = assertThrows(KandraSchemaException::class.java) {
+            testApplication {
+                application {
+                    install(Kandra) {
+                        contactPoints = "localhost:19999"
+                        localDatacenter = "dc1"
+                        keyspace = "coinx"
+                        autoCreateKeyspace = true
+                        replicationStrategy = ReplicationStrategy.NetworkTopologyStrategy(
+                            mapOf("us-east' } ; --" to 3)
+                        )
+                    }
+                }
+            }
+        }
+        assertTrue(ex.message!!.contains("not a valid CQL identifier"))
+    }
+
+    /**
+     * GH #65 — a valid keyspace name must still install and run queries normally, proving the new
+     * identifier validation doesn't reject legitimate configuration.
+     */
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `install succeeds and queries work with a valid keyspace name`() {
+        val cp = KandraTestcontainers.container.contactPoint
+        testApplication {
+            application {
+                install(Kandra) {
+                    contactPoints = "${cp.hostString}:${cp.port}"
+                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    keyspace = freshKeyspaceName()
+                    autoCreateKeyspace = true
+                    schemaMode = SchemaMode.AUTO_CREATE
+                    register(TestItem::class)
+                    auth { provider = KandraAuth.static("", "") }
+                }
+
+                val repo = kandra.suspendRepository<TestItem>()
+                val item = TestItem(UUID.randomUUID(), "valid-keyspace-item")
+                runBlocking {
+                    repo.save(item)
+                    assertNotNull(repo.findById(item.id))
+                }
+            }
+        }
+    }
+
+    /**
+     * GH #58 — `loadBalancing.dcAwareFailover` + `allowedRemoteDcs` + `failover { onLocalDcUnavailable
+     * = RETRY_REMOTE_DC }` were previously validated at startup but never wired into the driver at
+     * all: `CqlSessionBuilder.buildDriverConfig` never set the driver's own DC-failover options.
+     * This proves the wiring actually reaches the live driver's execution profile -- read directly
+     * off `session.context.config`, not re-derived from the plugin config -- and that installing with
+     * these options set doesn't break normal query execution against the (single-DC) test cluster.
+     */
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `dcAwareFailover with RETRY_REMOTE_DC wires the driver's native DC-failover options`() {
+        val cp = KandraTestcontainers.container.contactPoint
+        testApplication {
+            application {
+                install(Kandra) {
+                    contactPoints = "${cp.hostString}:${cp.port}"
+                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    keyspace = freshKeyspaceName()
+                    autoCreateKeyspace = true
+                    schemaMode = SchemaMode.AUTO_CREATE
+                    register(TestItem::class)
+                    auth { provider = KandraAuth.static("", "") }
+                    loadBalancing {
+                        dcAwareFailover = true
+                        allowedRemoteDcs = listOf("fake-remote-dc")
+                        maxRemoteNodesPerRemoteDc = 2
+                    }
+                    failover {
+                        onLocalDcUnavailable = FailoverPolicy.RETRY_REMOTE_DC
+                    }
+                }
+
+                val profile = kandraSession.context.config.defaultProfile
+                assertEquals(
+                    2,
+                    profile.getInt(DefaultDriverOption.LOAD_BALANCING_DC_FAILOVER_MAX_NODES_PER_REMOTE_DC)
+                )
+                assertTrue(
+                    profile.getBoolean(DefaultDriverOption.LOAD_BALANCING_DC_FAILOVER_ALLOW_FOR_LOCAL_CONSISTENCY_LEVELS)
+                )
+
+                val repo = kandra.suspendRepository<TestItem>()
+                val item = TestItem(UUID.randomUUID(), "dc-failover-item")
+                runBlocking {
+                    repo.save(item)
+                    assertNotNull(repo.findById(item.id))
+                }
+            }
+        }
+    }
+
+    /**
+     * GH #58 companion: `dcAwareFailover = true` alone (without `onLocalDcUnavailable =
+     * RETRY_REMOTE_DC`) must leave the driver's DC-failover options at their inert defaults --
+     * matches the documented "both knobs must be set together" contract.
+     */
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `dcAwareFailover without RETRY_REMOTE_DC leaves the driver's DC-failover options inert`() {
+        val cp = KandraTestcontainers.container.contactPoint
+        testApplication {
+            application {
+                install(Kandra) {
+                    contactPoints = "${cp.hostString}:${cp.port}"
+                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    keyspace = freshKeyspaceName()
+                    autoCreateKeyspace = true
+                    schemaMode = SchemaMode.NONE
+                    auth { provider = KandraAuth.static("", "") }
+                    loadBalancing {
+                        dcAwareFailover = true
+                        allowedRemoteDcs = listOf("fake-remote-dc")
+                    }
+                    // failover.onLocalDcUnavailable left at its default (THROW)
+                }
+
+                val profile = kandraSession.context.config.defaultProfile
+                assertEquals(
+                    0,
+                    profile.getInt(DefaultDriverOption.LOAD_BALANCING_DC_FAILOVER_MAX_NODES_PER_REMOTE_DC)
+                )
+            }
+        }
+    }
+
+    /**
+     * GH #61 — the credential-rotation loop previously called `getCredentials()` and discarded the
+     * result: `onCredentialRefreshed()` fired and success was logged, but nothing pushed the new
+     * value into the live session's auth. This proves the refreshed username genuinely reaches the
+     * driver's live `ProgrammaticPlainTextAuthProvider` (read via reflection -- the driver exposes no
+     * public getter for the current value) and that the success event fires only once that's true.
+     */
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `credential rotation pushes refreshed credentials into the live session's auth provider`() {
+        val cp = KandraTestcontainers.container.contactPoint
+        val callCount = AtomicInteger(0)
+        val rotatingProvider = KandraAuthProvider {
+            if (callCount.incrementAndGet() == 1) {
+                KandraCredentials("initial-user", "initial-pass")
+            } else {
+                KandraCredentials("rotated-user", "rotated-pass")
+            }
+        }
+        val refreshedCount = AtomicInteger(0)
+        val listener = object : KandraEventListener {
+            override fun onEventualWriteFailed(tableName: String, entity: Any, error: Throwable) {}
+            override fun onCredentialRefreshed() {
+                refreshedCount.incrementAndGet()
+            }
+        }
+
+        testApplication {
+            application {
+                install(Kandra) {
+                    contactPoints = "${cp.hostString}:${cp.port}"
+                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    keyspace = freshKeyspaceName()
+                    autoCreateKeyspace = true
+                    schemaMode = SchemaMode.NONE
+                    auth {
+                        provider = rotatingProvider
+                        refreshIntervalSeconds = 1
+                    }
+                    eventListener = listener
+                }
+
+                val session = kandraSession
+                runBlocking { delay(2_500) } // allow at least one 1s refresh tick to fire
+
+                assertTrue(refreshedCount.get() >= 1, "onCredentialRefreshed should have fired")
+
+                val liveAuthProvider = session.context.authProvider.orElse(null)
+                assertNotNull(liveAuthProvider, "session should have a live auth provider (initial credentials were non-blank)")
+                assertTrue(liveAuthProvider is ProgrammaticPlainTextAuthProvider)
+
+                val usernameField = ProgrammaticPlainTextAuthProvider::class.java.getDeclaredField("username")
+                usernameField.isAccessible = true
+                val liveUsername = String(usernameField.get(liveAuthProvider) as CharArray)
+                assertEquals("rotated-user", liveUsername, "the live session's auth provider should carry the refreshed username")
+            }
+        }
+    }
+
+    /**
+     * GH #61 companion: when the session was opened without an active auth provider (initial
+     * credentials were blank, e.g. against `AllowAllAuthenticator`), a subsequent credential refresh
+     * has nothing to push the new value into. It must not fire a misleading success event.
+     */
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `credential rotation does not fire onCredentialRefreshed when the session has no live auth provider`() {
+        val cp = KandraTestcontainers.container.contactPoint
+        val refreshedCount = AtomicInteger(0)
+        val listener = object : KandraEventListener {
+            override fun onEventualWriteFailed(tableName: String, entity: Any, error: Throwable) {}
+            override fun onCredentialRefreshed() {
+                refreshedCount.incrementAndGet()
+            }
+        }
+
+        testApplication {
+            application {
+                install(Kandra) {
+                    contactPoints = "${cp.hostString}:${cp.port}"
+                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    keyspace = freshKeyspaceName()
+                    autoCreateKeyspace = true
+                    schemaMode = SchemaMode.NONE
+                    auth {
+                        provider = KandraAuth.static("", "") // blank -- no live auth provider is built
+                        refreshIntervalSeconds = 1
+                    }
+                    eventListener = listener
+                }
+
+                runBlocking { delay(2_500) }
+
+                assertFalse(refreshedCount.get() >= 1, "onCredentialRefreshed should not fire with no live auth provider to update")
+                assertFalse(kandraSession.context.authProvider.isPresent, "session should have no live auth provider at all")
+            }
         }
     }
 }
