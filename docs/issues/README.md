@@ -57,6 +57,7 @@ Docker before relying on them.
 | [ISS-044](ISS-044-schema-registry-validation-gaps.md) | `SchemaRegistry` didn't validate several illegal annotation states at registration time |
 | [ISS-045](ISS-045-ddl-generator-invalid-cql.md) | `DdlGenerator` could silently produce invalid or data-losing CQL |
 | [ISS-046](ISS-046-codegen-content-assertion-tests.md) | `kandra-codegen`'s test suite never asserted on generated file content |
+| [ISS-048](ISS-048-repository-statementbuilder-config-bypass.md) | `KandraRepository`/`KandraSuspendRepository` built their own default `StatementBuilder`, discarding the plugin's configured consistency/codec/debug/cache-size on every read |
 
 ## Closed — not a bug
 

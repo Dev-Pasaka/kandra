@@ -8,7 +8,6 @@ import io.kandra.core.exception.KandraSchemaException
 import io.kandra.core.schema.TableSchema
 import io.kandra.runtime.BatchEngine
 import io.kandra.runtime.QueryExecutor
-import io.kandra.runtime.StatementBuilder
 import io.kandra.runtime.driver.executeSuspend
 import io.kandra.runtime.cache.KandraCache
 import io.kandra.runtime.dsl.KandraPage
@@ -31,8 +30,10 @@ class KandraSuspendRepository<T : Any>(
     private val entityClass: KClass<T>,
     private val batchEngine: BatchEngine
 ) {
-    private val statementBuilder = StatementBuilder(session)
-    private val executor = QueryExecutor(session, schema, statementBuilder)
+    // ISS-048: read the plugin-configured StatementBuilder/codec/debugConfig off batchEngine
+    // rather than building all-defaults copies — see BatchEngine's fields for why this is safe.
+    private val statementBuilder = batchEngine.statementBuilder
+    private val executor = QueryExecutor(session, schema, statementBuilder, batchEngine.codec, batchEngine.debugConfig)
     private val cache = KandraCache<Any, T>(schema.cacheConfig)
 
     private fun checkNotShuttingDown() {

@@ -61,13 +61,16 @@ private val logger = KotlinLogging.logger {}
 @InternalKandraApi
 class BatchEngine(
     private val session: CqlSession,
-    private val statementBuilder: StatementBuilder,
+    // internal, not private: KandraRepository/KandraSuspendRepository (ISS-048) read this off the
+    // batchEngine they already receive instead of constructing their own default StatementBuilder,
+    // so plugin-configured codec/debug/consistency/cache-size actually reach the read path.
+    internal val statementBuilder: StatementBuilder,
     private val scope: CoroutineScope,
     @OptIn(ExperimentalKandraApi::class)
     private val eventListener: KandraEventListener? = null,
     private val retryConfig: RetryConfig = RetryConfig(),
-    private val debugConfig: DebugConfig = DebugConfig(),
-    private val codec: KandraCodec = KandraCodec.default
+    internal val debugConfig: DebugConfig = DebugConfig(),
+    internal val codec: KandraCodec = KandraCodec.default
 ) {
     /** Set to true by the shutdown hook to stop accepting new queries. */
     val isShuttingDown: AtomicBoolean = AtomicBoolean(false)
