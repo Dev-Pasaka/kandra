@@ -42,9 +42,29 @@ private val logger = KotlinLogging.logger {}
  * - A row claimed **longer ago** than [staleClaimThreshold] throws [KandraMigrationException],
  *   telling the operator to inspect `kandra_migrations` and resolve it manually.
  *
+ * ### Clock source for staleness (GH-64)
+ *
+ * "How long ago was this claimed?" is deliberately measured entirely by the ScyllaDB/Cassandra
+ * cluster's own clock, never by comparing two application instances' wall clocks. [claim] writes
+ * `claimed_at` using the CQL `toTimestamp(now())` function -- evaluated by the coordinator that
+ * processes the claim, not bound as a JVM-generated [Instant] -- and [handleUnresolvedClaim]
+ * reads "now" the same way, via a fresh `SELECT toTimestamp(now())` against the coordinator
+ * serving that read. Both sides of the [Duration.between] comparison therefore come from the
+ * cluster, not from `Instant.now()` on whichever apps happen to be claiming or checking. This
+ * removes the failure mode of an earlier version of this class, where `claimed_at` was an
+ * app-generated [Instant] and staleness was `Duration.between(claimedAt, Instant.now())` across
+ * two independently-drifting machine clocks: a claiming instance whose clock ran fast (or a
+ * checking instance whose clock ran slow) could make a genuinely crashed migration look
+ * perpetually fresh, while the reverse skew could make an in-progress migration look falsely
+ * stale and abort a deployment. The remaining assumption -- that nodes within one Scylla/
+ * Cassandra cluster have reasonably synced clocks with each other -- is far narrower than
+ * "every application instance is NTP-synced with every other," and is already an existing
+ * operational precondition for correct LWT/Paxos behavior in these systems.
+ *
  * @param staleClaimThreshold how long a [MigrationRowStatus.CLAIMED] row is given the benefit of
  *   the doubt (treated as possibly still in progress elsewhere) before `run()` refuses to
- *   proceed and throws instead. Defaults to 10 minutes.
+ *   proceed and throws instead. Compared against an age measured entirely by the database
+ *   cluster's own clock (see "Clock source for staleness" above). Defaults to 10 minutes.
  */
 class KandraMigrationRunner(
     private val session: CqlSession,
@@ -149,7 +169,10 @@ class KandraMigrationRunner(
      */
     private fun handleUnresolvedClaim(row: MigrationHistory, migration: KandraMigration) {
         val claimedAt = row.claimedAt ?: row.appliedAt
-        val age = Duration.between(claimedAt, Instant.now())
+        // "now" is read from the cluster (see class KDoc, "Clock source for staleness"), not
+        // this JVM's Instant.now() -- claimedAt was written the same way by claim(), so this
+        // comparison never mixes two different machines' clocks.
+        val age = Duration.between(claimedAt, serverNow(migration.version))
         // Only for display in the log/exception text below -- truncates to whole seconds, so it
         // must never be used for the actual staleness comparison (a sub-second age would round
         // down to 0 and compare equal to a Duration.ZERO threshold, silently forgiving anything).
@@ -182,6 +205,25 @@ class KandraMigrationRunner(
         }
     }
 
+    /**
+     * The current time as seen by the ScyllaDB/Cassandra coordinator serving this query --
+     * *not* this JVM's [Instant.now]. Used so that staleness checks in [handleUnresolvedClaim]
+     * never depend on the checking application instance's own wall clock (see class KDoc,
+     * "Clock source for staleness", GH-64).
+     *
+     * `version` must name an existing row (true for every caller here -- [handleUnresolvedClaim]
+     * is only ever invoked with a row that was just read). Falls back to this JVM's own
+     * [Instant.now] only in the practically-unreachable case that the row vanished between that
+     * read and this call.
+     */
+    private fun serverNow(version: Int): Instant {
+        val prepared = session.prepare(
+            "SELECT toTimestamp(now()) AS server_now FROM kandra_migrations WHERE version = ?"
+        )
+        val row = session.execute(prepared.bind(version)).one()
+        return row?.getInstant("server_now") ?: Instant.now()
+    }
+
     /** Returns the full history of applied migrations. */
     fun history(): List<MigrationHistory> {
         return session.execute("SELECT version, name, status, claimed_at, applied_at, checksum FROM kandra_migrations")
@@ -206,6 +248,10 @@ class KandraMigrationRunner(
     /**
      * Claims a migration version via LWT, writing it as [MigrationRowStatus.CLAIMED].
      *
+     * `claimed_at` is assigned via the CQL `toTimestamp(now())` function -- evaluated by the
+     * coordinator that processes this INSERT -- rather than bound as a JVM-generated
+     * [Instant.now]. See class KDoc, "Clock source for staleness" (GH-64).
+     *
      * Returns `null` on success. Returns the pre-existing row if another instance already
      * claimed (or applied) this version first -- Cassandra/Scylla's `IF NOT EXISTS` LWT response
      * includes the current values of that row on failure, so no extra read is needed.
@@ -213,14 +259,13 @@ class KandraMigrationRunner(
     private fun claim(migration: KandraMigration): MigrationHistory? {
         val prepared = session.prepare(
             "INSERT INTO kandra_migrations (version, name, status, claimed_at, checksum) " +
-            "VALUES (?, ?, ?, ?, ?) IF NOT EXISTS"
+            "VALUES (?, ?, ?, toTimestamp(now()), ?) IF NOT EXISTS"
         )
         val rs = session.execute(
             prepared.bind(
                 migration.version,
                 migration.name,
                 MigrationRowStatus.CLAIMED.name,
-                Instant.now(),
                 migration.checksum()
             )
         )

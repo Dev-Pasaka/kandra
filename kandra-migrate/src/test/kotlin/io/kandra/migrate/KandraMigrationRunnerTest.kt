@@ -214,6 +214,86 @@ class KandraMigrationRunnerTest {
         assertTrue(ex.message!!.contains("crashed"))
     }
 
+    // ── GH-64: staleness is measured by the DB cluster's clock, not app instance clocks ───
+
+    @Test
+    fun `claim() writes claimed_at via the cluster's own clock, not this JVM's Instant now`() {
+        val session = freshSession()
+        val runner = KandraMigrationRunner(session)
+        // A migration whose up() blocks briefly, so the test can read the row while it's still
+        // CLAIMED -- i.e. observe exactly what claim() persisted, with nothing else touching it.
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val blocking = object : KandraMigration(1, "blocking-migration") {
+            override fun up(session: CqlSession) {
+                latch.countDown()
+                release.await()
+            }
+        }
+
+        val thread = Thread { runner.run(blocking) }
+        thread.start()
+        latch.await()
+
+        // Independently ask the same cluster what time it thinks it is right now.
+        val serverNowRow = session.execute("SELECT toTimestamp(now()) AS n FROM kandra_migrations WHERE version = 1").one()!!
+        val serverNow = serverNowRow.getInstant("n")!!
+
+        val claimedRow = session.execute("SELECT claimed_at FROM kandra_migrations WHERE version = 1").one()!!
+        val claimedAt = claimedRow.getInstant("claimed_at")!!
+
+        release.countDown()
+        thread.join()
+
+        // claimed_at was assigned by the same cluster clock we just queried independently --
+        // regardless of what this test JVM's own Instant.now() says, the two must be close.
+        assertTrue(
+            Duration.between(claimedAt, serverNow).abs() < Duration.ofSeconds(10),
+            "claimed_at ($claimedAt) should be close to the cluster's own concept of now ($serverNow)"
+        )
+    }
+
+    @Test
+    fun `a claim that becomes stale purely through real elapsed time is detected via the cluster clock`() {
+        val session = freshSession()
+        // A tiny threshold plus a real sleep -- proves staleness is measured by actually letting
+        // time pass and asking the cluster, end to end, rather than by forging a claimed_at value.
+        val threshold = Duration.ofSeconds(2)
+        val claimingRunner = KandraMigrationRunner(session, staleClaimThreshold = threshold)
+        val migration = CrashingMigration(1)
+
+        assertThrows(SimulatedCrash::class.java) { claimingRunner.run(migration) }
+        // Row is left CLAIMED (see the GH-26 crash-safety test above for why).
+
+        Thread.sleep(threshold.toMillis() + 1500)
+
+        val checkingRunner = KandraMigrationRunner(session, staleClaimThreshold = threshold)
+        val ex = assertThrows(KandraMigrationException::class.java) {
+            checkingRunner.run(CrashingMigration(1))
+        }
+        assertTrue(ex.message!!.contains("exceeds the staleness threshold"))
+    }
+
+    @Test
+    fun `a claim that is not yet stale by real elapsed time is treated as still in-progress`() {
+        val session = freshSession()
+        val threshold = Duration.ofMinutes(10)
+        val claimingRunner = KandraMigrationRunner(session, staleClaimThreshold = threshold)
+        val migration = CrashingMigration(1)
+
+        assertThrows(SimulatedCrash::class.java) { claimingRunner.run(migration) }
+
+        // No sleep: essentially zero real time has elapsed since the claim, so this must be
+        // treated as (still) fresh purely by asking the cluster for its own current time, with
+        // no dependence on any Instant.now() this JVM produces.
+        val checkingRunner = KandraMigrationRunner(session, staleClaimThreshold = threshold)
+        val v2 = RecordingMigration(2)
+        checkingRunner.run(CrashingMigration(1), v2) // must not throw
+
+        assertEquals(0, v2.applyCount) // still halts before later migrations
+        assertEquals(MigrationRowStatus.CLAIMED, checkingRunner.history().first { it.version == 1 }.status)
+    }
+
     // ── Backward compatibility: legacy rows with no status column value ───────────────────
 
     @Test
