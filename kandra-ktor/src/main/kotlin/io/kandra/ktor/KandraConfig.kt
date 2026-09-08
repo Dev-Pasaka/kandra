@@ -31,7 +31,12 @@ sealed class ReplicationStrategy {
 }
 
 class PoolConfig {
-    var localRequestsPerConnection: Int = 1024
+    // GH #69: `localRequestsPerConnection` was previously declared here but never read anywhere in
+    // CqlSessionBuilder -- setting it had zero effect. The DataStax driver (4.17.0) has no
+    // local/remote split for per-connection request limits (only CONNECTION_MAX_REQUESTS, which
+    // maxRequestsPerConnection below already maps to; the driver's local/remote distinction only
+    // applies to connection *pool size*, not per-connection request count), so there was no faithful
+    // way to wire it -- removed rather than left as a config value that silently does nothing.
     var maxRequestsPerConnection: Int = 32768
     var heartbeatIntervalSeconds: Int = 30
     /** How long to wait for a CQL query response. Default is 5 000 ms (driver default is 2 000 ms). */
