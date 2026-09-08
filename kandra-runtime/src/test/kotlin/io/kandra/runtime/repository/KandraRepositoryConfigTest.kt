@@ -95,6 +95,15 @@ class KandraRepositoryConfigTest {
         override fun prepare(query: String): PreparedStatement = FakePreparedStatement(query)
         override fun prepare(statement: SimpleStatement): PreparedStatement = FakePreparedStatement(statement.query)
 
+        // AsyncCqlSession's default prepareAsync(String) routes through the generic execute(request,
+        // resultType) overload above (Statement-only) and NPEs on the result — override directly so
+        // io.kandra.runtime.driver.prepareSuspend (GH #27 / ISS-049's async-prepare suspend paths) works.
+        override fun prepareAsync(query: String): CompletionStage<PreparedStatement> =
+            CompletableFuture.completedFuture(FakePreparedStatement(query))
+
+        override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> =
+            CompletableFuture.completedFuture(FakePreparedStatement(statement.query))
+
         override fun getName(): String = "RowReturningFakeSession"
         override fun getMetadata(): Metadata = throw UnsupportedOperationException()
         override fun isSchemaMetadataEnabled(): Boolean = false

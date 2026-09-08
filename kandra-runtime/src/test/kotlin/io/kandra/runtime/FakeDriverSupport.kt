@@ -230,6 +230,16 @@ internal class ControllableFakeSession(
     override fun prepare(query: String): PreparedStatement = FakePreparedStatement(query)
     override fun prepare(statement: SimpleStatement): PreparedStatement = FakePreparedStatement(statement.query)
 
+    // AsyncCqlSession's default prepareAsync(String) routes through the generic execute(request, resultType)
+    // overload above (which only understands Statement requests) and NPEs on the result — override directly
+    // so io.kandra.runtime.driver.prepareSuspend (the async-prepare suspend paths added for GH #27 / ISS-049)
+    // works against this fake the same way it already does against ScriptedCqlSession.
+    override fun prepareAsync(query: String): CompletionStage<PreparedStatement> =
+        CompletableFuture.completedFuture(FakePreparedStatement(query))
+
+    override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> =
+        CompletableFuture.completedFuture(FakePreparedStatement(statement.query))
+
     override fun getName(): String = "ControllableFakeSession"
     override fun getMetadata(): Metadata = throw UnsupportedOperationException()
     override fun isSchemaMetadataEnabled(): Boolean = false
@@ -274,6 +284,13 @@ internal class FakeCqlSession : CqlSession {
     override fun prepare(query: String): PreparedStatement = FakePreparedStatement(query)
     override fun prepare(statement: SimpleStatement): PreparedStatement = FakePreparedStatement(statement.query)
 
+    // See ControllableFakeSession's identical override above for why this is needed.
+    override fun prepareAsync(query: String): CompletionStage<PreparedStatement> =
+        CompletableFuture.completedFuture(FakePreparedStatement(query))
+
+    override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> =
+        CompletableFuture.completedFuture(FakePreparedStatement(statement.query))
+
     override fun getName(): String = "FakeCqlSession"
     override fun getMetadata(): Metadata = throw UnsupportedOperationException()
     override fun isSchemaMetadataEnabled(): Boolean = false
@@ -308,3 +325,94 @@ private class RowHandler(private val columns: Map<String, Any?>) : InvocationHan
 /** [Row] backed by a plain `propertyName-agnostic` CQL-column-name -> value map. */
 internal fun fakeRow(columns: Map<String, Any?>): Row =
     Proxy.newProxyInstance(Row::class.java.classLoader, arrayOf(Row::class.java), RowHandler(columns)) as Row
+
+/**
+ * [CqlSession] whose *blocking* [prepare] throws, while [prepareAsync] succeeds normally via an
+ * already-completed future — purpose-built to prove a suspend code path never falls back to the
+ * blocking driver call on a prepared-statement cache miss (GH #27 / ISS-049).
+ *
+ * [blockingPrepareCount]/[asyncPrepareCount] let a test additionally assert *how many* times each
+ * was invoked (e.g. "exactly one async prepare, cached on the second call"). [execute]/[executeAsync]
+ * always succeed with an empty/applied result — this fake is only about which prepare path fired,
+ * not about statement execution outcomes (see [ControllableFakeSession]/[ScriptedCqlSession] for that).
+ */
+internal class PrepareCallTrackingSession : CqlSession {
+    val blockingPrepareCount = java.util.concurrent.atomic.AtomicInteger(0)
+    val asyncPrepareCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Rows returned by every [execute]/[executeAsync] call, regardless of statement — defaults to a
+     * single row answering `[applied]` truthfully for LWT-style checks (`saveIfNotExists`, versioned
+     * `update`). Override for tests that decode an actual entity (`findByIdSuspend` and friends) —
+     * this fake does not parse CQL, so the same row list answers every statement in a given test.
+     */
+    var rowsToReturn: List<Row> = listOf(fakeRow(mapOf("[applied]" to true)))
+
+    override fun prepare(query: String): PreparedStatement {
+        blockingPrepareCount.incrementAndGet()
+        throw AssertionError(
+            "Blocking CqlSession.prepare(\"$query\") was called from what must be a suspend-only code " +
+            "path — it must use prepareAsync/StatementBuilder's *Suspend prepare instead (GH #27 / ISS-049)."
+        )
+    }
+
+    override fun prepare(statement: SimpleStatement): PreparedStatement = prepare(statement.query)
+
+    override fun prepareAsync(query: String): CompletionStage<PreparedStatement> {
+        asyncPrepareCount.incrementAndGet()
+        return CompletableFuture.completedFuture(FakePreparedStatement(query))
+    }
+
+    override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> =
+        prepareAsync(statement.query)
+
+    override fun execute(statement: Statement<*>): ResultSet = PrepareTrackingResultSet(rowsToReturn)
+    override fun executeAsync(statement: Statement<*>): CompletionStage<AsyncResultSet> =
+        CompletableFuture.completedFuture(PrepareTrackingAsyncResultSet(rowsToReturn))
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <RequestT : com.datastax.oss.driver.api.core.session.Request, ResultT : Any> execute(
+        request: RequestT,
+        resultType: GenericType<ResultT>
+    ): ResultT? {
+        if (request is Statement<*>) execute(request)
+        return null
+    }
+
+    override fun getName(): String = "PrepareCallTrackingSession"
+    override fun getMetadata(): Metadata = throw UnsupportedOperationException()
+    override fun isSchemaMetadataEnabled(): Boolean = false
+    override fun setSchemaMetadataEnabled(newValue: Boolean?): CompletionStage<Metadata> = CompletableFuture.failedFuture(UnsupportedOperationException())
+    override fun refreshSchemaAsync(): CompletionStage<Metadata> = CompletableFuture.failedFuture(UnsupportedOperationException())
+    override fun checkSchemaAgreementAsync(): CompletionStage<Boolean> = CompletableFuture.completedFuture(true)
+    override fun getContext(): DriverContext = throw UnsupportedOperationException()
+    override fun getKeyspace(): Optional<CqlIdentifier> = Optional.empty()
+    override fun getMetrics(): Optional<Metrics> = Optional.empty()
+    override fun closeFuture(): CompletionStage<Void> = CompletableFuture.completedFuture(null)
+    override fun closeAsync(): CompletionStage<Void> = CompletableFuture.completedFuture(null)
+    override fun forceCloseAsync(): CompletionStage<Void> = CompletableFuture.completedFuture(null)
+    override fun isClosed(): Boolean = false
+}
+
+/** [ResultSet]/[AsyncResultSet] pair backed by a configurable row list, for [PrepareCallTrackingSession]. */
+private class PrepareTrackingResultSet(private val rows: List<Row>) : ResultSet {
+    override fun iterator(): MutableIterator<Row> = rows.toMutableList().iterator()
+    override fun isFullyFetched(): Boolean = true
+    override fun getAvailableWithoutFetching(): Int = rows.size
+    override fun one(): Row? = rows.firstOrNull()
+    override fun all(): List<Row> = rows
+    override fun getExecutionInfo(): ExecutionInfo = throw UnsupportedOperationException()
+    override fun getExecutionInfos(): List<ExecutionInfo> = emptyList()
+    override fun getColumnDefinitions(): ColumnDefinitions = throw UnsupportedOperationException()
+    override fun wasApplied(): Boolean = true
+}
+
+private class PrepareTrackingAsyncResultSet(private val rows: List<Row>) : AsyncResultSet {
+    override fun currentPage(): Iterable<Row> = rows
+    override fun remaining(): Int = 0
+    override fun hasMorePages(): Boolean = false
+    override fun fetchNextPage(): CompletionStage<AsyncResultSet> = CompletableFuture.completedFuture(PrepareTrackingAsyncResultSet(emptyList()))
+    override fun getExecutionInfo(): ExecutionInfo = throw UnsupportedOperationException()
+    override fun getColumnDefinitions(): ColumnDefinitions = throw UnsupportedOperationException()
+    override fun wasApplied(): Boolean = true
+}

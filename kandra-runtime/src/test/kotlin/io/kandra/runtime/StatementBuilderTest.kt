@@ -1,10 +1,12 @@
 package io.kandra.runtime
 
 import io.kandra.core.SchemaRegistry
+import io.kandra.core.annotations.Counter
 import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.exception.KandraSchemaException
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -30,6 +32,12 @@ data class NullableKeyEntity(
 data class WithLookup(
     @PartitionKey val id: UUID,
     @LookupIndex(tableSuffix = "by_email") val email: String
+)
+
+@ScyllaTable("sb_counters")
+data class SbCounter(
+    @PartitionKey val id: UUID,
+    @Counter val hits: Long = 0L
 )
 
 /**
@@ -157,5 +165,50 @@ class StatementBuilderTest {
         assertThrows(KandraSchemaException::class.java) {
             builder.insertPrimary(schema, NullableKeyEntity(id = null, label = "x"))
         }
+    }
+
+    // ── counterUpdate: Long.MIN_VALUE overflow guard (GH #36 item 3 / ISS-049) ────────────────────
+    // Math.abs(Long.MIN_VALUE) overflows back to Long.MIN_VALUE itself (two's-complement has no
+    // positive representation for it) -- silently binding a negative delta while the CQL literally
+    // says "+ ?" (or vice versa for a "- ?"). counterUpdate must reject this explicitly instead of
+    // relying on Math.abs's silent wraparound.
+
+    @Test
+    fun `counterUpdate throws KandraSchemaException for delta = Long_MIN_VALUE instead of silently overflowing`() {
+        val schema = SchemaRegistry.register(SbCounter::class)
+        val builder = StatementBuilder(ControllableFakeSession())
+
+        assertThrows(KandraSchemaException::class.java) {
+            builder.counterUpdate(schema, "hits", mapOf("id" to UUID.randomUUID()), Long.MIN_VALUE)
+        }
+    }
+
+    @Test
+    fun `counterUpdateSuspend throws KandraSchemaException for delta = Long_MIN_VALUE instead of silently overflowing`() {
+        val schema = SchemaRegistry.register(SbCounter::class)
+        val builder = StatementBuilder(ControllableFakeSession())
+
+        assertThrows(KandraSchemaException::class.java) {
+            runBlocking { builder.counterUpdateSuspend(schema, "hits", mapOf("id" to UUID.randomUUID()), Long.MIN_VALUE) }
+        }
+    }
+
+    @Test
+    fun `counterUpdate accepts Long_MIN_VALUE plus one (the actual boundary) without throwing`() {
+        val schema = SchemaRegistry.register(SbCounter::class)
+        val builder = StatementBuilder(ControllableFakeSession())
+
+        // Sanity check that the guard is exact -- it must not over-reject values Math.abs handles fine.
+        val stmt = builder.counterUpdate(schema, "hits", mapOf("id" to UUID.randomUUID()), Long.MIN_VALUE + 1)
+        assertEquals(Long.MAX_VALUE, stmt.recorded().values[0])
+    }
+
+    @Test
+    fun `counterUpdate does not overflow back to a negative value for a normal negative delta`() {
+        val schema = SchemaRegistry.register(SbCounter::class)
+        val builder = StatementBuilder(ControllableFakeSession())
+
+        val stmt = builder.counterUpdate(schema, "hits", mapOf("id" to UUID.randomUUID()), -5L)
+        assertEquals(5L, stmt.recorded().values[0], "counterUpdate binds the absolute value; the sign lives in the CQL operator")
     }
 }

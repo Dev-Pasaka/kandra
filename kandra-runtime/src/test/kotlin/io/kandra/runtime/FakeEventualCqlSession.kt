@@ -62,6 +62,16 @@ class FakeEventualCqlSession : CqlSession {
 
     override fun prepare(statement: SimpleStatement): PreparedStatement = FakeEventualPreparedStatement(statement.query)
 
+    // AsyncCqlSession's default prepareAsync(String) routes through the generic execute(request, resultType)
+    // overload above (which only understands Statement requests) and NPEs on the result — override directly
+    // so io.kandra.runtime.driver.prepareSuspend (the async-prepare suspend paths added for GH #27 / ISS-049)
+    // works against this fake, matching ScriptedCqlSession's identical override.
+    override fun prepareAsync(query: String): CompletionStage<PreparedStatement> =
+        CompletableFuture.completedFuture(FakeEventualPreparedStatement(query))
+
+    override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> =
+        CompletableFuture.completedFuture(FakeEventualPreparedStatement(statement.query))
+
     override fun getName(): String = "FakeEventualCqlSession"
     override fun getMetadata(): Metadata = throw UnsupportedOperationException("FakeEventualCqlSession does not support getMetadata()")
     override fun isSchemaMetadataEnabled(): Boolean = false
