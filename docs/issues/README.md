@@ -14,12 +14,11 @@ real ScyllaDB cluster. None of these have fixes yet.
 
 | ID | GH | Severity | Title |
 |---|---|---|---|
-| [ISS-055](ISS-055-retry-ignores-idempotency.md) | [#56](https://github.com/Dev-Pasaka/kandra/issues/56) | Critical | `BatchEngine`'s retry loop ignores statement idempotency — non-idempotent writes can double-apply on retry |
-| [ISS-056](ISS-056-saveifnotexists-blind-lwt-retry.md) | [#57](https://github.com/Dev-Pasaka/kandra/issues/57) | High | `saveIfNotExists`/`saveIfNotExistsSuspend` blindly retry their LWT, risking a false negative on the caller's own successful write |
-| [ISS-058](ISS-058-versioned-update-drops-ttl.md) | [#59](https://github.com/Dev-Pasaka/kandra/issues/59) | High | `@Version` LWT updates silently strip TTL on every update to a `@Ttl`-annotated entity |
 | [ISS-059](ISS-059-batchscope-blocking-collect.md) | [#60](https://github.com/Dev-Pasaka/kandra/issues/60) | High | `KandraBatchScope`'s statement collection still blocks the coroutine dispatcher on cache-miss prepare (ISS-049 leftover) |
-| [ISS-061](ISS-061-softdelete-ignores-consistency.md) | [#62](https://github.com/Dev-Pasaka/kandra/issues/62) | Medium | Soft-delete writes bypass the configured consistency level |
-| [ISS-069](ISS-069-assorted-low-severity-findings.md) | [#70](https://github.com/Dev-Pasaka/kandra/issues/70) | Low | Assorted lower-severity findings — items 1 (`@Sensitive` redaction) and 6 (list-column warning) fixed; items 2-5 open (warn-only injection guard default, RF>3 read-your-writes gap, no shard-aware driver/pool tuning, retry backoff lacks jitter) |
+
+The last open item from the 2026-09-08 review batch (GH #54-#70) — needs an API-shape change to
+`KandraBatchScope`/`KandraRuntime` (differentiating `batch { }` from `batchBlocking { }` at the
+`saveInBatch`/`deleteInBatch` call sites) that deserves its own focused pass rather than being rushed.
 
 ## Fixed — pending live-cluster verification
 
@@ -76,8 +75,12 @@ Docker before relying on them.
 | [ISS-052](ISS-052-jakarta-codegen-health-polish.md) | Assorted polish — Jakarta validator factory reuse, codegen nullability, health endpoint debounce |
 | [ISS-053](ISS-053-batch-and-versioned-update-ignore-consistency.md) | `LOGGED BATCH` writes and `@Version` LWT updates ignored the configured consistency level entirely |
 | [ISS-054](ISS-054-generic-reads-ignore-read-consistency.md) | Generic `find`/`findAll`/`findPage` reads ignored configured read consistency, with no override |
+| [ISS-055](ISS-055-retry-ignores-idempotency.md) | `BatchEngine`'s retry loop ignored statement idempotency — non-idempotent writes could double-apply on retry |
+| [ISS-056](ISS-056-saveifnotexists-blind-lwt-retry.md) | `saveIfNotExists`/`saveIfNotExistsSuspend` blindly retried their LWT, risking a false negative on the caller's own successful write |
 | [ISS-057](ISS-057-multidc-failover-inert.md) | Multi-DC failover/load-balancing config was validated and documented, but never wired into the driver |
+| [ISS-058](ISS-058-versioned-update-drops-ttl.md) | `@Version` LWT updates silently stripped TTL on every update to a `@Ttl`-annotated entity |
 | [ISS-060](ISS-060-credential-rotation-noop.md) | Credential rotation (`auth.refreshIntervalSeconds`) refreshed credentials but never applied them to the live session |
+| [ISS-061](ISS-061-softdelete-ignores-consistency.md) | Soft-delete writes bypassed the configured consistency level |
 | [ISS-062](ISS-062-migration-checksum-false-positive-risk.md) | `KandraMigration.checksum()`'s bytecode hash risked false-positive startup failures after cosmetic recompilation |
 | [ISS-063](ISS-063-migration-claim-staleness-clock-skew.md) | Migration claim staleness was computed from wall-clock timestamps across potentially skewed app instances |
 | [ISS-064](ISS-064-keyspace-dc-identifiers-unvalidated.md) | Keyspace and DC-name identifiers were spliced unvalidated into CQL/DDL |
@@ -85,6 +88,7 @@ Docker before relying on them.
 | [ISS-066](ISS-066-findall-no-row-cap.md) | `findAll`/`exists`-style reads had no default row cap — memory-exhaustion vector |
 | [ISS-067](ISS-067-decodeentity-rebuilds-column-map.md) | `QueryExecutor.decodeEntity` rebuilt the full column map on every row decoded instead of caching it |
 | [ISS-068](ISS-068-localrequestsperconnection-dead-config.md) | `PoolConfig.localRequestsPerConnection` was dead configuration — removed |
+| [ISS-069](ISS-069-assorted-low-severity-findings.md) | Assorted lower-severity findings — dead `@Sensitive` redaction (now wired in), no list-column warning (now added), retry backoff had no jitter (now added); RF>3 and injection-guard-default items documented; shard-awareness noted as an unaddressed architectural item |
 
 ## Closed — not a bug
 

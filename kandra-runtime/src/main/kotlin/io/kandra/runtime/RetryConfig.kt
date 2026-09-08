@@ -28,4 +28,13 @@ class RetryConfig {
         ReadTimeoutException::class,
         NoNodeAvailableException::class
     )
+
+    /**
+     * Adds randomized "equal jitter" to the linear backoff (half the computed delay, plus a random
+     * amount up to the other half) — `true` by default. Without jitter, many concurrent callers
+     * hitting the same transient failure (a GC pause, a brief coordinator blip) retry at synchronized
+     * intervals, turning a transient blip into a self-inflicted retry burst against the cluster. See
+     * ISS-069 / GH #70 item 5.
+     */
+    var jitter: Boolean = true
 }

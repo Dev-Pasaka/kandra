@@ -1,5 +1,6 @@
 package io.kandra.runtime
 
+import com.datastax.oss.driver.api.core.NoNodeAvailableException
 import com.datastax.oss.driver.api.core.cql.BatchStatement
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.LookupConsistency
@@ -55,6 +56,11 @@ class BatchEngineTest {
 
     // ── Retry / backoff (executeWithRetry) ───────────────────────────────────
 
+    // These use deleteById (a lone, genuinely-idempotent BoundStatement -- StatementBuilder.deleteById
+    // always calls .setIdempotent(true)) rather than save(), which builds a LOGGED BATCH around a
+    // non-idempotent plain INSERT and must NOT retry (ISS-055 / GH #56) -- see the "never retries a
+    // non-idempotent statement" tests below for that half of the behavior.
+
     @Test
     fun `retries a retryable failure and succeeds within maxAttempts`() {
         val schema = SchemaRegistry.register(BeWidget::class)
@@ -64,7 +70,7 @@ class BatchEngineTest {
             retryConfig = RetryConfig().apply { backoffMillis = 1; maxBackoffMillis = 2 }
         )
 
-        engine.save(schema, BeWidget(UUID.randomUUID(), "widget-1"))
+        engine.deleteById(schema, UUID.randomUUID())
 
         assertEquals(3, session.executeCallCount) // 2 failed attempts + 1 success, same statement re-executed
     }
@@ -79,7 +85,7 @@ class BatchEngineTest {
         )
 
         val ex = assertThrows(KandraQueryException::class.java) {
-            engine.save(schema, BeWidget(UUID.randomUUID(), "widget-1"))
+            engine.deleteById(schema, UUID.randomUUID())
         }
 
         assertTrue(ex.message!!.contains("failed after 3 attempts"), "unexpected message: ${ex.message}")
@@ -93,10 +99,29 @@ class BatchEngineTest {
         val engine = BatchEngine(session, StatementBuilder(session), unconfinedScope())
 
         assertThrows(IllegalStateException::class.java) {
-            engine.save(schema, BeWidget(UUID.randomUUID(), "widget-1"))
+            engine.deleteById(schema, UUID.randomUUID())
         }
 
         assertEquals(1, session.executeCallCount) // rethrown immediately, no retry loop entered
+    }
+
+    @Test
+    fun `never retries a non-idempotent statement, even on a retryable exception`() {
+        val schema = SchemaRegistry.register(BeWidget::class)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
+        val engine = BatchEngine(
+            session, StatementBuilder(session), unconfinedScope(),
+            retryConfig = RetryConfig().apply { maxAttempts = 3; backoffMillis = 1; maxBackoffMillis = 2 }
+        )
+
+        // save() builds a LOGGED BATCH around a plain (non-idempotent) INSERT -- the batch itself is
+        // never explicitly marked idempotent, so it must fail on the first WriteTimeoutException-class
+        // failure instead of blindly retrying and risking a double-apply. See ISS-055 / GH #56.
+        assertThrows(NoNodeAvailableException::class.java) {
+            engine.save(schema, BeWidget(UUID.randomUUID(), "widget-1"))
+        }
+
+        assertEquals(1, session.executeCallCount)
     }
 
     @Test

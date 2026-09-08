@@ -70,6 +70,10 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
      */
     var lastBoundConsistencyLevel: ConsistencyLevel? = null
 
+    /** The CQL text of the most recent `prepare`/`prepareAsync` call. */
+    var lastPreparedCql: String? = null
+        private set
+
     private fun nextOutcome(): ExecuteOutcome {
         executeCount.incrementAndGet()
         return if (queue.isNotEmpty()) queue.removeFirst() else ExecuteOutcome.Applied(true)
@@ -106,19 +110,22 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
         }
     }
 
-    override fun prepare(query: String): PreparedStatement = FakeBindablePreparedStatement(query) { lastBoundConsistencyLevel = it }
+    override fun prepare(query: String): PreparedStatement {
+        lastPreparedCql = query
+        return FakeBindablePreparedStatement(query) { lastBoundConsistencyLevel = it }
+    }
 
-    override fun prepare(statement: SimpleStatement): PreparedStatement =
-        FakeBindablePreparedStatement(statement.query) { lastBoundConsistencyLevel = it }
+    override fun prepare(statement: SimpleStatement): PreparedStatement = prepare(statement.query)
 
     // AsyncCqlSession's default prepareAsync(String) routes through the generic execute(request, resultType)
     // overload above (which only understands Statement requests) and NPEs on the result — override directly
     // so io.kandra.runtime.driver.prepareSuspend (used by the versioned-update suspend path) works.
-    override fun prepareAsync(query: String): CompletionStage<PreparedStatement> =
-        CompletableFuture.completedFuture(FakeBindablePreparedStatement(query) { lastBoundConsistencyLevel = it })
+    override fun prepareAsync(query: String): CompletionStage<PreparedStatement> {
+        lastPreparedCql = query
+        return CompletableFuture.completedFuture(FakeBindablePreparedStatement(query) { lastBoundConsistencyLevel = it })
+    }
 
-    override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> =
-        CompletableFuture.completedFuture(FakeBindablePreparedStatement(statement.query) { lastBoundConsistencyLevel = it })
+    override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> = prepareAsync(statement.query)
 
     override fun getName(): String = "ScriptedCqlSession"
 

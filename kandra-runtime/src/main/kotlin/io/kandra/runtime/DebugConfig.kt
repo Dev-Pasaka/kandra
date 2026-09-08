@@ -28,6 +28,10 @@ class DebugConfig {
      * Note this is a heuristic, not a parser — it can neither catch every injection shape (e.g.
      * quote-less numeric-context or keyword injection) nor guarantee zero false positives on CQL that
      * legitimately embeds a literal (e.g. a fixed non-user-supplied constant). Enable with that in mind.
+     *
+     * The warn-only default is deliberate and non-breaking (see ISS-069 / GH #70 item 2) — any team
+     * exposing `raw()`/`rawQuery()` to code that builds queries from less-trusted input should turn
+     * this on rather than relying on the warn-only default.
      */
     var rawQueryStrictMode: Boolean = false
 }

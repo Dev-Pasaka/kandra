@@ -1,5 +1,6 @@
 package io.kandra.runtime
 
+import com.datastax.oss.driver.api.core.NoNodeAvailableException
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.PartitionKey
@@ -87,27 +88,34 @@ class KandraBatchScopeSafetyTest {
     // ── retry-on-transient-error now applies to the final commit ─────────────
 
     @Test
-    fun `batch (suspend) retries a transient failure on the final commit and succeeds`() = runBlocking {
+    fun `batch (suspend) never retries a transient failure on the final commit -- the batch is not idempotent`() {
         SchemaRegistry.register(BsWidget::class)
-        val session = ControllableFakeSession(failuresBeforeSuccess = 2)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
         val runtime = newRuntime(session, RetryConfig().apply { backoffMillis = 1; maxBackoffMillis = 2 })
         val repo = runtime.suspendRepository<BsWidget>()
 
-        runtime.batch { repo.saveInBatch(BsWidget(UUID.randomUUID(), "a")) }
+        // A caller-controlled batch { } commit wraps a plain (non-idempotent) INSERT and is never
+        // explicitly marked idempotent itself -- ISS-055 / GH #56 -- so it must fail on the first
+        // retryable-class exception rather than blindly retrying.
+        assertThrows(NoNodeAvailableException::class.java) {
+            runBlocking { runtime.batch { repo.saveInBatch(BsWidget(UUID.randomUUID(), "a")) } }
+        }
 
-        assertEquals(3, session.executeCallCount, "2 failed commit attempts + 1 success, same batch re-executed")
+        assertEquals(1, session.executeCallCount)
     }
 
     @Test
-    fun `batchBlocking retries a transient failure on the final commit and succeeds`() {
+    fun `batchBlocking never retries a transient failure on the final commit -- the batch is not idempotent`() {
         SchemaRegistry.register(BsWidget::class)
-        val session = ControllableFakeSession(failuresBeforeSuccess = 2)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
         val runtime = newRuntime(session, RetryConfig().apply { backoffMillis = 1; maxBackoffMillis = 2 })
         val repo = runtime.repository<BsWidget>()
 
-        runtime.batchBlocking { repo.saveInBatch(BsWidget(UUID.randomUUID(), "a")) }
+        assertThrows(NoNodeAvailableException::class.java) {
+            runtime.batchBlocking { repo.saveInBatch(BsWidget(UUID.randomUUID(), "a")) }
+        }
 
-        assertEquals(3, session.executeCallCount, "2 failed commit attempts + 1 success, same batch re-executed")
+        assertEquals(1, session.executeCallCount)
     }
 
     // ── shutdown gate now applies to the final commit, not just at batch{} entry ──

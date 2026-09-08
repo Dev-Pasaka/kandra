@@ -13,6 +13,15 @@ import io.kandra.core.KandraConsistency
  * 1. Per-operation parameter
  * 2. `@ReadConsistency` / `@WriteConsistency` on the entity class
  * 3. These defaults
+ *
+ * **Read-your-writes above RF 3** (see ISS-069 / GH #70 item 3): read-your-writes requires
+ * `R + W >= RF`. The defaults below (`LOCAL_ONE` + `LOCAL_QUORUM`) only satisfy that for `RF <= 3`
+ * (`1 + 2 = 3`) — a keyspace with `RF = 5` (plausible for a larger multi-DC deployment) using these
+ * defaults silently stops guaranteeing read-your-writes, with no warning from Strict Mode (which only
+ * fires on `LOCAL_ONE`/`ONE` usage in a multi-DC topology, not on an RF/consistency mismatch). This is
+ * exactly the kind of thing that passes every test against an `RF=1` Testcontainers setup and surfaces
+ * as a mystery stale-read bug only under a real `RF=5` production topology — raise [defaultRead] (e.g.
+ * to `LOCAL_QUORUM`) if your keyspace's replication factor exceeds 3.
  */
 class ConsistencyConfig {
     var defaultRead: KandraConsistency = KandraConsistency.LOCAL_ONE
