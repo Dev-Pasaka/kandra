@@ -1,5 +1,6 @@
 package io.kandra.runtime
 
+import com.datastax.oss.driver.api.core.ConsistencyLevel
 import com.datastax.oss.driver.api.core.CqlIdentifier
 import com.datastax.oss.driver.api.core.CqlSession
 import com.datastax.oss.driver.api.core.context.DriverContext
@@ -53,6 +54,19 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
     private val queue = ArrayDeque(outcomes)
     val executeCount = AtomicInteger(0)
 
+    /** The [Statement] passed to the most recent `execute`/`executeAsync` call. */
+    var lastStatement: Statement<*>? = null
+        private set
+
+    /**
+     * The consistency level of the most recently `.bind()`-built [BoundStatement], as recorded by
+     * [fakeBoundStatement]'s `setConsistencyLevel` interception (real [BoundStatement]s can't be
+     * instantiated outside driver internals, so this proxy is the only way to observe what
+     * [BatchEngine]/[StatementBuilder] actually set on one). `null` until a bound statement calls
+     * `.setConsistencyLevel(...)`.
+     */
+    var lastBoundConsistencyLevel: ConsistencyLevel? = null
+
     private fun nextOutcome(): ExecuteOutcome {
         executeCount.incrementAndGet()
         return if (queue.isNotEmpty()) queue.removeFirst() else ExecuteOutcome.Applied(true)
@@ -67,14 +81,17 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
         return null
     }
 
-    override fun execute(statement: Statement<*>): ResultSet =
-        when (val outcome = nextOutcome()) {
+    override fun execute(statement: Statement<*>): ResultSet {
+        lastStatement = statement
+        return when (val outcome = nextOutcome()) {
             is ExecuteOutcome.Throw -> throw outcome.error
             is ExecuteOutcome.Applied -> FakeAppliedResultSet(outcome.applied)
         }
+    }
 
-    override fun executeAsync(statement: Statement<*>): CompletionStage<AsyncResultSet> =
-        when (val outcome = nextOutcome()) {
+    override fun executeAsync(statement: Statement<*>): CompletionStage<AsyncResultSet> {
+        lastStatement = statement
+        return when (val outcome = nextOutcome()) {
             is ExecuteOutcome.Throw -> {
                 val future = CompletableFuture<AsyncResultSet>()
                 future.completeExceptionally(outcome.error)
@@ -82,19 +99,21 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
             }
             is ExecuteOutcome.Applied -> CompletableFuture.completedFuture(FakeAppliedAsyncResultSet(outcome.applied))
         }
+    }
 
-    override fun prepare(query: String): PreparedStatement = FakeBindablePreparedStatement(query)
+    override fun prepare(query: String): PreparedStatement = FakeBindablePreparedStatement(query) { lastBoundConsistencyLevel = it }
 
-    override fun prepare(statement: SimpleStatement): PreparedStatement = FakeBindablePreparedStatement(statement.query)
+    override fun prepare(statement: SimpleStatement): PreparedStatement =
+        FakeBindablePreparedStatement(statement.query) { lastBoundConsistencyLevel = it }
 
     // AsyncCqlSession's default prepareAsync(String) routes through the generic execute(request, resultType)
     // overload above (which only understands Statement requests) and NPEs on the result — override directly
     // so io.kandra.runtime.driver.prepareSuspend (used by the versioned-update suspend path) works.
     override fun prepareAsync(query: String): CompletionStage<PreparedStatement> =
-        CompletableFuture.completedFuture(FakeBindablePreparedStatement(query))
+        CompletableFuture.completedFuture(FakeBindablePreparedStatement(query) { lastBoundConsistencyLevel = it })
 
     override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> =
-        CompletableFuture.completedFuture(FakeBindablePreparedStatement(statement.query))
+        CompletableFuture.completedFuture(FakeBindablePreparedStatement(statement.query) { lastBoundConsistencyLevel = it })
 
     override fun getName(): String = "ScriptedCqlSession"
 
@@ -126,8 +145,11 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
 }
 
 /** [PreparedStatement] whose [bind] returns a dynamic-proxy [BoundStatement] (see [fakeBoundStatement]). */
-private class FakeBindablePreparedStatement(private val query: String) : PreparedStatement {
-    override fun bind(vararg values: Any?): BoundStatement = fakeBoundStatement()
+private class FakeBindablePreparedStatement(
+    private val query: String,
+    private val onSetConsistencyLevel: (ConsistencyLevel) -> Unit = {}
+) : PreparedStatement {
+    override fun bind(vararg values: Any?): BoundStatement = fakeBoundStatement(onSetConsistencyLevel)
     override fun getId(): ByteBuffer = ByteBuffer.wrap(query.toByteArray())
     override fun getResultMetadataId(): ByteBuffer? = null
     override fun getQuery(): String = query
@@ -147,17 +169,21 @@ private class FakeBindablePreparedStatement(private val query: String) : Prepare
  * off the bound statement it built — it only builds and passes it to `session.execute(...)`, which our
  * [ScriptedCqlSession] ignores in favor of the scripted [ExecuteOutcome] queue.
  */
-private fun fakeBoundStatement(): BoundStatement {
+private fun fakeBoundStatement(onSetConsistencyLevel: (ConsistencyLevel) -> Unit = {}): BoundStatement {
     // Fluent setters (setSerialConsistencyLevel, setIdempotent, setTracing, ...) are declared to return
     // a generic `SelfT extends Statement<SelfT>` — erased to plain Object at runtime, so `method.returnType`
     // can't be compared against BoundStatement::class directly. Matched by name instead (every setter-style
     // method on Statement/Bindable/BoundStatement starts with "set", plus a few no-arg fluent methods).
     val selfReturningNames = setOf("enableTracing", "disableTracing", "copy")
-    val handler = InvocationHandler { proxy, method, _ ->
+    val handler = InvocationHandler { proxy, method, args ->
         when {
             method.name == "toString" -> "FakeBoundStatement"
             method.name == "hashCode" -> System.identityHashCode(proxy)
             method.name == "equals" -> false
+            method.name == "setConsistencyLevel" -> {
+                (args?.getOrNull(0) as? ConsistencyLevel)?.let(onSetConsistencyLevel)
+                proxy
+            }
             method.name.startsWith("set") || method.name in selfReturningNames -> proxy
             method.returnType == Boolean::class.javaPrimitiveType -> false
             method.returnType == Int::class.javaPrimitiveType -> 0

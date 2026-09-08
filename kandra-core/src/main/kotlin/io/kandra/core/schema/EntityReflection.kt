@@ -24,5 +24,10 @@ data class EntityReflection(
     /** The entity's primary constructor, or `null` if it has none. */
     val primaryConstructor: KFunction<*>?,
     /** `primaryConstructor.parameters`, cached alongside it — used by `QueryExecutor.decodeEntity`. */
-    val constructorParameters: List<KParameter>
+    val constructorParameters: List<KParameter>,
+    /**
+     * Every column schema for this entity, keyed by Kotlin property name.
+     * Used by `QueryExecutor.decodeEntity` to avoid rebuilding the map on every row.
+     */
+    val columnsByProperty: Map<String, ColumnSchema>
 )

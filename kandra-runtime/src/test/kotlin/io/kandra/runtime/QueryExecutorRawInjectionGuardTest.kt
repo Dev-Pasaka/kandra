@@ -48,7 +48,8 @@ class QueryExecutorRawInjectionGuardTest {
             copyParameters = RawGuardEntity::class.memberFunctions.find { it.name == "copy" }?.parameters ?: emptyList(),
             propertiesByName = RawGuardEntity::class.memberProperties.associateBy { it.name },
             primaryConstructor = RawGuardEntity::class.primaryConstructor,
-            constructorParameters = RawGuardEntity::class.primaryConstructor?.parameters ?: emptyList()
+            constructorParameters = RawGuardEntity::class.primaryConstructor?.parameters ?: emptyList(),
+            columnsByProperty = emptyMap()
         )
     )
 

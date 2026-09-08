@@ -8,7 +8,24 @@ policy; nothing was lost, they're just not represented here.
 
 ## Open
 
-_None currently open._
+Filed 2026-09-08 from a deep technical review (data integrity/consistency, performance/concurrency,
+security, and distributed-systems correctness passes) done ahead of experimental testing against a
+real ScyllaDB cluster. None of these have fixes yet.
+
+| ID | GH | Severity | Title |
+|---|---|---|---|
+| [ISS-054](ISS-054-generic-reads-ignore-read-consistency.md) | [#55](https://github.com/Dev-Pasaka/kandra/issues/55) | Critical | Generic `find`/`findAll`/`findPage` reads ignore configured read consistency, with no override |
+| [ISS-055](ISS-055-retry-ignores-idempotency.md) | [#56](https://github.com/Dev-Pasaka/kandra/issues/56) | Critical | `BatchEngine`'s retry loop ignores statement idempotency — non-idempotent writes can double-apply on retry |
+| [ISS-056](ISS-056-saveifnotexists-blind-lwt-retry.md) | [#57](https://github.com/Dev-Pasaka/kandra/issues/57) | High | `saveIfNotExists`/`saveIfNotExistsSuspend` blindly retry their LWT, risking a false negative on the caller's own successful write |
+| [ISS-058](ISS-058-versioned-update-drops-ttl.md) | [#59](https://github.com/Dev-Pasaka/kandra/issues/59) | High | `@Version` LWT updates silently strip TTL on every update to a `@Ttl`-annotated entity |
+| [ISS-059](ISS-059-batchscope-blocking-collect.md) | [#60](https://github.com/Dev-Pasaka/kandra/issues/60) | High | `KandraBatchScope`'s statement collection still blocks the coroutine dispatcher on cache-miss prepare (ISS-049 leftover) |
+| [ISS-061](ISS-061-softdelete-ignores-consistency.md) | [#62](https://github.com/Dev-Pasaka/kandra/issues/62) | Medium | Soft-delete writes bypass the configured consistency level |
+| [ISS-066](ISS-066-findall-no-row-cap.md) | [#67](https://github.com/Dev-Pasaka/kandra/issues/67) | Medium | `findAll`/`exists`-style reads have no default row cap — memory-exhaustion vector |
+| [ISS-069](ISS-069-assorted-low-severity-findings.md) | [#70](https://github.com/Dev-Pasaka/kandra/issues/70) | Low | Assorted lower-severity findings — items 1 (`@Sensitive` redaction) and 6 (list-column warning) fixed; items 2-5 open (warn-only injection guard default, RF>3 read-your-writes gap, no shard-aware driver/pool tuning, retry backoff lacks jitter) |
+
+Also in progress, in isolated worktrees: [ISS-057](ISS-057-multidc-failover-inert.md) (#58),
+[ISS-060](ISS-060-credential-rotation-noop.md) (#61), [ISS-064](ISS-064-keyspace-dc-identifiers-unvalidated.md) (#65),
+[ISS-068](ISS-068-localrequestsperconnection-dead-config.md) (#69).
 
 ## Fixed — pending live-cluster verification
 
@@ -63,9 +80,11 @@ Docker before relying on them.
 | [ISS-050](ISS-050-raw-query-injection-guard.md) | `raw()`/`rawQuery()`'s CQL-injection guard only fired under a narrow condition and never blocked execution |
 | [ISS-051](ISS-051-columnref-cqlname-validation.md) | `KandraColumnRef`'s public constructor accepted an unvalidated `cqlName` |
 | [ISS-052](ISS-052-jakarta-codegen-health-polish.md) | Assorted polish — Jakarta validator factory reuse, codegen nullability, health endpoint debounce |
+| [ISS-053](ISS-053-batch-and-versioned-update-ignore-consistency.md) | `LOGGED BATCH` writes and `@Version` LWT updates ignored the configured consistency level entirely |
 | [ISS-062](ISS-062-migration-checksum-false-positive-risk.md) | `KandraMigration.checksum()`'s bytecode hash risked false-positive startup failures after cosmetic recompilation |
 | [ISS-063](ISS-063-migration-claim-staleness-clock-skew.md) | Migration claim staleness was computed from wall-clock timestamps across potentially skewed app instances |
 | [ISS-065](ISS-065-credentials-tostring-leak.md) | `KandraCredentials`' auto-generated `toString()` would print the plaintext password |
+| [ISS-067](ISS-067-decodeentity-rebuilds-column-map.md) | `QueryExecutor.decodeEntity` rebuilt the full column map on every row decoded instead of caching it |
 
 ## Closed — not a bug
 
