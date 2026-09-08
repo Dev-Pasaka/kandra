@@ -85,7 +85,8 @@ class StatementBuilder(
         return resolved
     }
 
-    private fun resolveReadConsistency(schema: TableSchema, override: KandraConsistency?): KandraConsistency {
+    @InternalKandraApi
+    internal fun resolveReadConsistency(schema: TableSchema, override: KandraConsistency?): KandraConsistency {
         val resolved = override
             ?: schema.entityClass.findAnnotation<ReadConsistency>()?.level
             ?: consistencyConfig.defaultRead

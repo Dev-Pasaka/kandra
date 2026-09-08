@@ -70,7 +70,7 @@ class QueryExecutorSuspendPreparePathTest {
         val executor = QueryExecutor(session, schema, StatementBuilder(session))
         val block: QueryContext.() -> Unit = { KandraColumnRef<String>("email") eq "a@b.com" }
 
-        val results = executor.findAllSuspend(QepAccount::class, block)
+        val results = executor.findAllSuspend(QepAccount::class, block = block)
 
         assertEquals(1, results.size)
         assertEquals(0, session.blockingPrepareCount.get())
@@ -88,7 +88,7 @@ class QueryExecutorSuspendPreparePathTest {
         val executor = QueryExecutor(session, schema, StatementBuilder(session))
         val block: QueryContext.() -> Unit = { KandraColumnRef<UUID>("id") isIn listOf(id) }
 
-        val results = executor.findAllSuspend(QepItem::class, block)
+        val results = executor.findAllSuspend(QepItem::class, block = block)
 
         assertEquals(1, results.size)
         assertEquals(0, session.blockingPrepareCount.get())
@@ -105,7 +105,7 @@ class QueryExecutorSuspendPreparePathTest {
         val executor = QueryExecutor(session, schema, StatementBuilder(session))
         val block: QueryContext.() -> Unit = { KandraColumnRef<String>("email") eq "a@b.com" }
 
-        val exists = executor.existsSuspend(block)
+        val exists = executor.existsSuspend(block = block)
 
         assertTrue(exists)
         assertEquals(0, session.blockingPrepareCount.get())

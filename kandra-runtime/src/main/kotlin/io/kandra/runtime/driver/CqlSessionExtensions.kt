@@ -24,3 +24,21 @@ suspend fun CqlSession.executeSuspendAll(statement: Statement<*>): List<Row> {
     }
     return rows
 }
+
+/**
+ * Like [executeSuspendAll], but stops fetching further pages once [cap] rows have been collected —
+ * used by [io.kandra.runtime.QueryExecutor]'s unpaged read paths (`findAll`/`find`/`exists`'s IN and
+ * direct-CQL branches) to bound in-memory materialization (see ISS-066 / GH #67). May return slightly
+ * more than [cap] rows (whatever the last fetched page contained) — the caller truncates to the exact
+ * cap and decides how to warn.
+ */
+suspend fun CqlSession.executeSuspendUpTo(statement: Statement<*>, cap: Int): List<Row> {
+    val rows = mutableListOf<Row>()
+    var resultSet = executeAsync(statement).toCompletableFuture().await()
+    rows.addAll(resultSet.currentPage())
+    while (rows.size <= cap && resultSet.hasMorePages()) {
+        resultSet = resultSet.fetchNextPage().toCompletableFuture().await()
+        rows.addAll(resultSet.currentPage())
+    }
+    return rows
+}

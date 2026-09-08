@@ -1,7 +1,10 @@
 package io.kandra.runtime
 
 import com.datastax.oss.driver.api.core.CqlSession
+import com.datastax.oss.driver.api.core.DefaultConsistencyLevel
+import com.datastax.oss.driver.api.core.cql.ResultSet
 import com.datastax.oss.driver.api.core.cql.Row
+import com.datastax.oss.driver.api.core.cql.Statement
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.kandra.core.InternalKandraApi
 import io.kandra.core.KandraConsistency
@@ -11,6 +14,7 @@ import io.kandra.core.schema.TableSchema
 import io.kandra.runtime.codec.KandraCodec
 import io.kandra.runtime.driver.executeSuspend
 import io.kandra.runtime.driver.executeSuspendAll
+import io.kandra.runtime.driver.executeSuspendUpTo
 import io.kandra.runtime.driver.prepareSuspend
 import io.kandra.runtime.dsl.KandraPage
 import io.kandra.runtime.dsl.KandraPredicate
@@ -47,7 +51,17 @@ class QueryExecutor(
     private val schema: TableSchema,
     private val statementBuilder: StatementBuilder,
     private val codec: KandraCodec = KandraCodec.default,
-    private val debugConfig: DebugConfig = DebugConfig()
+    private val debugConfig: DebugConfig = DebugConfig(),
+    /**
+     * Hard cap on rows materialized into memory by an unpaged read (`findAll`/`find`/`exists`'s IN
+     * and direct-CQL branches — `findById`/lookup-index reads are inherently bounded to one row, and
+     * `findPage` is explicitly paged). See ISS-066 / GH #67: without this, a predicate matching a wide
+     * partition or many partitions could materialize an unbounded result set into application heap.
+     * Exceeding it logs a loud WARN and truncates rather than throwing, so an existing large-but-legal
+     * result set doesn't turn into a runtime failure — `findPage` is the documented alternative for
+     * genuinely unbounded reads.
+     */
+    private val maxUnpagedResultRows: Int = 10_000
 ) {
 
     fun <T : Any> findById(entityClass: KClass<T>, vararg idValues: Any, consistency: KandraConsistency? = null): T? {
@@ -60,9 +74,9 @@ class QueryExecutor(
         return entity
     }
 
-    fun <T : Any> findAll(entityClass: KClass<T>, block: QueryContext.() -> Unit): List<T> {
+    fun <T : Any> findAll(entityClass: KClass<T>, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): List<T> {
         val ctx = QueryContext().also(block)
-        val rows = resolveRows(ctx)
+        val rows = resolveRows(ctx, consistency = consistency)
         val entities = rows.map { decodeEntity(it, entityClass) }
         if (debugConfig.logQueries) {
             entities.forEach { entity ->
@@ -72,13 +86,14 @@ class QueryExecutor(
         return entities
     }
 
-    fun <T : Any> find(entityClass: KClass<T>, block: QueryContext.() -> Unit): T? =
-        findAll(entityClass, block).firstOrNull()
+    fun <T : Any> find(entityClass: KClass<T>, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? =
+        findAll(entityClass, consistency, block).firstOrNull()
 
     fun <T : Any> findPage(
         entityClass: KClass<T>,
         pageSize: Int,
         pageToken: String?,
+        consistency: KandraConsistency? = null,
         block: QueryContext.() -> Unit
     ): KandraPage<T> {
         val ctx = QueryContext().also(block)
@@ -91,7 +106,7 @@ class QueryExecutor(
             val lookup = schema.lookupTables.first { it.indexColumn.cqlName == lookupColName }
             val lookupValue = (lookupPredicate as? KandraPredicate.Eq)?.value
                 ?: throw KandraQueryException("Lookup table pagination only supports equality predicates.")
-            val lookupRow = session.execute(statementBuilder.selectByLookup(lookup, lookupValue!!))
+            val lookupRow = session.execute(statementBuilder.selectByLookup(lookup, lookupValue!!, consistency))
                 .one() ?: return KandraPage(emptyList(), null, false)
 
             // Full key (partition + clustering), not partition-only -- a lookup value maps to exactly
@@ -118,7 +133,10 @@ class QueryExecutor(
         }
         val values = if (primaryPredicates.isEmpty()) emptyList() else buildWhere(primaryPredicates).second
         val prepared = session.prepare(cql)
-        var stmt = prepared.bind(*values.toTypedArray()).setPageSize(pageSize)
+        val resolvedConsistency = statementBuilder.resolveReadConsistency(schema, consistency)
+        var stmt = prepared.bind(*values.toTypedArray())
+            .setPageSize(pageSize)
+            .setConsistencyLevel(DefaultConsistencyLevel.valueOf(resolvedConsistency.name))
 
         if (pageToken != null) {
             val bytes = Base64.getDecoder().decode(pageToken)
@@ -144,9 +162,9 @@ class QueryExecutor(
         )
     }
 
-    fun exists(block: QueryContext.() -> Unit): Boolean {
+    fun exists(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): Boolean {
         val ctx = QueryContext().also(block)
-        val rows = resolveRows(ctx, limitOne = true, selectKeys = true)
+        val rows = resolveRows(ctx, consistency = consistency, limitOne = true, selectKeys = true)
         return rows.isNotEmpty()
     }
 
@@ -174,9 +192,9 @@ class QueryExecutor(
         return entity
     }
 
-    suspend fun <T : Any> findAllSuspend(entityClass: KClass<T>, block: QueryContext.() -> Unit): List<T> {
+    suspend fun <T : Any> findAllSuspend(entityClass: KClass<T>, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): List<T> {
         val ctx = QueryContext().also(block)
-        val rows = resolveRowsSuspend(ctx)
+        val rows = resolveRowsSuspend(ctx, consistency = consistency)
         val entities = rows.map { decodeEntity(it, entityClass) }
         if (debugConfig.logQueries) {
             entities.forEach { entity ->
@@ -186,13 +204,14 @@ class QueryExecutor(
         return entities
     }
 
-    suspend fun <T : Any> findSuspend(entityClass: KClass<T>, block: QueryContext.() -> Unit): T? =
-        findAllSuspend(entityClass, block).firstOrNull()
+    suspend fun <T : Any> findSuspend(entityClass: KClass<T>, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? =
+        findAllSuspend(entityClass, consistency, block).firstOrNull()
 
     suspend fun <T : Any> findPageSuspend(
         entityClass: KClass<T>,
         pageSize: Int,
         pageToken: String?,
+        consistency: KandraConsistency? = null,
         block: QueryContext.() -> Unit
     ): KandraPage<T> {
         val ctx = QueryContext().also(block)
@@ -205,7 +224,7 @@ class QueryExecutor(
             val lookup = schema.lookupTables.first { it.indexColumn.cqlName == lookupColName }
             val lookupValue = (lookupPredicate as? KandraPredicate.Eq)?.value
                 ?: throw KandraQueryException("Lookup table pagination only supports equality predicates.")
-            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(lookup, lookupValue!!))
+            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(lookup, lookupValue!!, consistency))
                 .one() ?: return KandraPage(emptyList(), null, false)
 
             // Full key (partition + clustering), not partition-only -- a lookup value maps to exactly
@@ -229,7 +248,10 @@ class QueryExecutor(
         }
         val values = if (primaryPredicates.isEmpty()) emptyList() else buildWhere(primaryPredicates).second
         val prepared = session.prepareSuspend(cql)
-        var stmt = prepared.bind(*values.toTypedArray()).setPageSize(pageSize)
+        val resolvedConsistency = statementBuilder.resolveReadConsistency(schema, consistency)
+        var stmt = prepared.bind(*values.toTypedArray())
+            .setPageSize(pageSize)
+            .setConsistencyLevel(DefaultConsistencyLevel.valueOf(resolvedConsistency.name))
 
         if (pageToken != null) {
             val bytes = Base64.getDecoder().decode(pageToken)
@@ -253,9 +275,9 @@ class QueryExecutor(
         )
     }
 
-    suspend fun existsSuspend(block: QueryContext.() -> Unit): Boolean {
+    suspend fun existsSuspend(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): Boolean {
         val ctx = QueryContext().also(block)
-        val rows = resolveRowsSuspend(ctx, limitOne = true, selectKeys = true)
+        val rows = resolveRowsSuspend(ctx, consistency = consistency, limitOne = true, selectKeys = true)
         return rows.isNotEmpty()
     }
 
@@ -361,6 +383,7 @@ class QueryExecutor(
 
     private fun resolveRows(
         ctx: QueryContext,
+        consistency: KandraConsistency? = null,
         limitOne: Boolean = false,
         selectKeys: Boolean = false
     ): List<Row> {
@@ -387,8 +410,8 @@ class QueryExecutor(
             logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
 
             val encodedIds = inPredicate.values.filterNotNull()
-            val rs = session.execute(statementBuilder.selectByPartitionKeyIn(schema, encodedIds))
-            return rs.all()
+            val rs = session.execute(statementBuilder.selectByPartitionKeyIn(schema, encodedIds, consistency))
+            return boundedAll(rs)
         }
 
         // ── Lookup table predicate ────────────────────────────────────────────
@@ -404,7 +427,7 @@ class QueryExecutor(
                 else -> throw KandraQueryException("Lookup table queries only support equality predicates.")
             } ?: throw KandraQueryException("Lookup predicate value must not be null.")
 
-            val lookupRow = session.execute(statementBuilder.selectByLookup(lookup, lookupValue))
+            val lookupRow = session.execute(statementBuilder.selectByLookup(lookup, lookupValue, consistency))
                 .one() ?: return emptyList()
 
             // Full key (partition + clustering) -- selectById requires all of it (see ISS-029).
@@ -412,7 +435,7 @@ class QueryExecutor(
                 lookupRow.getObject(keyCol.cqlName)
                     ?: throw KandraQueryException("Null key column '${keyCol.cqlName}' from lookup table")
             }
-            val primaryRs = session.execute(statementBuilder.selectById(schema, *keyValues.toTypedArray()))
+            val primaryRs = session.execute(statementBuilder.selectById(schema, *keyValues.toTypedArray(), consistency = consistency))
             return primaryRs.all()
         }
 
@@ -435,12 +458,34 @@ class QueryExecutor(
         }
         val cql = "SELECT $selectCols FROM ${schema.tableName} WHERE $whereParts$limitClause"
         val prepared = session.prepare(cql)
-        val rs = session.execute(prepared.bind(*values.toTypedArray()))
-        return rs.all()
+        val resolvedConsistency = statementBuilder.resolveReadConsistency(schema, consistency)
+        val stmt = prepared.bind(*values.toTypedArray())
+            .setConsistencyLevel(DefaultConsistencyLevel.valueOf(resolvedConsistency.name))
+        val rs = session.execute(stmt)
+        return boundedAll(rs)
+    }
+
+    /**
+     * Collects rows off [rs] up to [maxUnpagedResultRows], logging a loud WARN and truncating instead
+     * of materializing further if the query has more than that. See ISS-066 / GH #67.
+     */
+    private fun boundedAll(rs: ResultSet): List<Row> {
+        val rows = ArrayList<Row>(minOf(maxUnpagedResultRows + 1, 256))
+        val iterator = rs.iterator()
+        while (iterator.hasNext() && rows.size <= maxUnpagedResultRows) rows.add(iterator.next())
+        if (rows.size > maxUnpagedResultRows) {
+            logger.warn {
+                "Query on '${schema.tableName}' returned more than $maxUnpagedResultRows rows without " +
+                "paging — truncating to $maxUnpagedResultRows. Use findPage() for large or unbounded result sets."
+            }
+            return rows.subList(0, maxUnpagedResultRows)
+        }
+        return rows
     }
 
     private suspend fun resolveRowsSuspend(
         ctx: QueryContext,
+        consistency: KandraConsistency? = null,
         limitOne: Boolean = false,
         selectKeys: Boolean = false
     ): List<Row> {
@@ -467,7 +512,7 @@ class QueryExecutor(
             logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
 
             val encodedIds = inPredicate.values.filterNotNull()
-            return session.executeSuspendAll(statementBuilder.selectByPartitionKeyInSuspend(schema, encodedIds))
+            return boundedSuspendAll(statementBuilder.selectByPartitionKeyInSuspend(schema, encodedIds, consistency))
         }
 
         // ── Lookup table predicate ────────────────────────────────────────────
@@ -483,7 +528,7 @@ class QueryExecutor(
                 else -> throw KandraQueryException("Lookup table queries only support equality predicates.")
             } ?: throw KandraQueryException("Lookup predicate value must not be null.")
 
-            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(lookup, lookupValue))
+            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(lookup, lookupValue, consistency))
                 .one() ?: return emptyList()
 
             // Full key (partition + clustering) -- selectById requires all of it (see ISS-029).
@@ -491,7 +536,9 @@ class QueryExecutor(
                 lookupRow.getObject(keyCol.cqlName)
                     ?: throw KandraQueryException("Null key column '${keyCol.cqlName}' from lookup table")
             }
-            return session.executeSuspendAll(statementBuilder.selectByIdSuspend(schema, *keyValues.toTypedArray()))
+            return session.executeSuspendAll(
+                statementBuilder.selectByIdSuspend(schema, *keyValues.toTypedArray(), consistency = consistency)
+            )
         }
 
         // ── @SecondaryIndex predicate ─────────────────────────────────────────
@@ -513,7 +560,27 @@ class QueryExecutor(
         }
         val cql = "SELECT $selectCols FROM ${schema.tableName} WHERE $whereParts$limitClause"
         val prepared = session.prepareSuspend(cql)
-        return session.executeSuspendAll(prepared.bind(*values.toTypedArray()))
+        val resolvedConsistency = statementBuilder.resolveReadConsistency(schema, consistency)
+        val stmt = prepared.bind(*values.toTypedArray())
+            .setConsistencyLevel(DefaultConsistencyLevel.valueOf(resolvedConsistency.name))
+        return boundedSuspendAll(stmt)
+    }
+
+    /**
+     * Suspend counterpart of [boundedAll] — see ISS-066 / GH #67. [executeSuspendUpTo] may return
+     * slightly more than [maxUnpagedResultRows] (whatever the last fetched page contained); this
+     * truncates to the exact cap and logs.
+     */
+    private suspend fun boundedSuspendAll(statement: Statement<*>): List<Row> {
+        val rows = session.executeSuspendUpTo(statement, maxUnpagedResultRows)
+        if (rows.size > maxUnpagedResultRows) {
+            logger.warn {
+                "Query on '${schema.tableName}' returned more than $maxUnpagedResultRows rows without " +
+                "paging — truncating to $maxUnpagedResultRows. Use findPageSuspend() for large or unbounded result sets."
+            }
+            return rows.subList(0, maxUnpagedResultRows)
+        }
+        return rows
     }
 
     private fun buildWhere(predicates: List<KandraPredicate>): Pair<String, List<Any?>> {

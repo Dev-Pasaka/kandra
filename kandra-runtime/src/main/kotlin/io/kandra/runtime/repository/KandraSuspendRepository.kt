@@ -100,7 +100,7 @@ class KandraSuspendRepository<T : Any>(
     }
 
     suspend fun deleteBy(block: QueryContext.() -> Unit) {
-        val entity = executor.findSuspend(entityClass, block) ?: return
+        val entity = executor.findSuspend(entityClass, block = block) ?: return
         batchEngine.deleteSuspend(schema, entity)
     }
 
@@ -111,32 +111,33 @@ class KandraSuspendRepository<T : Any>(
             ?.also { cache.put(cacheKey, it) }
     }
 
-    suspend fun find(block: QueryContext.() -> Unit): T? {
+    suspend fun find(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? {
         checkNotShuttingDown()
-        return executor.findSuspend(entityClass, block)
+        return executor.findSuspend(entityClass, consistency, block)
     }
 
-    suspend fun findAll(limit: Int? = null, block: QueryContext.() -> Unit): List<T> {
+    suspend fun findAll(limit: Int? = null, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): List<T> {
         checkNotShuttingDown()
         val fullBlock: QueryContext.() -> Unit = {
             block()
             if (limit != null) limit(limit)
         }
-        return executor.findAllSuspend(entityClass, fullBlock)
+        return executor.findAllSuspend(entityClass, consistency, fullBlock)
     }
 
     suspend fun findPage(
         pageSize: Int,
         pageToken: String? = null,
+        consistency: KandraConsistency? = null,
         block: QueryContext.() -> Unit = {}
     ): KandraPage<T> {
         checkNotShuttingDown()
-        return executor.findPageSuspend(entityClass, pageSize, pageToken, block)
+        return executor.findPageSuspend(entityClass, pageSize, pageToken, consistency, block)
     }
 
-    suspend fun exists(block: QueryContext.() -> Unit): Boolean {
+    suspend fun exists(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): Boolean {
         checkNotShuttingDown()
-        return executor.existsSuspend(block)
+        return executor.existsSuspend(consistency, block)
     }
 
     /**
