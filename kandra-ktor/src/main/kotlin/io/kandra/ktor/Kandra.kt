@@ -220,18 +220,28 @@ val Kandra: ApplicationPlugin<KandraConfig> =
         application.attributes.put(KandraRuntimeKey, runtime)
         config.eventListener?.let { application.attributes.put(KandraEventListenerKey, it) }
 
-        // ── Health check route ───────────────────────────────────────────────
+        // ── Health check route (GH #36) ──────────────────────────────────────
+        // Unauthenticated by design (see KandraConfig.healthCheck doc) and, absent the cache
+        // below, ran a live `SELECT release_version FROM system.local` against the cluster on
+        // every single hit — a misconfigured or abusive probe storm translated 1:1 into cluster
+        // queries. healthCheckCache debounces that: within healthCheckCacheTtlMs of the last
+        // real check, a request gets the cached result instead of hitting the cluster again.
         if (config.healthCheck) {
+            val healthCheckCache = HealthCheckCache(config.healthCheckCacheTtlMs)
+            application.attributes.put(KandraHealthCheckCacheKey, healthCheckCache)
             application.routing {
                 get("/kandra/health") {
-                    if (runtime.isHealthy()) {
+                    if (healthCheckCache.check { runtime.isHealthy() }) {
                         call.respondText("""{"status":"UP"}""", ContentType.Application.Json, HttpStatusCode.OK)
                     } else {
                         call.respondText("""{"status":"DOWN"}""", ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
                     }
                 }
             }
-            logger.info { "Kandra: health check route registered at GET /kandra/health" }
+            logger.info {
+                "Kandra: health check route registered at GET /kandra/health " +
+                    "(cached for ${config.healthCheckCacheTtlMs}ms)"
+            }
         }
 
         // ── Credential rotation ──────────────────────────────────────────────
@@ -339,11 +349,46 @@ private fun validatePermissions(session: CqlSession, keyspace: String, schemaMod
     }
 }
 
+/**
+ * Debounces `/kandra/health`'s cluster probe (GH #36): a request within [ttlMillis] of the last
+ * real check gets the cached result instead of triggering another
+ * `SELECT release_version FROM system.local`, so a probe storm (misconfigured monitoring, or
+ * deliberate abuse if the route is reachable beyond a private network) doesn't translate 1:1 into
+ * cluster queries.
+ *
+ * [probeCount] is `internal` — it's not meant as public API, only so tests in this module can
+ * assert on how many real probes actually ran, rather than inferring it indirectly from timing.
+ *
+ * Not linearizable under concurrent requests racing the exact TTL boundary — two overlapping
+ * requests can, in the worst case, both see a stale cache and both probe. That's an acceptable
+ * trade for a health check: correctness never suffers (the result is always either fresh or at
+ * most [ttlMillis] old), only the debounce guarantee is best-effort rather than exact, and adding
+ * a lock here would cost more than a rare extra probe is worth.
+ */
+internal class HealthCheckCache(private val ttlMillis: Long) {
+    @Volatile private var cachedResult: Boolean = false
+    @Volatile private var cachedAtMillis: Long = Long.MIN_VALUE
+    val probeCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    suspend fun check(probe: suspend () -> Boolean): Boolean {
+        val now = System.currentTimeMillis()
+        if (cachedAtMillis != Long.MIN_VALUE && now - cachedAtMillis < ttlMillis) {
+            return cachedResult
+        }
+        val result = probe()
+        probeCount.incrementAndGet()
+        cachedResult = result
+        cachedAtMillis = now
+        return result
+    }
+}
+
 val KandraSessionKey: AttributeKey<CqlSession> = AttributeKey("KandraSession")
 val KandraCodecKey: AttributeKey<KandraCodec> = AttributeKey("KandraCodec")
 val KandraRuntimeKey: AttributeKey<KandraRuntime> = AttributeKey("KandraRuntime")
 @OptIn(ExperimentalKandraApi::class)
 val KandraEventListenerKey: AttributeKey<KandraEventListener> = AttributeKey("KandraEventListener")
+internal val KandraHealthCheckCacheKey: AttributeKey<HealthCheckCache> = AttributeKey("KandraHealthCheckCache")
 
 val Application.kandraSession: CqlSession get() = attributes[KandraSessionKey]
 val Application.kandraCodec: KandraCodec get() = attributes[KandraCodecKey]

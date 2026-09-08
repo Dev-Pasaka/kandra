@@ -34,8 +34,9 @@ class KandraProcessorTableContentTest {
 
     /**
      * One entity covering every case the issue asks for: a plain non-nullable simple type, a
-     * nullable simple type (see the `nullableName` test below for why it currently generates
-     * identically to the non-nullable case), three flavors of generic collection, an explicit
+     * nullable simple type (see the `nullableName` test below), three flavors of generic
+     * collection plus a nullable generic collection and a collection of a nullable element type
+     * (GH-36 nullability threading must recurse correctly at every nesting level), an explicit
      * `@Column` rename, a blank `@Column("")` (the GH-30 regression case — must resolve via
      * `CqlNaming.resolveColumnName`, not an independently-drifting fallback), and a
      * `@LookupIndex` column to verify `isLookup = true` threading.
@@ -57,6 +58,8 @@ class KandraProcessorTableContentTest {
             val tags: List<String>,
             val scores: Set<Int>,
             val attributes: Map<String, Int>,
+            val nullableTags: List<String>?,
+            val tagsOfNullable: List<String?>,
             @Column("custom_col") val renamed: String,
             @Column("") val blankColumn: String,
             @LookupIndex(tableSuffix = "by_email") val email: String
@@ -119,16 +122,15 @@ class KandraProcessorTableContentTest {
     }
 
     @Test
-    fun `nullable property currently generates the SAME type as non-nullable - GH-36 nullability threading is not yet implemented`() {
-        // resolveTypeName only splices `type.declaration.qualifiedName` (plus recursed generic
-        // arguments); it never consults `type.isMarkedNullable`, so a `String?` property currently
-        // renders identically to a non-nullable `String` property: `KandraColumnRef<kotlin.String>`,
-        // not `KandraColumnRef<kotlin.String?>`. This is the CURRENT behavior, not the desired one —
-        // GH-36 (still open) covers adding nullability threading. Once that lands, this assertion
-        // must change to expect `kotlin.String?` and stop asserting the erasure.
+    fun `nullable property generates a nullable type argument - GH-36`() {
+        // resolveTypeName now consults type.isMarkedNullable and appends "?" to the rendered type,
+        // so a String? property generates KandraColumnRef<kotlin.String?>, distinct from the plain
+        // KandraColumnRef<kotlin.String> a non-nullable String property gets (asserted above). This
+        // is valid Kotlin: KandraColumnRef<T> declares T with no upper bound (implicitly Any?), so a
+        // nullable type argument needs no change to KandraColumnRef itself.
         assertTrue(
-            tableContent.contains("val nullableName = io.kandra.runtime.dsl.KandraColumnRef<kotlin.String>(\"nullable_name\")"),
-            "Expected nullable property to currently generate the same non-nullable-looking type in:\n$tableContent"
+            tableContent.contains("val nullableName = io.kandra.runtime.dsl.KandraColumnRef<kotlin.String?>(\"nullable_name\")"),
+            "Expected nullable String column to render KandraColumnRef<kotlin.String?> in:\n$tableContent"
         )
     }
 
@@ -147,6 +149,26 @@ class KandraProcessorTableContentTest {
                 "val attributes = io.kandra.runtime.dsl.KandraColumnRef<kotlin.collections.Map<kotlin.String, kotlin.Int>>(\"attributes\")"
             ),
             "Expected Map<String, Int> column line not found in:\n$tableContent"
+        )
+    }
+
+    @Test
+    fun `nullable generic container renders the nullability suffix on the outer type - GH-36`() {
+        assertTrue(
+            tableContent.contains(
+                "val nullableTags = io.kandra.runtime.dsl.KandraColumnRef<kotlin.collections.List<kotlin.String>?>(\"nullable_tags\")"
+            ),
+            "Expected List<String>? column to render KandraColumnRef<kotlin.collections.List<kotlin.String>?> in:\n$tableContent"
+        )
+    }
+
+    @Test
+    fun `generic container of a nullable element type threads nullability on the type argument - GH-36`() {
+        assertTrue(
+            tableContent.contains(
+                "val tagsOfNullable = io.kandra.runtime.dsl.KandraColumnRef<kotlin.collections.List<kotlin.String?>>(\"tags_of_nullable\")"
+            ),
+            "Expected List<String?> column to render KandraColumnRef<kotlin.collections.List<kotlin.String?>> in:\n$tableContent"
         )
     }
 
