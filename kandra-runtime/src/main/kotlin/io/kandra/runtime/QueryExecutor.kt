@@ -53,13 +53,23 @@ class QueryExecutor(
     fun <T : Any> findById(entityClass: KClass<T>, vararg idValues: Any, consistency: KandraConsistency? = null): T? {
         val rs = session.execute(statementBuilder.selectById(schema, *idValues, consistency = consistency))
         val row = rs.one() ?: return null
-        return decodeEntity(row, entityClass)
+        val entity = decodeEntity(row, entityClass)
+        if (debugConfig.logQueries) {
+            logger.debug { "Decoded entity: ${KandraEntityLogger.safeToString(entity, schema)}" }
+        }
+        return entity
     }
 
     fun <T : Any> findAll(entityClass: KClass<T>, block: QueryContext.() -> Unit): List<T> {
         val ctx = QueryContext().also(block)
         val rows = resolveRows(ctx)
-        return rows.map { decodeEntity(it, entityClass) }
+        val entities = rows.map { decodeEntity(it, entityClass) }
+        if (debugConfig.logQueries) {
+            entities.forEach { entity ->
+                logger.debug { "Decoded entity: ${KandraEntityLogger.safeToString(entity, schema)}" }
+            }
+        }
+        return entities
     }
 
     fun <T : Any> find(entityClass: KClass<T>, block: QueryContext.() -> Unit): T? =
@@ -156,14 +166,24 @@ class QueryExecutor(
 
     suspend fun <T : Any> findByIdSuspend(entityClass: KClass<T>, vararg idValues: Any, consistency: KandraConsistency? = null): T? {
         val rs = session.executeSuspend(statementBuilder.selectByIdSuspend(schema, *idValues, consistency = consistency))
-        val row = rs.one() ?: return null
-        return decodeEntity(row, entityClass)
+        val row = rs.currentPage().firstOrNull() ?: return null
+        val entity = decodeEntity(row, entityClass)
+        if (debugConfig.logQueries) {
+            logger.debug { "Decoded entity: ${KandraEntityLogger.safeToString(entity, schema)}" }
+        }
+        return entity
     }
 
     suspend fun <T : Any> findAllSuspend(entityClass: KClass<T>, block: QueryContext.() -> Unit): List<T> {
         val ctx = QueryContext().also(block)
         val rows = resolveRowsSuspend(ctx)
-        return rows.map { decodeEntity(it, entityClass) }
+        val entities = rows.map { decodeEntity(it, entityClass) }
+        if (debugConfig.logQueries) {
+            entities.forEach { entity ->
+                logger.debug { "Decoded entity: ${KandraEntityLogger.safeToString(entity, schema)}" }
+            }
+        }
+        return entities
     }
 
     suspend fun <T : Any> findSuspend(entityClass: KClass<T>, block: QueryContext.() -> Unit): T? =
@@ -525,16 +545,10 @@ class QueryExecutor(
         val ctor = schema.reflection.primaryConstructor as? KFunction<T>
             ?: throw KandraQueryException("Entity '${entityClass.simpleName}' has no primary constructor.")
         val ctorParams = schema.reflection.constructorParameters
-
-        val allCols = buildList {
-            addAll(schema.partitionKeys)
-            addAll(schema.clusteringKeys)
-            addAll(schema.columns)
-            addAll(schema.lookupTables.map { it.indexColumn })
-        }.associateBy { it.propertyName }
+        val columnsByProperty = schema.reflection.columnsByProperty
 
         val args = ctorParams.associateWith { param ->
-            val col = allCols[param.name]
+            val col = columnsByProperty[param.name]
             if (col == null) null else codec.decode(row, col)
         }
 

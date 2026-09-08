@@ -4,6 +4,7 @@ import com.datastax.oss.driver.api.core.cql.BatchableStatement
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.InternalKandraApi
 import io.kandra.core.exception.KandraQueryException
+import io.kandra.core.schema.TableSchema
 import io.kandra.runtime.repository.KandraRepository
 import io.kandra.runtime.repository.KandraSuspendRepository
 
@@ -33,29 +34,34 @@ class KandraBatchScope internal constructor(
     private val batchEngine: BatchEngine
 ) {
     private val statements = mutableListOf<BatchableStatement<*>>()
+    private var schema: TableSchema? = null
 
     /** Adds the entity save (primary + BATCH lookups) to this batch. */
     fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null) {
         @OptIn(InternalKandraApi::class)
         statements.addAll(batchEngine.collectSave(schema, entity, ttlSeconds))
+        this@KandraBatchScope.schema = schema
     }
 
     /** Adds the entity save (primary + BATCH lookups) to this batch. */
     fun <T : Any> KandraRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null) {
         @OptIn(InternalKandraApi::class)
         statements.addAll(batchEngine.collectSave(schema, entity, ttlSeconds))
+        this@KandraBatchScope.schema = schema
     }
 
     /** Adds the entity delete (primary + all lookup tables) to this batch. */
     fun <T : Any> KandraSuspendRepository<T>.deleteInBatch(entity: T) {
         @OptIn(InternalKandraApi::class)
         statements.addAll(batchEngine.collectDelete(schema, entity))
+        this@KandraBatchScope.schema = schema
     }
 
     /** Adds the entity delete (primary + all lookup tables) to this batch. */
     fun <T : Any> KandraRepository<T>.deleteInBatch(entity: T) {
         @OptIn(InternalKandraApi::class)
         statements.addAll(batchEngine.collectDelete(schema, entity))
+        this@KandraBatchScope.schema = schema
     }
 
     /**
@@ -79,8 +85,10 @@ class KandraBatchScope internal constructor(
      * in-flight tracking as every other write, instead of calling `session.execute` directly.
      */
     internal fun execute() {
+        if (statements.isEmpty()) return
         @OptIn(InternalKandraApi::class)
-        batchEngine.executeBatchScope(statements)
+        val schema = schema ?: throw KandraQueryException("Empty batch scope")
+        batchEngine.executeBatchScope(schema, statements)
     }
 
     /**
@@ -90,7 +98,9 @@ class KandraBatchScope internal constructor(
      * thread, while still applying the same shutdown gate / retry / in-flight tracking.
      */
     internal suspend fun executeSuspend() {
+        if (statements.isEmpty()) return
         @OptIn(InternalKandraApi::class)
-        batchEngine.executeBatchScopeSuspend(statements)
+        val schema = schema ?: throw KandraQueryException("Empty batch scope")
+        batchEngine.executeBatchScopeSuspend(schema, statements)
     }
 }

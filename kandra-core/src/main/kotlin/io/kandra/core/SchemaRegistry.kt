@@ -1,5 +1,6 @@
 package io.kandra.core
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.kandra.core.annotations.CacheResult
 import io.kandra.core.annotations.ClusteringKey
 import io.kandra.core.annotations.Column
@@ -41,7 +42,7 @@ import kotlin.reflect.full.primaryConstructor
  */
 @InternalKandraApi
 object SchemaRegistry {
-
+    private val logger = KotlinLogging.logger {}
     private val registry = ConcurrentHashMap<KClass<*>, TableSchema>()
 
     fun <T : Any> register(klass: KClass<T>): TableSchema =
@@ -97,6 +98,14 @@ object SchemaRegistry {
                     "Property '${klass.simpleName}.${prop.name}' is annotated both @PartitionKey " +
                         "and @ClusteringKey — a column cannot be both."
                 )
+            }
+
+            if (prop.returnType.classifier == List::class) {
+                logger.warn {
+                    "Property '${klass.simpleName}.${prop.name}' uses List collection. " +
+                        "List columns in ScyllaDB/Cassandra can have significant performance and " +
+                        "concurrency implications (reordering, tombstone growth). Consider Set or Map if order is not critical."
+                }
             }
 
             // Resolved cqlName must be a valid CQL identifier — this also catches a blank
@@ -313,7 +322,7 @@ object SchemaRegistry {
             gcGraceSeconds = tableAnnotation.gcGraceSeconds.takeIf { it >= 0 },
             cacheConfig = cacheResultAnn?.let { CacheResultConfig(it.ttlSeconds, it.maxSize) },
             generatedUuidColumns = generatedUuidColumns,
-            reflection = buildEntityReflection(klass)
+            reflection = buildEntityReflection(klass, columnSchemas)
         )
     }
 
@@ -322,7 +331,7 @@ object SchemaRegistry {
      * exactly once — called only from [buildSchema], itself only reached once per class via
      * [register]'s `getOrPut`. See ISS-034 / GitHub #13.
      */
-    private fun <T : Any> buildEntityReflection(klass: KClass<T>): EntityReflection {
+    private fun <T : Any> buildEntityReflection(klass: KClass<T>, columnSchemas: List<ColumnSchema>): EntityReflection {
         val copyFunction = klass.memberFunctions.find { it.name == "copy" }
         val primaryConstructor = klass.primaryConstructor
         return EntityReflection(
@@ -330,7 +339,8 @@ object SchemaRegistry {
             copyParameters = copyFunction?.parameters ?: emptyList(),
             propertiesByName = klass.memberProperties.associateBy { it.name },
             primaryConstructor = primaryConstructor,
-            constructorParameters = primaryConstructor?.parameters ?: emptyList()
+            constructorParameters = primaryConstructor?.parameters ?: emptyList(),
+            columnsByProperty = columnSchemas.associateBy { it.propertyName }
         )
     }
 

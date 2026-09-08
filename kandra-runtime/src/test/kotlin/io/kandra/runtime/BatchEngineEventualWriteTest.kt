@@ -64,7 +64,8 @@ class BatchEngineEventualWriteTest {
             copyParameters = Widget::class.memberFunctions.find { it.name == "copy" }?.parameters ?: emptyList(),
             propertiesByName = Widget::class.memberProperties.associateBy { it.name },
             primaryConstructor = Widget::class.primaryConstructor,
-            constructorParameters = Widget::class.primaryConstructor?.parameters ?: emptyList()
+            constructorParameters = Widget::class.primaryConstructor?.parameters ?: emptyList(),
+            columnsByProperty = listOf(idCol, emailCol).associateBy { it.propertyName }
         )
     )
 

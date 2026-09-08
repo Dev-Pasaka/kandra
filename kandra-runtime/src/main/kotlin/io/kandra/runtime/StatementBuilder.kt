@@ -76,7 +76,8 @@ class StatementBuilder(
     private fun BoundStatement.setEncoded(idx: Int, value: Any): BoundStatement =
         set(idx, value, value::class.java as Class<Any>)
 
-    private fun resolveWriteConsistency(schema: TableSchema, override: KandraConsistency?): KandraConsistency {
+    @InternalKandraApi
+    internal fun resolveWriteConsistency(schema: TableSchema, override: KandraConsistency?): KandraConsistency {
         val resolved = override
             ?: schema.entityClass.findAnnotation<WriteConsistency>()?.level
             ?: consistencyConfig.defaultWrite

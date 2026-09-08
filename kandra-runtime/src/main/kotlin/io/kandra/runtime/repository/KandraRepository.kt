@@ -56,23 +56,23 @@ class KandraRepository<T : Any>(
     fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean =
         batchEngine.saveIfNotExists(schema, entity, serialConsistency).also { if (it) cache.invalidate(cacheKeyOf(entity)) }
 
-    fun saveAll(entities: List<T>, useBatch: Boolean = true) {
-        batchEngine.saveAll(schema, entities, useBatch = useBatch)
+    fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null) {
+        batchEngine.saveAll(schema, entities, useBatch = useBatch, consistency = consistency)
         entities.forEach { cache.invalidate(cacheKeyOf(it)) }
     }
 
-    fun update(old: T, new: T) {
-        batchEngine.update(schema, old, new)
+    fun update(old: T, new: T, consistency: KandraConsistency? = null) {
+        batchEngine.update(schema, old, new, consistency = consistency)
         cache.invalidate(cacheKeyOf(new))
     }
 
-    fun updateForce(entity: T) {
-        batchEngine.updateForce(schema, entity)
+    fun updateForce(entity: T, consistency: KandraConsistency? = null) {
+        batchEngine.updateForce(schema, entity, consistency = consistency)
         cache.invalidate(cacheKeyOf(entity))
     }
 
-    fun saveWithNulls(entity: T, ttlSeconds: Int? = null) {
-        batchEngine.saveWithNulls(schema, entity, ttlSeconds)
+    fun saveWithNulls(entity: T, ttlSeconds: Int? = null, consistency: KandraConsistency? = null) {
+        batchEngine.saveWithNulls(schema, entity, ttlSeconds, consistency = consistency)
         cache.invalidate(cacheKeyOf(entity))
     }
 

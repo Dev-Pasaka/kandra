@@ -59,23 +59,23 @@ class KandraSuspendRepository<T : Any>(
     suspend fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean =
         batchEngine.saveIfNotExistsSuspend(schema, entity, serialConsistency).also { if (it) cache.invalidate(cacheKeyOf(entity)) }
 
-    suspend fun saveAll(entities: List<T>, useBatch: Boolean = true) {
-        batchEngine.saveAllSuspend(schema, entities, useBatch = useBatch)
+    suspend fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null) {
+        batchEngine.saveAllSuspend(schema, entities, useBatch = useBatch, consistency = consistency)
         entities.forEach { cache.invalidate(cacheKeyOf(it)) }
     }
 
-    suspend fun update(old: T, new: T) {
-        batchEngine.updateSuspend(schema, old, new)
+    suspend fun update(old: T, new: T, consistency: KandraConsistency? = null) {
+        batchEngine.updateSuspend(schema, old, new, consistency = consistency)
         cache.invalidate(cacheKeyOf(new))
     }
 
-    suspend fun updateForce(entity: T) {
-        batchEngine.updateForceSuspend(schema, entity)
+    suspend fun updateForce(entity: T, consistency: KandraConsistency? = null) {
+        batchEngine.updateForceSuspend(schema, entity, consistency = consistency)
         cache.invalidate(cacheKeyOf(entity))
     }
 
-    suspend fun saveWithNulls(entity: T, ttlSeconds: Int? = null) {
-        batchEngine.saveWithNullsSuspend(schema, entity, ttlSeconds)
+    suspend fun saveWithNulls(entity: T, ttlSeconds: Int? = null, consistency: KandraConsistency? = null) {
+        batchEngine.saveWithNullsSuspend(schema, entity, ttlSeconds, consistency = consistency)
         cache.invalidate(cacheKeyOf(entity))
     }
 
