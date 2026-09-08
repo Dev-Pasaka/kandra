@@ -174,31 +174,37 @@ class BatchEngineCollectionCounterTest {
     // ── retry-on-transient-error ───────────────────────────────────────────
 
     @Test
-    fun `increment retries a retryable failure and succeeds within maxAttempts`() {
+    fun `increment never retries -- counter updates are not idempotent (ISS-055, GH #56)`() {
         val schema = SchemaRegistry.register(CcWidget::class)
-        val session = ControllableFakeSession(failuresBeforeSuccess = 2)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
         val engine = BatchEngine(
             session, StatementBuilder(session), unconfinedScope(),
             retryConfig = RetryConfig().apply { backoffMillis = 1; maxBackoffMillis = 2 }
         )
 
-        engine.increment(schema, "name", mapOf("id" to UUID.randomUUID()), 1L)
-
-        assertEquals(3, session.executeCallCount)
+        // StatementBuilder.counterUpdate always marks the statement non-idempotent -- a blind retry
+        // could double-apply the increment/decrement. See ISS-055 / GH #56.
+        assertThrows(NoNodeAvailableException::class.java) {
+            engine.increment(schema, "name", mapOf("id" to UUID.randomUUID()), 1L)
+        }
+        assertEquals(1, session.executeCallCount)
     }
 
     @Test
-    fun `append retries a retryable failure and succeeds within maxAttempts`() {
+    fun `append never retries -- collection append is not idempotent (ISS-055, GH #56)`() {
         val schema = SchemaRegistry.register(CcWidget::class)
-        val session = ControllableFakeSession(failuresBeforeSuccess = 2)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
         val engine = BatchEngine(
             session, StatementBuilder(session), unconfinedScope(),
             retryConfig = RetryConfig().apply { backoffMillis = 1; maxBackoffMillis = 2 }
         )
 
-        engine.append(schema, listOf(UUID.randomUUID()), "name", listOf("x"))
-
-        assertEquals(3, session.executeCallCount)
+        // StatementBuilder.appendToCollection always marks the statement non-idempotent -- a blind
+        // retry could append the same element twice. See ISS-055 / GH #56.
+        assertThrows(NoNodeAvailableException::class.java) {
+            engine.append(schema, listOf(UUID.randomUUID()), "name", listOf("x"))
+        }
+        assertEquals(1, session.executeCallCount)
     }
 
     @Test

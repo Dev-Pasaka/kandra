@@ -64,8 +64,8 @@ class KandraSuspendRepository<T : Any>(
         entities.forEach { cache.invalidate(cacheKeyOf(it)) }
     }
 
-    suspend fun update(old: T, new: T, consistency: KandraConsistency? = null) {
-        batchEngine.updateSuspend(schema, old, new, consistency = consistency)
+    suspend fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null) {
+        batchEngine.updateSuspend(schema, old, new, consistency = consistency, ttlSeconds = ttlSeconds)
         cache.invalidate(cacheKeyOf(new))
     }
 

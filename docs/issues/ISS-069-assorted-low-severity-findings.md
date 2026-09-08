@@ -1,6 +1,7 @@
 # ISS-069: Assorted lower-severity findings from the pre-cluster-testing deep review
 
-**Status:** Partially fixed — items 1 and 6 done (this PR); items 2-5 open, tracked separately below
+**Status:** Fixed (items 1, 5, 6 as code changes; items 2, 3 as doc callouts; item 4 is a recorded
+architectural note, not actionable as a code or doc-comment change — see below)
 
 ## Problem
 
@@ -27,7 +28,7 @@ bug surfaced while testing this: `safeToString` called `prop.call(entity)` witho
 check for any entity class that isn't a public top-level class — now fixed. Covered by
 `KandraEntityLoggerTest` (redaction + non-sensitive-field passthrough).
 
-### 2. `raw()`/`rawQuery()`'s injection guard defaults to warn-only, not fail-closed
+### 2. `raw()`/`rawQuery()`'s injection guard defaults to warn-only, not fail-closed — **Documented**
 
 `QueryExecutor.kt:273-283` — confirmed `ISS-050`'s fix works exactly as documented (the heuristic fires
 unconditionally, `rawQuery`/`rawQuerySuspend` are covered, `rawQueryStrictMode = true` genuinely fails
@@ -35,7 +36,10 @@ closed). This is a deliberate, documented non-breaking default, not a bug — fl
 security-review recommendation: any team exposing `raw()` to code that builds queries from less-trusted
 input should turn `rawQueryStrictMode` on rather than relying on the warn-only default.
 
-### 3. Default consistency levels stop guaranteeing read-your-writes above RF 3
+**Doc callout added:** `DebugConfig.rawQueryStrictMode`'s KDoc now states this recommendation directly
+at the point of use.
+
+### 3. Default consistency levels stop guaranteeing read-your-writes above RF 3 — **Documented**
 
 `kandra-runtime/.../ConsistencyConfig.kt:18-19` defaults to `defaultRead = LOCAL_ONE`,
 `defaultWrite = LOCAL_QUORUM`. Read-your-writes requires `R + W ≥ RF`; these defaults satisfy that only
@@ -46,7 +50,10 @@ surfaces it. Worth a documentation callout — this is exactly the kind of thing
 against an `RF=1` Testcontainers setup and surfaces as a mystery stale-read bug only under a real
 `RF=5` production topology.
 
-### 4. No shard-aware driver / no connection-pool-size tuning
+**Doc callout added:** `ConsistencyConfig`'s class KDoc now states the RF>3 caveat directly next to
+`defaultRead`/`defaultWrite`.
+
+### 4. No shard-aware driver / no connection-pool-size tuning — **Not addressed**
 
 No `CONNECTION_POOL_LOCAL_SIZE`/`REMOTE_SIZE` driver option is ever set (stock DataStax driver default:
 1 pooled connection per node), and Kandra uses the stock OSS DataStax Java driver rather than a
@@ -54,13 +61,24 @@ shard-aware ScyllaDB driver, so it can't route requests directly to the owning s
 nodes. Not a bug — an architectural note worth surfacing explicitly before cluster-scale load testing,
 since it's a real throughput ceiling that no Kandra-level config change alone will remove.
 
-### 5. Retry backoff has no jitter
+**Left as-is:** this is an architectural note about the driver, not something a doc comment on a
+specific config class naturally attaches to, and `kandra-ktor` (where `PoolConfig` lives) was mid-fix
+under a concurrent lane (#58/#61/#65/#69) when this was written. Recorded here as the durable reference;
+worth a note in `docs/USER_GUIDE.md`'s pooling section as a future follow-up.
+
+### 5. Retry backoff has no jitter — **Fixed**
 
 `BatchEngine.kt`'s linear backoff (`backoffMillis * (attempt + 1)`, capped by `maxBackoffMillis`, at
 both `executeWithRetry` and `executeWithRetrySuspend`) is fully deterministic. Under a transient failure
 correlated across many concurrent requests (a GC pause, a brief network blip affecting one coordinator),
 all callers retry at synchronized intervals — a self-inflicted retry burst against the cluster rather
 than spread-out load. Add randomized jitter to the backoff calculation.
+
+**Fix:** added `RetryConfig.jitter: Boolean = true` and a `BatchEngine.jitteredBackoff(attempt)` helper
+implementing "equal jitter" (half the computed linear delay, plus a random amount up to the other half)
+— used by both `executeWithRetry` and `executeWithRetrySuspend`. Covered by
+`BatchEngineWriteSafetyTest`, which asserts the jittered value stays within `[computed/2, computed]`
+across many samples, and that disabling `jitter` returns exactly the deterministic computed value.
 
 ### 6. No anti-pattern warning for `List<T>` collection columns — **Fixed**
 

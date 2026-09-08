@@ -61,8 +61,8 @@ class KandraRepository<T : Any>(
         entities.forEach { cache.invalidate(cacheKeyOf(it)) }
     }
 
-    fun update(old: T, new: T, consistency: KandraConsistency? = null) {
-        batchEngine.update(schema, old, new, consistency = consistency)
+    fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null) {
+        batchEngine.update(schema, old, new, consistency = consistency, ttlSeconds = ttlSeconds)
         cache.invalidate(cacheKeyOf(new))
     }
 

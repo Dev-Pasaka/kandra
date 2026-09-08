@@ -22,8 +22,6 @@ import org.junit.jupiter.api.Test
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 @ScyllaTable("ufe_accounts")
@@ -131,18 +129,17 @@ class BatchEngineUpdateForceEventualTest {
         assertTrue(error is IllegalStateException, "unexpected error type: $error")
     }
 
-    // ── retry-on-transient-error now applies to updateForce's EVENTUAL write ────
+    // ── ISS-055 / GH #56: a non-idempotent EVENTUAL write must not be retried ──
 
     @Test
-    fun `updateForce retries a transient EVENTUAL lookup write failure and succeeds`() {
+    fun `updateForce never retries a transient EVENTUAL lookup write failure -- lookup insert is not idempotent`() {
         val schema = SchemaRegistry.register(UfeAccount::class)
         val session = FakeEventualCqlSession()
         val attempts = AtomicInteger(0)
-        val succeeded = CountDownLatch(1)
         session.onExecute = { stmt: Statement<*> ->
             if (stmt !is BatchStatement) {
-                if (attempts.incrementAndGet() == 1) throw NoNodeAvailableException()
-                succeeded.countDown()
+                attempts.incrementAndGet()
+                throw NoNodeAvailableException()
             }
             FakeEventualResultSet.empty()
         }
@@ -151,25 +148,20 @@ class BatchEngineUpdateForceEventualTest {
 
         engine.updateForce(schema, UfeAccount(UUID.randomUUID(), "a@example.com", "handle1"))
 
-        assertTrue(succeeded.await(2, TimeUnit.SECONDS), "eventual write should have retried and succeeded")
-        assertEquals(2, attempts.get(), "expected exactly one retry (2 attempts total)")
-        assertTrue(listener.failures.isEmpty(), "no failure should be reported once the retry succeeds")
+        awaitTrue { listener.failures.isNotEmpty() }
+        assertEquals(1, attempts.get(), "a non-idempotent write must not be retried")
+        assertEquals(1, listener.failures.size)
     }
 
     @Test
-    fun `updateForceSuspend retries a transient EVENTUAL lookup write failure and succeeds`() = runBlocking {
+    fun `updateForceSuspend never retries a transient EVENTUAL lookup write failure -- lookup insert is not idempotent`() = runBlocking {
         val schema = SchemaRegistry.register(UfeAccount::class)
         val session = FakeEventualCqlSession()
         val attempts = AtomicInteger(0)
-        val succeeded = CountDownLatch(1)
         session.onExecuteAsync = { stmt: Statement<*> ->
             if (stmt !is BatchStatement) {
-                if (attempts.incrementAndGet() == 1) {
-                    CompletableFuture.failedFuture(NoNodeAvailableException())
-                } else {
-                    succeeded.countDown()
-                    CompletableFuture.completedFuture(FakeEventualAsyncResultSet.empty())
-                }
+                attempts.incrementAndGet()
+                CompletableFuture.failedFuture(NoNodeAvailableException())
             } else {
                 CompletableFuture.completedFuture(FakeEventualAsyncResultSet.empty())
             }
@@ -179,9 +171,9 @@ class BatchEngineUpdateForceEventualTest {
 
         engine.updateForceSuspend(schema, UfeAccount(UUID.randomUUID(), "a@example.com", "handle1"))
 
-        assertTrue(succeeded.await(2, TimeUnit.SECONDS), "eventual write should have retried and succeeded")
-        assertEquals(2, attempts.get(), "expected exactly one retry (2 attempts total)")
-        assertTrue(listener.failures.isEmpty(), "no failure should be reported once the retry succeeds")
+        awaitTrue { listener.failures.isNotEmpty() }
+        assertEquals(1, attempts.get(), "a non-idempotent write must not be retried")
+        assertEquals(1, listener.failures.size)
     }
 
     // Note: updateForce's/updateSuspend's EVENTUAL writes now route through the same
@@ -220,19 +212,14 @@ class BatchEngineUpdateForceEventualTest {
     }
 
     @Test
-    fun `updateSuspend retries a transient EVENTUAL lookup write failure and succeeds`() = runBlocking {
+    fun `updateSuspend never retries a transient EVENTUAL lookup write failure -- lookup insert is not idempotent`() = runBlocking {
         val schema = SchemaRegistry.register(UfeAccount::class)
         val session = FakeEventualCqlSession()
         val attempts = AtomicInteger(0)
-        val succeeded = CountDownLatch(1)
         session.onExecuteAsync = { stmt: Statement<*> ->
             if (stmt !is BatchStatement) {
-                if (attempts.incrementAndGet() == 1) {
-                    CompletableFuture.failedFuture(NoNodeAvailableException())
-                } else {
-                    succeeded.countDown()
-                    CompletableFuture.completedFuture(FakeEventualAsyncResultSet.empty())
-                }
+                attempts.incrementAndGet()
+                CompletableFuture.failedFuture(NoNodeAvailableException())
             } else {
                 CompletableFuture.completedFuture(FakeEventualAsyncResultSet.empty())
             }
@@ -244,8 +231,8 @@ class BatchEngineUpdateForceEventualTest {
         val new = old.copy()
         engine.updateSuspend(schema, old, new)
 
-        assertTrue(succeeded.await(2, TimeUnit.SECONDS), "eventual write should have retried and succeeded")
-        assertEquals(2, attempts.get(), "expected exactly one retry (2 attempts total)")
-        assertTrue(listener.failures.isEmpty(), "no failure should be reported once the retry succeeds")
+        awaitTrue { listener.failures.isNotEmpty() }
+        assertEquals(1, attempts.get(), "a non-idempotent write must not be retried")
+        assertEquals(1, listener.failures.size)
     }
 }

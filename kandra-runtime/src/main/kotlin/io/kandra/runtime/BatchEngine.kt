@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.random.Random
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.KProperty1
@@ -126,6 +127,19 @@ class BatchEngine(
 
     // ── Execute with retry ───────────────────────────────────────────────────
 
+    /**
+     * Linear backoff (`backoffMillis * (attempt + 1)`, capped at `maxBackoffMillis`) with optional
+     * "equal jitter" — half the computed delay, plus a random amount up to the other half — so many
+     * concurrent callers retrying the same transient failure don't all retry in lockstep. See
+     * ISS-069 / GH #70 item 5.
+     */
+    private fun jitteredBackoff(attempt: Int): Long {
+        val computed = minOf(retryConfig.backoffMillis * (attempt + 1), retryConfig.maxBackoffMillis)
+        if (!retryConfig.jitter) return computed
+        val half = computed / 2
+        return half + Random.nextLong(half + 1)
+    }
+
     private fun executeWithRetry(
         statement: Statement<*>,
         tableName: String = "unknown",
@@ -147,8 +161,15 @@ class BatchEngine(
                     return rs
                 } catch (e: Throwable) {
                     if (retryConfig.retryOn.none { it.isInstance(e) }) throw e
+                    // Never retry a statement that isn't explicitly marked idempotent — StatementBuilder
+                    // sets this per-statement (see its setIdempotent call sites), and an unset flag on a
+                    // BatchStatement (batches never explicitly mark themselves idempotent) is `null`,
+                    // which fails safe here too. A blind retry of a non-idempotent write (plain INSERT,
+                    // lookup INSERT, collection append/remove/put, counter increment/decrement) risks
+                    // double-applying it server-side. See ISS-055 / GH #56.
+                    if (statement.isIdempotent() != true) throw e
                     lastError = e
-                    val backoff = minOf(retryConfig.backoffMillis * (attempt + 1), retryConfig.maxBackoffMillis)
+                    val backoff = jitteredBackoff(attempt)
                     logger.warn { "Retrying after ${e::class.simpleName} (attempt ${attempt + 1}/${retryConfig.maxAttempts}, backoff ${backoff}ms)" }
                     Thread.sleep(backoff)
                 }
@@ -180,8 +201,10 @@ class BatchEngine(
                     return rs
                 } catch (e: Throwable) {
                     if (retryConfig.retryOn.none { it.isInstance(e) }) throw e
+                    // See the blocking executeWithRetry's identical check for why — ISS-055 / GH #56.
+                    if (statement.isIdempotent() != true) throw e
                     lastError = e
-                    val backoff = minOf(retryConfig.backoffMillis * (attempt + 1), retryConfig.maxBackoffMillis)
+                    val backoff = jitteredBackoff(attempt)
                     logger.warn { "Retrying after ${e::class.simpleName} (attempt ${attempt + 1}/${retryConfig.maxAttempts}, backoff ${backoff}ms)" }
                     delay(backoff)
                 }
@@ -270,7 +293,9 @@ class BatchEngine(
         val stamped = injectTimestamps(schema, entity, isInsert = true)
         val primaryStmt = statementBuilder.insertPrimary(schema, stamped, ifNotExists = true)
             .setSerialConsistencyLevel(DefaultConsistencyLevel.valueOf(serialConsistency.name))
-        val rs = executeWithRetry(primaryStmt, schema.tableName, "saveIfNotExists")
+        // Not executeWithRetry: a blind retry of this LWT risks observing our own prior attempt's
+        // success as a false "already exists" negative. See executeOnce's doc.
+        val rs = executeOnce(primaryStmt, schema.tableName, "saveIfNotExists")
         val applied = rs.one()?.getBoolean("[applied]") ?: false
         if (!applied) return false
         val (batchLookups, eventualLookups) = schema.lookupTables.partition { it.consistency == LookupConsistency.BATCH }
@@ -296,7 +321,7 @@ class BatchEngine(
 
     // ── Update ───────────────────────────────────────────────────────────────
 
-    fun update(schema: TableSchema, old: Any, new: Any, consistency: KandraConsistency? = null) {
+    fun update(schema: TableSchema, old: Any, new: Any, consistency: KandraConsistency? = null, ttlSeconds: Int? = null) {
         validateEntity(new)
         val versionCol = schema.versionColumn
         val stamped = injectTimestamps(schema, new, isInsert = false)
@@ -307,7 +332,7 @@ class BatchEngine(
                 ?: throw KandraQueryException("@Version field '${versionCol.propertyName}' is null")
             val newVersion = incrementVersion(versionCol, oldVersion)
             val stampedWithVersion = injectVersion(schema, stamped, versionCol.propertyName, newVersion)
-            val stmt = buildVersionedUpdateStatement(schema, versionCol, stampedWithVersion, oldVersion, consistency)
+            val stmt = buildVersionedUpdateStatement(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds)
             // Not executeWithRetry: a blind retry of this LWT would risk observing our own prior
             // attempt's success as a false optimistic-lock conflict. See executeOnce's doc.
             val rs = executeOnce(stmt, schema.tableName, "update")
@@ -551,7 +576,9 @@ class BatchEngine(
         val stamped = injectTimestamps(schema, entity, isInsert = true)
         val primaryStmt = statementBuilder.insertPrimarySuspend(schema, stamped, ifNotExists = true)
             .setSerialConsistencyLevel(DefaultConsistencyLevel.valueOf(serialConsistency.name))
-        val rs = executeWithRetrySuspend(primaryStmt)
+        // Not executeWithRetrySuspend: a blind retry of this LWT risks observing our own prior
+        // attempt's success as a false "already exists" negative. See executeOnce's doc.
+        val rs = executeOnceSuspend(primaryStmt, schema.tableName, "saveIfNotExists")
         val applied = rs.currentPage().firstOrNull()?.getBoolean("[applied]") ?: false
         if (!applied) return false
         val (batchLookups, eventualLookups) = schema.lookupTables.partition { it.consistency == LookupConsistency.BATCH }
@@ -575,7 +602,7 @@ class BatchEngine(
         fireEventualSuspend(schema, eventualLookups, stamped)
     }
 
-    suspend fun updateSuspend(schema: TableSchema, old: Any, new: Any, consistency: KandraConsistency? = null) {
+    suspend fun updateSuspend(schema: TableSchema, old: Any, new: Any, consistency: KandraConsistency? = null, ttlSeconds: Int? = null) {
         validateEntity(new)
         val versionCol = schema.versionColumn
         val stamped = injectTimestamps(schema, new, isInsert = false)
@@ -587,7 +614,7 @@ class BatchEngine(
             val newVersion = incrementVersion(versionCol, oldVersion)
             val stampedWithVersion = injectVersion(schema, stamped, versionCol.propertyName, newVersion)
             // Async prepare avoids blocking the dispatcher on the first call for this CQL string
-            val stmt = buildVersionedUpdateStatementSuspend(schema, versionCol, stampedWithVersion, oldVersion, consistency)
+            val stmt = buildVersionedUpdateStatementSuspend(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds)
             // Not executeWithRetrySuspend: a blind retry of this LWT would risk observing our own
             // prior attempt's success as a false optimistic-lock conflict. See executeOnceSuspend's doc.
             val rs = executeOnceSuspend(stmt, schema.tableName, "update")
@@ -698,6 +725,11 @@ class BatchEngine(
         val marker = schema.softDeleteMarkerColumn
         val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter && it != marker }
         val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
+        // Soft-delete builds its CQL directly (not via StatementBuilder), so it needs its own
+        // consistency resolution — previously neither statement here called .setConsistencyLevel(...)
+        // at all, silently downgrading every soft-delete to the driver's LOCAL_ONE default regardless
+        // of configuration (see ISS-061 / GH #62, the same class of gap ISS-053 fixed for batches).
+        val resolvedConsistency = DefaultConsistencyLevel.valueOf(statementBuilder.resolveWriteConsistency(schema, null).name)
         if (nonKeyCols.isNotEmpty()) {
             val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
             val cql = "UPDATE ${schema.tableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
@@ -705,14 +737,14 @@ class BatchEngine(
             val values = mutableListOf<Any?>()
             nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
             keyValues.forEach { values.add(it) }
-            executeWithRetry(prepared.bind(*values.toTypedArray()))
+            executeWithRetry(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency))
         }
         // Marker column is written without TTL — it must outlive the other columns so
         // findActive() can still tell this row apart from a live one after they expire.
         if (marker != null) {
             val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
             val prepared = session.prepare(cql)
-            executeWithRetry(prepared.bind(true, *keyValues.toTypedArray()))
+            executeWithRetry(prepared.bind(true, *keyValues.toTypedArray()).setConsistencyLevel(resolvedConsistency))
         }
         // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
         // until its TTL expires, so it must remain resolvable via its @LookupIndex too, exactly like
@@ -730,6 +762,8 @@ class BatchEngine(
         val marker = schema.softDeleteMarkerColumn
         val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter && it != marker }
         val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
+        // See softDeleteBlocking's identical comment — ISS-061 / GH #62.
+        val resolvedConsistency = DefaultConsistencyLevel.valueOf(statementBuilder.resolveWriteConsistency(schema, null).name)
         if (nonKeyCols.isNotEmpty()) {
             val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
             val cql = "UPDATE ${schema.tableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
@@ -738,12 +772,12 @@ class BatchEngine(
             val values = mutableListOf<Any?>()
             nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
             keyValues.forEach { values.add(it) }
-            executeWithRetrySuspend(prepared.bind(*values.toTypedArray()))
+            executeWithRetrySuspend(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency))
         }
         if (marker != null) {
             val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
             val prepared = session.prepareSuspend(cql)
-            executeWithRetrySuspend(prepared.bind(true, *keyValues.toTypedArray()))
+            executeWithRetrySuspend(prepared.bind(true, *keyValues.toTypedArray()).setConsistencyLevel(resolvedConsistency))
         }
         // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
         // until its TTL expires, so it must remain resolvable via its @LookupIndex too, exactly like
@@ -762,16 +796,21 @@ class BatchEngine(
         versionCol: ColumnSchema,
         stampedWithVersion: Any,
         oldVersion: Any,
-        consistency: KandraConsistency? = null
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null
     ): BoundStatement {
         val nonKeyCols = buildList {
             addAll(schema.columns)
             addAll(schema.lookupTables.map { it.indexColumn })
         }.distinctBy { it.cqlName }.filter { !it.isTransient }
-        
+
         val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
         val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
-        val cql = "UPDATE ${schema.tableName} SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
+        // TTL is a per-cell property: an UPDATE with no USING TTL writes its touched cells with no
+        // expiry, silently clearing the row's TTL on the first update after save() (see ISS-058 / GH #59).
+        val effectiveTtl = ttlSeconds ?: schema.defaultTtl
+        val usingClause = if (effectiveTtl != null) " USING TTL $effectiveTtl" else ""
+        val cql = "UPDATE ${schema.tableName}$usingClause SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
         val prepared = session.prepareSuspend(cql)   // truly async prepare
 
         val entityProps = schema.reflection.propertiesByName
@@ -803,7 +842,8 @@ class BatchEngine(
         versionCol: ColumnSchema,
         stampedWithVersion: Any,
         oldVersion: Any,
-        consistency: KandraConsistency? = null
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null
     ): BoundStatement {
         val nonKeyCols = buildList {
             addAll(schema.columns)
@@ -812,7 +852,11 @@ class BatchEngine(
 
         val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
         val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
-        val cql = "UPDATE ${schema.tableName} SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
+        // TTL is a per-cell property: an UPDATE with no USING TTL writes its touched cells with no
+        // expiry, silently clearing the row's TTL on the first update after save() (see ISS-058 / GH #59).
+        val effectiveTtl = ttlSeconds ?: schema.defaultTtl
+        val usingClause = if (effectiveTtl != null) " USING TTL $effectiveTtl" else ""
+        val cql = "UPDATE ${schema.tableName}$usingClause SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
         val prepared = session.prepare(cql)
 
         val entityProps = schema.reflection.propertiesByName

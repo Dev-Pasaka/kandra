@@ -133,58 +133,54 @@ class BatchEngineEventualWriteTest {
 
     // ── (a) retry on transient error ──────────────────────────────────────────
 
+    // insertLookup is a non-idempotent statement (StatementBuilder marks lookup INSERTs
+    // .setIdempotent(false)), so as of ISS-055 / GH #56 a transient failure on an EVENTUAL lookup
+    // write is no longer blindly retried -- it fails on the first attempt and is reported to the
+    // event listener immediately, same as any other non-idempotent write.
+
     @Test
-    fun `fireEventual retries a transient failure once and eventually succeeds`() {
+    fun `fireEventual never retries a transient failure -- lookup insert is not idempotent`() {
         val session = FakeEventualCqlSession()
         val attempts = AtomicInteger(0)
-        val succeeded = CountDownLatch(1)
         session.onExecute = {
-            if (attempts.incrementAndGet() == 1) throw NoNodeAvailableException()
-            succeeded.countDown()
-            FakeEventualResultSet.empty()
+            attempts.incrementAndGet()
+            throw NoNodeAvailableException()
         }
         val listener = RecordingEventListener()
         val engine = newEngine(session, listener)
 
         invokeFireEventual(engine, listOf(lookupSchema), widget)
 
-        assertTrue(succeeded.await(2, TimeUnit.SECONDS), "eventual write should have retried and succeeded")
-        assertEquals(2, attempts.get(), "expected exactly one retry (2 attempts total)")
-        assertTrue(listener.failures.isEmpty(), "no failure should be reported once the retry succeeds")
+        awaitTrue { listener.failures.isNotEmpty() }
+        assertEquals(1, attempts.get(), "a non-idempotent write must not be retried")
+        assertEquals(1, listener.failures.size)
     }
 
     @Test
-    fun `fireEventualSuspend retries a transient failure once and eventually succeeds`() {
+    fun `fireEventualSuspend never retries a transient failure -- lookup insert is not idempotent`() {
         val session = FakeEventualCqlSession()
         val attempts = AtomicInteger(0)
-        val succeeded = CountDownLatch(1)
         session.onExecuteAsync = {
-            if (attempts.incrementAndGet() == 1) {
-                CompletableFuture.failedFuture(NoNodeAvailableException())
-            } else {
-                succeeded.countDown()
-                CompletableFuture.completedFuture(FakeEventualAsyncResultSet.empty())
-            }
+            attempts.incrementAndGet()
+            CompletableFuture.failedFuture(NoNodeAvailableException())
         }
         val listener = RecordingEventListener()
         val engine = newEngine(session, listener)
 
         invokeFireEventualSuspend(engine, listOf(lookupSchema), widget)
 
-        assertTrue(succeeded.await(2, TimeUnit.SECONDS), "eventual write should have retried and succeeded")
-        assertEquals(2, attempts.get(), "expected exactly one retry (2 attempts total)")
-        assertTrue(listener.failures.isEmpty(), "no failure should be reported once the retry succeeds")
+        awaitTrue { listener.failures.isNotEmpty() }
+        assertEquals(1, attempts.get(), "a non-idempotent write must not be retried")
+        assertEquals(1, listener.failures.size)
     }
 
     @Test
-    fun `fireEventualStatements (update path) retries a transient failure once and eventually succeeds`() {
+    fun `fireEventualStatements (update path) never retries a transient failure -- lookup insert is not idempotent`() {
         val session = FakeEventualCqlSession()
         val attempts = AtomicInteger(0)
-        val succeeded = CountDownLatch(1)
         session.onExecute = {
-            if (attempts.incrementAndGet() == 1) throw NoNodeAvailableException()
-            succeeded.countDown()
-            FakeEventualResultSet.empty()
+            attempts.incrementAndGet()
+            throw NoNodeAvailableException()
         }
         val listener = RecordingEventListener()
         val engine = newEngine(session, listener)
@@ -192,9 +188,9 @@ class BatchEngineEventualWriteTest {
 
         invokeFireEventualStatements(engine, listOf(stmt), widget, "(update)", "widget_by_email")
 
-        assertTrue(succeeded.await(2, TimeUnit.SECONDS), "eventual write should have retried and succeeded")
-        assertEquals(2, attempts.get(), "expected exactly one retry (2 attempts total)")
-        assertTrue(listener.failures.isEmpty(), "no failure should be reported once the retry succeeds")
+        awaitTrue { listener.failures.isNotEmpty() }
+        assertEquals(1, attempts.get(), "a non-idempotent write must not be retried")
+        assertEquals(1, listener.failures.size)
     }
 
     // ── (b) inFlightCount tracking ────────────────────────────────────────────
