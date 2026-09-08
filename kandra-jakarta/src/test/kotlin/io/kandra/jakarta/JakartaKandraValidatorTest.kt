@@ -33,4 +33,26 @@ class JakartaKandraValidatorTest {
     fun `support detection finds Hibernate Validator on the test classpath`() {
         assertTrue(KandraJakartaSupport.isAvailable)
     }
+
+    /**
+     * GH-36 item 1: default-constructed validators for different entity types must share one
+     * `ValidatorFactory` instead of each building (and leaking) their own. Before the fix, the
+     * default parameter called `Validation.buildDefaultValidatorFactory()` directly in the
+     * constructor, so every one of the instances below would have carried a distinct
+     * `ValidatorFactory` — this asserts they're all backed by the exact same one.
+     */
+    @Test
+    fun `default-constructed validators for different entity types share one ValidatorFactory`() {
+        val factoryBefore = JakartaKandraValidator.sharedValidatorFactory
+
+        JakartaKandraValidator<Account>()
+        JakartaKandraValidator<Account>()
+        data class Other(@field:NotBlank val name: String)
+        JakartaKandraValidator<Other>()
+
+        assertTrue(
+            factoryBefore === JakartaKandraValidator.sharedValidatorFactory,
+            "Constructing further validators must not replace or duplicate the shared factory"
+        )
+    }
 }

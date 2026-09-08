@@ -227,14 +227,27 @@ fun DIAware.${entityVar}SuspendRepo(): io.kandra.runtime.repository.KandraSuspen
      * arguments (e.g. `Map<String, String>` -> `kotlin.collections.Map<kotlin.String, kotlin.String>`).
      * A raw qualified name with no arguments is not valid Kotlin for a generic declaration
      * (unlike Java, Kotlin has no raw-type escape hatch), so every type argument must be resolved.
+     *
+     * GH-36: also appends `?` when [KSType.isMarkedNullable] is true, at every nesting level (a
+     * nullable type argument, e.g. `List<String?>`, is resolved the same way since each argument is
+     * itself a recursive [resolveTypeName] call on its own resolved [KSType]) — so `String` and
+     * `String?` properties now generate distinct `KandraColumnRef<kotlin.String>` /
+     * `KandraColumnRef<kotlin.String?>` declarations instead of erasing the difference.
+     *
+     * `KandraColumnRef<T>` (`kandra-runtime`'s `dsl/QueryDsl.kt`) declares `T` with no upper bound,
+     * which defaults to Kotlin's implicit `Any?` — so a nullable type argument like
+     * `KandraColumnRef<kotlin.String?>` is ordinary, valid Kotlin generic syntax. That means full
+     * nullability threading is achievable by rendering it into the type argument itself, with no
+     * change needed to `KandraColumnRef`'s own definition (out of scope for this fix — see ISS-052).
      */
     private fun resolveTypeName(type: KSType): String {
         val qualifiedName = type.declaration.qualifiedName?.asString() ?: "kotlin.Any"
-        if (type.arguments.isEmpty()) return qualifiedName
+        val nullabilitySuffix = if (type.isMarkedNullable) "?" else ""
+        if (type.arguments.isEmpty()) return "$qualifiedName$nullabilitySuffix"
         val argNames = type.arguments.joinToString(", ") { arg ->
             arg.type?.resolve()?.let { resolveTypeName(it) } ?: "*"
         }
-        return "$qualifiedName<$argNames>"
+        return "$qualifiedName<$argNames>$nullabilitySuffix"
     }
 
     /**

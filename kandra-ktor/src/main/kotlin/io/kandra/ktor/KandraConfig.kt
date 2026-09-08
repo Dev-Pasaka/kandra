@@ -188,8 +188,24 @@ class KandraConfig {
     /** When true, large batches are automatically split into chunks of [batchMaxChunkSize]. */
     var batchAutoChunk: Boolean = true
 
-    /** When true, registers a `/kandra/health` route (and Ktor HealthCheck integration if available). */
+    /**
+     * When true, registers a `/kandra/health` route (and Ktor HealthCheck integration if
+     * available).
+     *
+     * This route is unauthenticated by design — Kandra has no notion of application-level auth to
+     * gate it with — so if it's reachable outside a private network, put it behind network-level
+     * access control (e.g. only allow your orchestrator's internal probe network to reach it).
+     */
     var healthCheck: Boolean = true
+
+    /**
+     * How long (in milliseconds) a `/kandra/health` result is cached before the next request
+     * triggers a fresh `SELECT release_version FROM system.local` against the cluster (GH-36).
+     * Without this, a probe storm (misconfigured monitoring, or deliberate abuse if the route is
+     * reachable beyond an orchestrator's internal network) translates 1:1 into real cluster
+     * queries. Set to `0` to disable caching and query on every request.
+     */
+    var healthCheckCacheTtlMs: Long = 500
 
     val pool: PoolConfig = PoolConfig()
     val retry: RetryConfig = RetryConfig()
