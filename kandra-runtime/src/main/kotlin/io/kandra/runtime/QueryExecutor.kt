@@ -23,6 +23,12 @@ import kotlin.reflect.KFunction
 private val logger = KotlinLogging.logger {}
 
 /**
+ * Matches a single-quoted string literal (`'...'`) or a double-quoted identifier immediately
+ * followed by `=` (`"col"=`) anywhere in a CQL string. See [QueryExecutor.checkRawInjectionRisk].
+ */
+private val SUSPICIOUS_LITERAL_PATTERN = Regex("""'[^']*'|"[^"]*"\s*=""")
+
+/**
  * Translates [QueryContext] predicates into CQL SELECT statements and decodes results.
  *
  * Lookup predicates trigger a two-step query:
@@ -135,18 +141,13 @@ class QueryExecutor(
     }
 
     fun raw(cql: String, vararg params: Any?): List<Row> {
-        if (params.isEmpty() && (cql.contains("'") || cql.contains("\"="))) {
-            logger.warn {
-                "raw() called with no parameters but CQL contains string literals. " +
-                "If any literal came from user input this is a CQL injection risk. " +
-                "Use parameterised queries: raw(\"SELECT * FROM t WHERE col = ?\", value)"
-            }
-        }
+        checkRawInjectionRisk(cql, "raw")
         val rs = session.execute(session.prepare(cql).bind(*params))
         return rs.all()
     }
 
     fun rawQuery(query: KandraRawQuery): List<Row> {
+        checkRawInjectionRisk(query.cql, "rawQuery")
         val rs = session.execute(session.prepare(query.cql).bind(*query.params.toTypedArray()))
         return rs.all()
     }
@@ -239,20 +240,46 @@ class QueryExecutor(
     }
 
     suspend fun rawSuspend(cql: String, vararg params: Any?): List<Row> {
-        if (params.isEmpty() && (cql.contains("'") || cql.contains("\"="))) {
-            logger.warn {
-                "raw() called with no parameters but CQL contains string literals. " +
-                "If any literal came from user input this is a CQL injection risk. " +
-                "Use parameterised queries: raw(\"SELECT * FROM t WHERE col = ?\", value)"
-            }
-        }
+        checkRawInjectionRisk(cql, "rawSuspend")
         val prepared = session.prepareSuspend(cql)
         return session.executeSuspendAll(prepared.bind(*params))
     }
 
     suspend fun rawQuerySuspend(query: KandraRawQuery): List<Row> {
+        checkRawInjectionRisk(query.cql, "rawQuerySuspend")
         val prepared = session.prepareSuspend(query.cql)
         return session.executeSuspendAll(prepared.bind(*query.params.toTypedArray()))
+    }
+
+    /**
+     * Heuristic CQL-injection guard shared by [raw]/[rawSuspend]/[rawQuery]/[rawQuerySuspend].
+     *
+     * Fires whenever [cql] appears to have a value spliced directly into the string — a single-quoted
+     * string literal (`'...'`), or a double-quoted identifier immediately followed by `=` (a common
+     * shape for `"col"='value'`-style splicing) — **regardless of whether any parameters are bound**.
+     * Unlike the pre-fix version, one legitimately bound `?` elsewhere in the same CQL string no
+     * longer suppresses this check: an embedded literal is a risk independent of how many other
+     * placeholders happen to be present (GH #32 / ISS-050).
+     *
+     * This remains a heuristic, not a CQL parser: it will not catch quote-less injection shapes (e.g.
+     * a numeric-context tautology or bare keyword injection), and it can false-positive on CQL that
+     * legitimately embeds a fixed, non-user-supplied literal. Absence of the warning is therefore not
+     * proof a query is safe, and presence of it is not proof a query is unsafe — it is a prompt to
+     * double check.
+     *
+     * By default this only logs a WARN. If [DebugConfig.rawQueryStrictMode] is enabled, it throws
+     * [KandraQueryException] instead, so callers who want `raw()`/`rawQuery()` to fail closed can opt in.
+     */
+    private fun checkRawInjectionRisk(cql: String, callerName: String) {
+        if (!SUSPICIOUS_LITERAL_PATTERN.containsMatchIn(cql)) return
+        val message = "$callerName() CQL appears to contain a string literal spliced directly into the " +
+            "query (independent of any other bound parameters). If any of it came from user input this " +
+            "is a CQL injection risk. Use parameterised queries: raw(\"SELECT * FROM t WHERE col = ?\", value)"
+        if (debugConfig.rawQueryStrictMode) {
+            throw KandraQueryException(message)
+        } else {
+            logger.warn { message }
+        }
     }
 
     private fun requireActiveMarker() = schema.softDeleteMarkerColumn
