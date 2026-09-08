@@ -59,6 +59,10 @@ Docker before relying on them.
 | [ISS-046](ISS-046-codegen-content-assertion-tests.md) | `kandra-codegen`'s test suite never asserted on generated file content |
 | [ISS-047](ISS-047-batchengine-safety-bypass.md) | Several write paths bypassed `BatchEngine`'s shutdown gate, retry, and in-flight tracking |
 | [ISS-048](ISS-048-repository-statementbuilder-config-bypass.md) | `KandraRepository`/`KandraSuspendRepository` built their own default `StatementBuilder`, discarding the plugin's configured consistency/codec/debug/cache-size on every read |
+| [ISS-049](ISS-049-suspend-blocking-prepare.md) | Suspend read/write paths still blocked the coroutine dispatcher on prepared-statement cache misses |
+| [ISS-050](ISS-050-raw-query-injection-guard.md) | `raw()`/`rawQuery()`'s CQL-injection guard only fired under a narrow condition and never blocked execution |
+| [ISS-051](ISS-051-columnref-cqlname-validation.md) | `KandraColumnRef`'s public constructor accepted an unvalidated `cqlName` |
+| [ISS-052](ISS-052-jakarta-codegen-health-polish.md) | Assorted polish — Jakarta validator factory reuse, codegen nullability, health endpoint debounce |
 
 ## Closed — not a bug
 
