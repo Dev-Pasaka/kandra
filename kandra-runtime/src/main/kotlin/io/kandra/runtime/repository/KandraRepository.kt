@@ -97,7 +97,7 @@ class KandraRepository<T : Any>(
     }
 
     fun deleteBy(block: QueryContext.() -> Unit) {
-        val entity = executor.find(entityClass, block) ?: return
+        val entity = executor.find(entityClass, block = block) ?: return
         batchEngine.delete(schema, entity)
     }
 
@@ -108,29 +108,30 @@ class KandraRepository<T : Any>(
             ?.also { cache.put(cacheKey, it) }
     }
 
-    fun find(block: QueryContext.() -> Unit): T? {
+    fun find(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? {
         checkNotShuttingDown()
-        return executor.find(entityClass, block)
+        return executor.find(entityClass, consistency, block)
     }
 
-    fun findAll(limit: Int? = null, block: QueryContext.() -> Unit): List<T> {
+    fun findAll(limit: Int? = null, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): List<T> {
         checkNotShuttingDown()
         val fullBlock: QueryContext.() -> Unit = {
             block()
             if (limit != null) limit(limit)
         }
-        return executor.findAll(entityClass, fullBlock)
+        return executor.findAll(entityClass, consistency, fullBlock)
     }
 
     fun findPage(
         pageSize: Int,
         pageToken: String? = null,
+        consistency: KandraConsistency? = null,
         block: QueryContext.() -> Unit = {}
-    ): KandraPage<T> = executor.findPage(entityClass, pageSize, pageToken, block)
+    ): KandraPage<T> = executor.findPage(entityClass, pageSize, pageToken, consistency, block)
 
-    fun exists(block: QueryContext.() -> Unit): Boolean {
+    fun exists(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): Boolean {
         checkNotShuttingDown()
-        return executor.exists(block)
+        return executor.exists(consistency, block)
     }
 
     /**

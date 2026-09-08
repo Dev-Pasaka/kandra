@@ -61,10 +61,11 @@ class ConsistencyStrictModeTest {
     )
 
     /**
-     * `resolveWriteConsistency` is now `internal` (see ISS-053/GH #54, needed by [BatchEngine] to
-     * resolve a `BatchStatement`'s consistency level), so Kotlin mangles its compiled name with a
-     * module-name suffix (`resolveWriteConsistency$kandra_runtime`) to avoid cross-module clashes.
-     * Match by prefix instead of hardcoding the mangled suffix, which is an implementation detail.
+     * `resolveWriteConsistency`/`resolveReadConsistency` are now `internal` (see ISS-053/GH #54 and
+     * ISS-054/GH #55, needed by [BatchEngine]/[QueryExecutor] respectively), so Kotlin mangles their
+     * compiled names with a module-name suffix (e.g. `resolveWriteConsistency$kandra_runtime`) to
+     * avoid cross-module clashes. Match by prefix instead of hardcoding the mangled suffix, which is
+     * an implementation detail.
      */
     private fun resolveWriteMethod(): Method =
         StatementBuilder::class.java.declaredMethods
@@ -72,9 +73,9 @@ class ConsistencyStrictModeTest {
             .apply { isAccessible = true }
 
     private fun resolveReadMethod(): Method =
-        StatementBuilder::class.java.getDeclaredMethod(
-            "resolveReadConsistency", TableSchema::class.java, KandraConsistency::class.java
-        ).apply { isAccessible = true }
+        StatementBuilder::class.java.declaredMethods
+            .single { it.name.startsWith("resolveReadConsistency") }
+            .apply { isAccessible = true }
 
     /** Captures WARN (and everything else) written to stderr by slf4j-simple during [block]. */
     private fun captureStderr(block: () -> Unit): String {

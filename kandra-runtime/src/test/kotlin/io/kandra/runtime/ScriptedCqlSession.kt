@@ -35,6 +35,9 @@ sealed class ExecuteOutcome {
 
     /** Simulate a normal LWT-style response with the driver's synthetic `[applied]` column set to [applied]. */
     data class Applied(val applied: Boolean) : ExecuteOutcome()
+
+    /** Simulate a read returning an arbitrary row list — for `findAll`/`exists`-style read-path tests. */
+    data class Rows(val rows: List<Row>) : ExecuteOutcome()
 }
 
 /**
@@ -86,6 +89,7 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
         return when (val outcome = nextOutcome()) {
             is ExecuteOutcome.Throw -> throw outcome.error
             is ExecuteOutcome.Applied -> FakeAppliedResultSet(outcome.applied)
+            is ExecuteOutcome.Rows -> FakeRowsResultSet(outcome.rows)
         }
     }
 
@@ -98,6 +102,7 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
                 future
             }
             is ExecuteOutcome.Applied -> CompletableFuture.completedFuture(FakeAppliedAsyncResultSet(outcome.applied))
+            is ExecuteOutcome.Rows -> CompletableFuture.completedFuture(FakeRowsAsyncResultSet(outcome.rows))
         }
     }
 
@@ -256,4 +261,28 @@ private class FakeAppliedAsyncResultSet(private val applied: Boolean) : AsyncRes
     override fun getExecutionInfo(): ExecutionInfo = throw UnsupportedOperationException()
     override fun getColumnDefinitions(): ColumnDefinitions = throw UnsupportedOperationException()
     override fun wasApplied(): Boolean = applied
+}
+
+/** Single-page [ResultSet] backed by an arbitrary row list — see [ExecuteOutcome.Rows]. */
+private class FakeRowsResultSet(private val rows: List<Row>) : ResultSet {
+    override fun iterator(): MutableIterator<Row> = rows.toMutableList().iterator()
+    override fun isFullyFetched(): Boolean = true
+    override fun getAvailableWithoutFetching(): Int = rows.size
+    override fun one(): Row? = rows.firstOrNull()
+    override fun all(): List<Row> = rows
+    override fun getExecutionInfo(): ExecutionInfo = throw UnsupportedOperationException()
+    override fun getExecutionInfos(): List<ExecutionInfo> = emptyList()
+    override fun getColumnDefinitions(): ColumnDefinitions = throw UnsupportedOperationException()
+    override fun wasApplied(): Boolean = true
+}
+
+/** Single-page [AsyncResultSet] backed by an arbitrary row list — see [ExecuteOutcome.Rows]. */
+private class FakeRowsAsyncResultSet(private val rows: List<Row>) : AsyncResultSet {
+    override fun currentPage(): Iterable<Row> = rows
+    override fun remaining(): Int = 0
+    override fun hasMorePages(): Boolean = false
+    override fun fetchNextPage(): CompletionStage<AsyncResultSet> = CompletableFuture.completedFuture(FakeRowsAsyncResultSet(emptyList()))
+    override fun getExecutionInfo(): ExecutionInfo = throw UnsupportedOperationException()
+    override fun getColumnDefinitions(): ColumnDefinitions = throw UnsupportedOperationException()
+    override fun wasApplied(): Boolean = true
 }
