@@ -489,7 +489,6 @@ install(Kandra) {
         requestTimeoutMillis          = 5000   // per-query timeout (ms)
         connectionTimeoutMillis       = 3000   // initial connect timeout (ms)
         heartbeatIntervalSeconds      = 30     // keep-alive interval
-        localRequestsPerConnection    = 1024
         maxRequestsPerConnection      = 32768
     }
 }

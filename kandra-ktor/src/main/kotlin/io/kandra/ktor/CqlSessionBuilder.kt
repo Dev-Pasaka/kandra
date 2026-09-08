@@ -1,11 +1,18 @@
 package io.kandra.ktor
 
 import com.datastax.oss.driver.api.core.CqlSession
+import com.datastax.oss.driver.api.core.auth.ProgrammaticPlainTextAuthProvider
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader
+import com.datastax.oss.driver.api.core.loadbalancing.NodeDistance
+import com.datastax.oss.driver.api.core.loadbalancing.NodeDistanceEvaluator
+import com.datastax.oss.driver.api.core.metadata.Node
+import com.datastax.oss.driver.internal.core.loadbalancing.DefaultLoadBalancingPolicy
+import io.kandra.core.CqlNaming
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.exception.KandraAuthException
 import io.kandra.core.exception.KandraQueryException
+import io.kandra.core.exception.KandraSchemaException
 import java.io.FileInputStream
 import java.net.InetSocketAddress
 import java.time.Duration
@@ -14,11 +21,58 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import java.security.KeyStore
 
+/**
+ * Result of [buildCqlSession]: the live [CqlSession] plus, when the session was built with
+ * non-blank credentials, the [ProgrammaticPlainTextAuthProvider] backing it. Kandra.kt's
+ * credential-rotation loop (GH #61) holds onto [liveAuthProvider] and calls
+ * `setUsername`/`setPassword` on it when the configured [io.kandra.core.KandraAuthProvider]
+ * returns refreshed credentials -- the driver picks up the new values on every subsequent
+ * authentication (new connections, reconnects), without a session rebuild.
+ *
+ * [liveAuthProvider] is `null` when the session was opened without auth at all (the configured
+ * provider returned a blank username at startup, e.g. against a cluster with `AllowAllAuthenticator`)
+ * -- there is no live auth to rotate in that case.
+ */
+internal class CqlSessionHandle(
+    val session: CqlSession,
+    val liveAuthProvider: ProgrammaticPlainTextAuthProvider?
+)
+
+/**
+ * Restricts driver-native cross-DC failover (GH #58) to exactly the datacenters listed in
+ * [LoadBalancingConfig.allowedRemoteDcs], in addition to the local datacenter.
+ *
+ * The DataStax driver's own `DefaultLoadBalancingPolicy` (via `BasicLoadBalancingPolicy`) already
+ * supports genuine cross-DC failover through the
+ * `advanced.load-balancing-policy.dc-failover.max-nodes-per-remote-dc` option -- but once that's
+ * greater than zero, the driver considers nodes in *every* remote datacenter uniformly, with no
+ * concept of an allow-list of its own. This evaluator is registered via
+ * `CqlSessionBuilder.withNodeDistanceEvaluator(...)` to fill that gap: any node whose datacenter
+ * isn't the local one and isn't in [allowedRemoteDcs] is forced to [NodeDistance.IGNORED] (the
+ * driver will never open a connection to it), while the local DC and any allowed remote DC defer
+ * to the policy's own default distance computation (`null` return).
+ */
+internal class AllowedDcNodeDistanceEvaluator(
+    private val localDatacenter: String,
+    private val allowedRemoteDcs: Set<String>
+) : NodeDistanceEvaluator {
+    override fun evaluateDistance(node: Node, currentLocalDc: String?): NodeDistance? =
+        evaluate(node.datacenter)
+
+    /** Pure decision logic, split out so it's unit-testable without a real driver [Node]. */
+    internal fun evaluate(nodeDatacenter: String?): NodeDistance? = when {
+        nodeDatacenter == null -> null
+        nodeDatacenter == localDatacenter -> null
+        nodeDatacenter in allowedRemoteDcs -> null
+        else -> NodeDistance.IGNORED
+    }
+}
+
 @OptIn(ExperimentalKandraApi::class)
-internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true): CqlSession {
+internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true): CqlSessionHandle {
     // Validate failover config
     if (config.loadBalancing.dcAwareFailover && config.loadBalancing.allowedRemoteDcs.isEmpty()) {
-        throw io.kandra.core.exception.KandraSchemaException(
+        throw KandraSchemaException(
             "loadBalancing.dcAwareFailover = true but allowedRemoteDcs is empty. " +
             "Provide at least one remote DC or set dcAwareFailover = false."
         )
@@ -26,7 +80,7 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
     if (config.failover.onLocalDcUnavailable == FailoverPolicy.RETRY_REMOTE_DC &&
         config.loadBalancing.allowedRemoteDcs.isEmpty()
     ) {
-        throw io.kandra.core.exception.KandraSchemaException(
+        throw KandraSchemaException(
             "failover.onLocalDcUnavailable = RETRY_REMOTE_DC but loadBalancing.allowedRemoteDcs is empty."
         )
     }
@@ -46,15 +100,36 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
         .withLocalDatacenter(config.localDatacenter)
         .withConfigLoader(configLoader)
 
+    // Multi-DC failover (GH #58): only restrict eligible remote DCs once the driver-native
+    // dc-failover mechanism is actually enabled below (buildDriverConfig) -- i.e. both
+    // dcAwareFailover and failover.onLocalDcUnavailable = RETRY_REMOTE_DC are set, matching the
+    // documented "two knobs must be set together" contract validated above.
+    val dcFailoverEnabled = config.loadBalancing.dcAwareFailover &&
+        config.failover.onLocalDcUnavailable == FailoverPolicy.RETRY_REMOTE_DC
+    if (dcFailoverEnabled) {
+        builder.withNodeDistanceEvaluator(
+            AllowedDcNodeDistanceEvaluator(
+                localDatacenter = config.localDatacenter,
+                allowedRemoteDcs = config.loadBalancing.allowedRemoteDcs.toSet()
+            )
+        )
+    }
+
     if (withKeyspace && config.keyspace.isNotBlank()) {
         builder.withKeyspace(config.keyspace)
     }
 
-    // Auth credentials
+    // Auth credentials -- built as a ProgrammaticPlainTextAuthProvider (rather than the simpler
+    // `withAuthCredentials(...)`) so the reference can be retained and mutated later for live
+    // credential rotation (GH #61). Skipped entirely when the provider returns a blank username,
+    // matching the previous behavior of not attempting auth against a cluster that doesn't require it.
+    var liveAuthProvider: ProgrammaticPlainTextAuthProvider? = null
     try {
         val creds = config.auth.provider.getCredentials()
         if (creds.username.isNotBlank()) {
-            builder.withAuthCredentials(creds.username, creds.password)
+            val provider = ProgrammaticPlainTextAuthProvider(creds.username, creds.password)
+            builder.withAuthProvider(provider)
+            liveAuthProvider = provider
         }
     } catch (e: KandraAuthException) {
         throw e
@@ -73,7 +148,7 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
         }
     }
 
-    return try {
+    val session = try {
         builder.build()
     } catch (e: com.datastax.oss.driver.api.core.AllNodesFailedException) {
         val authErrors = e.errors.values
@@ -89,6 +164,8 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
     } catch (e: com.datastax.oss.driver.api.core.auth.AuthenticationException) {
         throw KandraAuthException("ScyllaDB authentication failed: ${e.message}", e)
     }
+
+    return CqlSessionHandle(session, liveAuthProvider)
 }
 
 private fun buildDriverConfig(config: KandraConfig): DriverConfigLoader {
@@ -97,9 +174,40 @@ private fun buildDriverConfig(config: KandraConfig): DriverConfigLoader {
         .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofMillis(config.pool.requestTimeoutMillis))
         .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, Duration.ofMillis(config.pool.connectionTimeoutMillis))
         .withDuration(DefaultDriverOption.HEARTBEAT_INTERVAL, Duration.ofSeconds(config.pool.heartbeatIntervalSeconds.toLong()))
+        // Explicit, rather than relying on this being the driver's own default -- makes the link
+        // between loadBalancing/failover config below and actual driver routing behavior grep-able
+        // (GH #58: previously nothing in this file ever called .withLoadBalancingPolicy(...) or set
+        // LOAD_BALANCING_POLICY_CLASS at all).
+        .withClass(DefaultDriverOption.LOAD_BALANCING_POLICY_CLASS, DefaultLoadBalancingPolicy::class.java)
 
     if (config.ssl.enabled) {
         builder.withBoolean(DefaultDriverOption.SSL_HOSTNAME_VALIDATION, config.ssl.hostnameVerification)
+    }
+
+    // Multi-DC failover (GH #58). The driver's DefaultLoadBalancingPolicy natively supports
+    // cross-DC failover via these two advanced options; previously neither was ever set here, so
+    // `loadBalancing.dcAwareFailover = true` + `failover.onLocalDcUnavailable = RETRY_REMOTE_DC`
+    // were validated at startup (buildCqlSession, above) but had zero effect on request routing --
+    // a real local-DC outage behaved identically to FailoverPolicy.THROW. `allowedRemoteDcs` itself
+    // is enforced by the AllowedDcNodeDistanceEvaluator registered in buildCqlSession, since the
+    // driver's dc-failover options alone apply to every remote DC uniformly.
+    //
+    // allow-for-local-consistency-levels is forced true whenever failover is enabled: Kandra's own
+    // consistency defaults (LOCAL_ONE/LOCAL_QUORUM/LOCAL_SERIAL) are all "local" levels, so leaving
+    // this at the driver's own default (false) would make the failover configured above a no-op for
+    // the vast majority of Kandra's traffic.
+    if (config.loadBalancing.dcAwareFailover &&
+        config.failover.onLocalDcUnavailable == FailoverPolicy.RETRY_REMOTE_DC
+    ) {
+        builder
+            .withInt(
+                DefaultDriverOption.LOAD_BALANCING_DC_FAILOVER_MAX_NODES_PER_REMOTE_DC,
+                config.loadBalancing.maxRemoteNodesPerRemoteDc
+            )
+            .withBoolean(
+                DefaultDriverOption.LOAD_BALANCING_DC_FAILOVER_ALLOW_FOR_LOCAL_CONSISTENCY_LEVELS,
+                true
+            )
     }
 
     if (config.speculativeExecution.enabled) {
@@ -160,13 +268,38 @@ private fun buildSslContext(ssl: SslConfig): SSLContext {
     }
 }
 
-internal fun keyspaceDdl(keyspace: String, strategy: ReplicationStrategy): String = when (strategy) {
-    is ReplicationStrategy.SimpleStrategy ->
-        "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-            "{'class': 'SimpleStrategy', 'replication_factor': ${strategy.replicationFactor}}"
-    is ReplicationStrategy.NetworkTopologyStrategy -> {
-        val dcMap = strategy.dcReplicationMap.entries.joinToString(", ") { (dc, rf) -> "'$dc': $rf" }
-        "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-            "{'class': 'NetworkTopologyStrategy', $dcMap}"
+/**
+ * Renders the `CREATE KEYSPACE IF NOT EXISTS` DDL for [keyspace]/[strategy]. Both [keyspace] and,
+ * for [ReplicationStrategy.NetworkTopologyStrategy], every key of `dcReplicationMap` are validated
+ * as CQL identifiers (GH #65) before being spliced into the statement -- the same
+ * `CqlNaming.isValidIdentifier` check `SchemaRegistry` applies to table/column names. `keyspace` is
+ * already validated once at plugin-install time (`Kandra.kt`); this second check is defense in
+ * depth for any other caller of this internal function.
+ */
+internal fun keyspaceDdl(keyspace: String, strategy: ReplicationStrategy): String {
+    if (!CqlNaming.isValidIdentifier(keyspace)) {
+        throw KandraSchemaException(
+            "Kandra: keyspace '$keyspace' is not a valid CQL identifier. Identifiers must start " +
+            "with a letter or underscore and contain only letters, digits, and underscores."
+        )
+    }
+    return when (strategy) {
+        is ReplicationStrategy.SimpleStrategy ->
+            "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
+                "{'class': 'SimpleStrategy', 'replication_factor': ${strategy.replicationFactor}}"
+        is ReplicationStrategy.NetworkTopologyStrategy -> {
+            strategy.dcReplicationMap.keys.forEach { dc ->
+                if (!CqlNaming.isValidIdentifier(dc)) {
+                    throw KandraSchemaException(
+                        "Kandra: replicationStrategy datacenter name '$dc' is not a valid CQL " +
+                        "identifier. Identifiers must start with a letter or underscore and contain " +
+                        "only letters, digits, and underscores."
+                    )
+                }
+            }
+            val dcMap = strategy.dcReplicationMap.entries.joinToString(", ") { (dc, rf) -> "'$dc': $rf" }
+            "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
+                "{'class': 'NetworkTopologyStrategy', $dcMap}"
+        }
     }
 }

@@ -21,10 +21,6 @@ real ScyllaDB cluster. None of these have fixes yet.
 | [ISS-061](ISS-061-softdelete-ignores-consistency.md) | [#62](https://github.com/Dev-Pasaka/kandra/issues/62) | Medium | Soft-delete writes bypass the configured consistency level |
 | [ISS-069](ISS-069-assorted-low-severity-findings.md) | [#70](https://github.com/Dev-Pasaka/kandra/issues/70) | Low | Assorted lower-severity findings — items 1 (`@Sensitive` redaction) and 6 (list-column warning) fixed; items 2-5 open (warn-only injection guard default, RF>3 read-your-writes gap, no shard-aware driver/pool tuning, retry backoff lacks jitter) |
 
-Also in progress, in isolated worktrees: [ISS-057](ISS-057-multidc-failover-inert.md) (#58),
-[ISS-060](ISS-060-credential-rotation-noop.md) (#61), [ISS-064](ISS-064-keyspace-dc-identifiers-unvalidated.md) (#65),
-[ISS-068](ISS-068-localrequestsperconnection-dead-config.md) (#69) — bundled as [PR #75](https://github.com/Dev-Pasaka/kandra/pull/75).
-
 ## Fixed — pending live-cluster verification
 
 These compile and pass unit tests, but haven't yet been run against a real Testcontainers-backed
@@ -80,11 +76,15 @@ Docker before relying on them.
 | [ISS-052](ISS-052-jakarta-codegen-health-polish.md) | Assorted polish — Jakarta validator factory reuse, codegen nullability, health endpoint debounce |
 | [ISS-053](ISS-053-batch-and-versioned-update-ignore-consistency.md) | `LOGGED BATCH` writes and `@Version` LWT updates ignored the configured consistency level entirely |
 | [ISS-054](ISS-054-generic-reads-ignore-read-consistency.md) | Generic `find`/`findAll`/`findPage` reads ignored configured read consistency, with no override |
+| [ISS-057](ISS-057-multidc-failover-inert.md) | Multi-DC failover/load-balancing config was validated and documented, but never wired into the driver |
+| [ISS-060](ISS-060-credential-rotation-noop.md) | Credential rotation (`auth.refreshIntervalSeconds`) refreshed credentials but never applied them to the live session |
 | [ISS-062](ISS-062-migration-checksum-false-positive-risk.md) | `KandraMigration.checksum()`'s bytecode hash risked false-positive startup failures after cosmetic recompilation |
 | [ISS-063](ISS-063-migration-claim-staleness-clock-skew.md) | Migration claim staleness was computed from wall-clock timestamps across potentially skewed app instances |
+| [ISS-064](ISS-064-keyspace-dc-identifiers-unvalidated.md) | Keyspace and DC-name identifiers were spliced unvalidated into CQL/DDL |
 | [ISS-065](ISS-065-credentials-tostring-leak.md) | `KandraCredentials`' auto-generated `toString()` would print the plaintext password |
 | [ISS-066](ISS-066-findall-no-row-cap.md) | `findAll`/`exists`-style reads had no default row cap — memory-exhaustion vector |
 | [ISS-067](ISS-067-decodeentity-rebuilds-column-map.md) | `QueryExecutor.decodeEntity` rebuilt the full column map on every row decoded instead of caching it |
+| [ISS-068](ISS-068-localrequestsperconnection-dead-config.md) | `PoolConfig.localRequestsPerConnection` was dead configuration — removed |
 
 ## Closed — not a bug
 

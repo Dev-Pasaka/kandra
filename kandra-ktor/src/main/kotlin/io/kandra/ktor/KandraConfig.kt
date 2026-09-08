@@ -31,7 +31,12 @@ sealed class ReplicationStrategy {
 }
 
 class PoolConfig {
-    var localRequestsPerConnection: Int = 1024
+    // GH #69: `localRequestsPerConnection` was previously declared here but never read anywhere in
+    // CqlSessionBuilder -- setting it had zero effect. The DataStax driver (4.17.0) has no
+    // local/remote split for per-connection request limits (only CONNECTION_MAX_REQUESTS, which
+    // maxRequestsPerConnection below already maps to; the driver's local/remote distinction only
+    // applies to connection *pool size*, not per-connection request count), so there was no faithful
+    // way to wire it -- removed rather than left as a config value that silently does nothing.
     var maxRequestsPerConnection: Int = 32768
     var heartbeatIntervalSeconds: Int = 30
     /** How long to wait for a CQL query response. Default is 5 000 ms (driver default is 2 000 ms). */
@@ -75,30 +80,68 @@ class SslConfig {
     var cipherSuites: List<String>? = null
 }
 
-/** Load balancing policy for multi-datacenter deployments. */
+/**
+ * Load balancing policy for multi-datacenter deployments. [dcAwareFailover], [allowedRemoteDcs],
+ * and [FailoverConfig.onLocalDcUnavailable] are wired into the DataStax driver's own
+ * `DefaultLoadBalancingPolicy` (GH #58) -- setting `dcAwareFailover = true` together with
+ * `failover { onLocalDcUnavailable = FailoverPolicy.RETRY_REMOTE_DC }` genuinely enables the
+ * driver's cross-DC failover mechanism, restricted to the datacenters listed in [allowedRemoteDcs].
+ * Setting only one of the two leaves failover inert, by design (see [FailoverPolicy]).
+ */
 class LoadBalancingConfig {
-    /** Route queries to the token owner — avoids coordinator hop (always recommended). */
+    /**
+     * Route queries to the token owner — avoids coordinator hop (always recommended). The driver's
+     * `DefaultLoadBalancingPolicy` is token-aware unconditionally by design (there is no driver-level
+     * toggle to disable it without switching to a materially different policy), so this flag
+     * currently only documents the recommended posture rather than being read anywhere.
+     */
     var tokenAware: Boolean = true
 
-    /** Allow the driver to use replicas in remote DCs when the local DC is unavailable. */
+    /**
+     * Allow the driver to use replicas in remote DCs when the local DC is unavailable. Must be
+     * combined with `failover { onLocalDcUnavailable = FailoverPolicy.RETRY_REMOTE_DC }` to actually
+     * take effect -- see [FailoverPolicy].
+     */
     var dcAwareFailover: Boolean = false
 
-    /** DCs to fail over to, in priority order. Required when [dcAwareFailover] = true. */
+    /**
+     * DCs eligible for failover. Required (non-empty) when [dcAwareFailover] = true. Enforced as an
+     * allow-list via a driver `NodeDistanceEvaluator` (GH #58) -- every other remote DC is kept at
+     * `NodeDistance.IGNORED` and never connected to. The driver does not expose a priority/ordering
+     * mechanism across multiple allowed remote DCs; all of them are equally eligible once enabled.
+     */
     var allowedRemoteDcs: List<String> = emptyList()
 
-    /** Maximum number of remote replicas used per remote DC during failover. */
+    /**
+     * Maximum number of remote replicas used per remote DC during failover. Wired directly to the
+     * driver's `advanced.load-balancing-policy.dc-failover.max-nodes-per-remote-dc` option (GH #58)
+     * whenever failover is actually enabled (see [FailoverPolicy]).
+     */
     var maxRemoteNodesPerRemoteDc: Int = 1
 }
 
 enum class FailoverPolicy {
     /** Throw [com.datastax.oss.driver.api.core.NoNodeAvailableException] immediately (default). */
     THROW,
-    /** Retry against [LoadBalancingConfig.allowedRemoteDcs] in order. */
+    /**
+     * Enables the driver's native cross-DC failover (GH #58) — requires
+     * [LoadBalancingConfig.dcAwareFailover] = true and a non-empty
+     * [LoadBalancingConfig.allowedRemoteDcs]. The driver includes nodes from every DC in
+     * [LoadBalancingConfig.allowedRemoteDcs] in its query plans once local-DC nodes are exhausted;
+     * there is no ordering/priority across multiple allowed DCs.
+     */
     RETRY_REMOTE_DC
 }
 
 class FailoverConfig {
     var onLocalDcUnavailable: FailoverPolicy = FailoverPolicy.THROW
+
+    /**
+     * Declared for future use. The driver's native dc-failover mechanism (used to implement
+     * [FailoverPolicy.RETRY_REMOTE_DC], GH #58) has no artificial pre-failover delay concept —
+     * once local-DC nodes are exhausted for a request, eligible remote-DC nodes are used
+     * immediately — so this value is not currently read anywhere.
+     */
     var remoteRetryDelayMs: Long = 50
 }
 
