@@ -4,8 +4,15 @@ import io.kandra.core.exception.KandraAuthException
 
 /**
  * ScyllaDB credentials returned by a [KandraAuthProvider].
+ *
+ * [toString] deliberately redacts [password] so that logging, debugger watches, or an
+ * exception message that interpolates this object never leaks the plaintext value.
+ * [equals]/[hashCode] remain the data class defaults (they still consider [password]) so
+ * legitimate equality comparisons continue to work correctly.
  */
-data class KandraCredentials(val username: String, val password: String)
+data class KandraCredentials(val username: String, val password: String) {
+    override fun toString(): String = "KandraCredentials(username=$username, password=***)"
+}
 
 /**
  * Supplies credentials to the Kandra session builder.
