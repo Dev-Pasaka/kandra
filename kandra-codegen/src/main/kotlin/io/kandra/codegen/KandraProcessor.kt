@@ -10,6 +10,7 @@ import com.google.devtools.ksp.processing.SymbolProcessorEnvironment
 import com.google.devtools.ksp.processing.SymbolProcessorProvider
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSFile
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
 import com.google.devtools.ksp.validate
@@ -113,6 +114,23 @@ class KandraProcessor(
         val objectName = "${className}Table"
         val qualifiedName = classDecl.qualifiedName?.asString() ?: "$packageName.$className"
 
+        // GH-109 item 1: containingFile is null for a declaration with no source attached in this
+        // KSP round (e.g. a @ScyllaTable class surfaced only from a compiled binary dependency).
+        // Dependencies(...) below requires a non-null KSFile, so this used to be an unguarded `!!`
+        // — a raw NullPointerException with no Kandra context. Fail with a clear diagnostic instead
+        // and skip generation for this entity, rather than crashing the whole build.
+        val containingFile = classDecl.containingFile
+        if (containingFile == null) {
+            logger.error(
+                "Kandra codegen: cannot generate a table for '$qualifiedName' — no source file is " +
+                    "attached to this declaration in the current compilation round (this typically " +
+                    "means @ScyllaTable was found on a class supplied only via a compiled binary " +
+                    "dependency, which codegen cannot generate a table for).",
+                classDecl
+            )
+            return
+        }
+
         // GH-104: same-simple-name collision guard. Two distinct entities that compute the same
         // "$packageName/$objectName" (e.g. two differently-nested classes both named "User" in the
         // same package) would otherwise both reach codeGenerator.createNewFile below, and KSP's own
@@ -159,7 +177,7 @@ object $objectName : io.kandra.runtime.dsl.KandraTable<$className> {
 """.trimIndent()
 
         val file = codeGenerator.createNewFile(
-            dependencies = Dependencies(aggregating = false, classDecl.containingFile!!),
+            dependencies = Dependencies(aggregating = false, containingFile),
             packageName = packageName,
             fileName = objectName
         )
@@ -169,10 +187,10 @@ object $objectName : io.kandra.runtime.dsl.KandraTable<$className> {
         logger.info("Kandra codegen: generated $objectName for $className")
 
         if (koinPresent) {
-            emitKoinAccessors(classDecl, packageName, className)
+            emitKoinAccessors(packageName, className, containingFile)
         }
         if (kodeinPresent) {
-            emitKodeinAccessors(classDecl, packageName, className)
+            emitKodeinAccessors(packageName, className, containingFile)
         }
     }
 
@@ -186,7 +204,11 @@ object $objectName : io.kandra.runtime.dsl.KandraTable<$className> {
      * raw fully-qualified strings — this module has no compile dependency on `koin-core`, only the
      * *consuming* module (where this file lands and is compiled) does.
      */
-    private fun emitKoinAccessors(classDecl: KSClassDeclaration, packageName: String, className: String) {
+    private fun emitKoinAccessors(
+        packageName: String,
+        className: String,
+        containingFile: KSFile
+    ) {
         val entityVar = className.decapitalize()
         val fileName = "${className}KoinDi"
 
@@ -208,7 +230,7 @@ fun KoinComponent.${entityVar}SuspendRepo(): io.kandra.runtime.repository.Kandra
 """.trimIndent()
 
         val file = codeGenerator.createNewFile(
-            dependencies = Dependencies(aggregating = false, classDecl.containingFile!!),
+            dependencies = Dependencies(aggregating = false, containingFile),
             packageName = packageName,
             fileName = fileName
         )
@@ -231,7 +253,11 @@ fun KoinComponent.${entityVar}SuspendRepo(): io.kandra.runtime.repository.Kandra
      * Referenced Kodein types are spliced in as raw fully-qualified strings — this module has no
      * compile dependency on `kodein-di`, only the *consuming* module does.
      */
-    private fun emitKodeinAccessors(classDecl: KSClassDeclaration, packageName: String, className: String) {
+    private fun emitKodeinAccessors(
+        packageName: String,
+        className: String,
+        containingFile: KSFile
+    ) {
         val entityVar = className.decapitalize()
         val fileName = "${className}KodeinDi"
 
@@ -253,7 +279,7 @@ fun DIAware.${entityVar}SuspendRepo(): io.kandra.runtime.repository.KandraSuspen
 """.trimIndent()
 
         val file = codeGenerator.createNewFile(
-            dependencies = Dependencies(aggregating = false, classDecl.containingFile!!),
+            dependencies = Dependencies(aggregating = false, containingFile),
             packageName = packageName,
             fileName = fileName
         )
