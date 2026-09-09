@@ -3,7 +3,12 @@ package io.kandra.ktor
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption
 import com.datastax.oss.driver.internal.core.metadata.DefaultEndPoint
 import com.datastax.oss.driver.internal.core.session.throttling.ConcurrencyLimitingRequestThrottler
+import io.kandra.core.ExperimentalKandraApi
+import io.kandra.core.KandraAuthProvider
+import io.kandra.core.KandraCredentials
 import io.kandra.core.exception.KandraSchemaException
+import java.io.ByteArrayOutputStream
+import java.io.PrintStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import javax.net.ssl.SSLContext
@@ -394,5 +399,54 @@ class CqlSessionBuilderTest {
         }
         val ex = assertThrows(Exception::class.java) { buildCqlSession(config) }
         assertFalse(ex is KandraSchemaException, "pool sizes of 1 must pass validation and fail only on connection")
+    }
+
+    // ── Silent skip-auth on blank credentials (GH #107) ───────────────────────
+
+    /** Captures WARN (and everything else) written to stderr by slf4j-simple during [block]. */
+    private fun captureStderr(block: () -> Unit): String {
+        val original = System.err
+        val buffer = ByteArrayOutputStream()
+        System.setErr(PrintStream(buffer))
+        try {
+            block()
+        } finally {
+            System.setErr(original)
+        }
+        return buffer.toString()
+    }
+
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `buildCqlSession logs a WARN when auth provider returns a blank username`() {
+        val config = KandraConfig().apply {
+            contactPoints = "localhost:19999"
+            localDatacenter = "dc1"
+            auth { provider = KandraAuthProvider { KandraCredentials("", "") } }
+        }
+        val output = captureStderr {
+            assertThrows(Exception::class.java) { buildCqlSession(config) }
+        }
+        assertTrue(
+            output.contains("WITHOUT authentication"),
+            "Expected a no-auth WARN naming the blank-credentials condition, got: $output"
+        )
+    }
+
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `buildCqlSession does not warn about blank credentials when a real username is provided`() {
+        val config = KandraConfig().apply {
+            contactPoints = "localhost:19999"
+            localDatacenter = "dc1"
+            auth { provider = KandraAuthProvider { KandraCredentials("scylla", "pw") } }
+        }
+        val output = captureStderr {
+            assertThrows(Exception::class.java) { buildCqlSession(config) }
+        }
+        assertFalse(
+            output.contains("WITHOUT authentication"),
+            "Should not warn about no-auth when a real username was supplied, got: $output"
+        )
     }
 }

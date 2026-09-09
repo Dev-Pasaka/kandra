@@ -5,14 +5,33 @@ import io.kandra.core.exception.KandraSchemaException
 
 /**
  * Represents a single WHERE clause predicate in a Kandra query.
+ *
+ * GH #107: [column] is validated against [CqlNaming.isValidIdentifier] in [requireValidColumn],
+ * called from every subclass's `init` block -- the same basic CQL-identifier-shape check
+ * [KandraColumnRef] already applies to [KandraColumnRef.cqlName] (GH #33). Before this, the only
+ * thing preventing an injected column string from reaching `QueryExecutor.buildWhere()` (which
+ * splices `pred.column` unparameterized) was that [QueryContext.predicates] happens to be
+ * `internal` to this module -- an access-control accident, not an invariant of the predicate type
+ * itself. Any future public API surfacing `List<KandraPredicate>` would have silently reopened the
+ * hole #51/ISS-051 closed for `KandraColumnRef`; validating at construction closes it regardless of
+ * how a `KandraPredicate` instance is obtained.
  */
 sealed class KandraPredicate {
-    data class Eq(val column: String, val value: Any?) : KandraPredicate()
-    data class Gt(val column: String, val value: Any?) : KandraPredicate()
-    data class Gte(val column: String, val value: Any?) : KandraPredicate()
-    data class Lt(val column: String, val value: Any?) : KandraPredicate()
-    data class Lte(val column: String, val value: Any?) : KandraPredicate()
-    data class In(val column: String, val values: List<Any?>) : KandraPredicate()
+    protected fun requireValidColumn(column: String) {
+        if (!CqlNaming.isValidIdentifier(column)) {
+            throw KandraSchemaException(
+                "Invalid CQL column name '$column' — column names must be non-blank, start with " +
+                    "a letter or underscore, and contain only letters, digits, and underscores."
+            )
+        }
+    }
+
+    data class Eq(val column: String, val value: Any?) : KandraPredicate() { init { requireValidColumn(column) } }
+    data class Gt(val column: String, val value: Any?) : KandraPredicate() { init { requireValidColumn(column) } }
+    data class Gte(val column: String, val value: Any?) : KandraPredicate() { init { requireValidColumn(column) } }
+    data class Lt(val column: String, val value: Any?) : KandraPredicate() { init { requireValidColumn(column) } }
+    data class Lte(val column: String, val value: Any?) : KandraPredicate() { init { requireValidColumn(column) } }
+    data class In(val column: String, val values: List<Any?>) : KandraPredicate() { init { requireValidColumn(column) } }
 }
 
 /**
