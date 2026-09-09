@@ -187,6 +187,30 @@ val Kandra: ApplicationPlugin<KandraConfig> =
 
                         entityColumns.forEach { col ->
                             if (col.cqlName !in existingColumns) {
+                                // GH #92/ISS-079: CQL has no way to ALTER TABLE ADD a column into an
+                                // existing primary key. A missing partition/clustering key column
+                                // means the entity's key shape changed incompatibly since the table
+                                // was created (e.g. a new @ClusteringKey added for versioning) --
+                                // silently emitting a plain ALTER TABLE ADD would create it as a
+                                // regular column while Kandra keeps treating it as part of row
+                                // identity, so two logically-distinct rows collapse onto the same
+                                // physical row and silently overwrite each other's other columns.
+                                // This always needs a manual, explicit migration -- never a safe
+                                // auto-migration -- so refuse loudly instead of corrupting data.
+                                if (col.isPartitionKey || col.clusteringKey != null) {
+                                    throw KandraSchemaException(
+                                        "Kandra AUTO_MIGRATE: entity '${schema.entityClass.simpleName}' declares " +
+                                        "'${col.cqlName}' as a ${if (col.isPartitionKey) "partition" else "clustering"} " +
+                                        "key, but table '${schema.tableName}' does not have it as part of its " +
+                                        "primary key (or at all). CQL cannot ALTER TABLE ADD a column into an " +
+                                        "existing primary key -- ALTER TABLE ${schema.tableName} ADD " +
+                                        "${col.cqlName} would create it as a plain column, silently mapping " +
+                                        "distinct logical rows onto the same physical row. This requires a " +
+                                        "manual migration (e.g. via kandra-migrate: create a new table with the " +
+                                        "desired key and backfill, or recreate this table if the data can be " +
+                                        "discarded) -- refusing to auto-migrate."
+                                    )
+                                }
                                 val alterDdl = DdlGenerator.alterTableAddColumn(schema, col)
                                 session.execute(alterDdl)
                                 logger.info { "Kandra AUTO_MIGRATE: added column '${col.cqlName}' to '${schema.tableName}'" }

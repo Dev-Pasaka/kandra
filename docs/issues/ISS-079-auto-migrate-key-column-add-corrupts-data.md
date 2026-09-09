@@ -1,6 +1,6 @@
 # ISS-079: AUTO_MIGRATE can silently ALTER TABLE ADD a missing partition/clustering key as a plain column, causing row collisions
 
-**Status:** Open
+**Status:** Fixed
 
 ## Problem
 
@@ -25,3 +25,29 @@ In the diff loop, check whether a missing column is a partition/clustering key (
 `kandra-ktor/src/main/kotlin/io/kandra/ktor/Kandra.kt`, `kandra-core`'s `DdlGenerator`
 
 Filed from a critical post-fix audit (2026-09-09) ahead of experimental multi-DC cluster testing.
+
+## Fix
+
+Implemented exactly the "Suggested fix" above, in the `entityColumns.forEach` block of
+`SchemaMode.AUTO_MIGRATE`'s column-diff loop (`Kandra.kt`). For a column missing from
+`system_schema.columns`, the loop now checks `col.isPartitionKey || col.clusteringKey != null`
+*before* generating/executing `alterTableAddColumn`:
+
+- If the missing column is a partition or clustering key, it throws `KandraSchemaException`
+  naming the offending column, its key role, and the table -- with guidance to use a manual
+  migration (e.g. `kandra-migrate`: create a new table with the desired key and backfill, or
+  recreate the table if the data can be discarded) instead. Nothing is altered.
+- Otherwise, behavior is unchanged: a plain (non-key) missing column still gets a normal
+  `ALTER TABLE ADD`, logged at INFO exactly as before.
+
+This throw happens inside the `claimAndRunDdlBootstrap` claim's `action()` lambda -- the existing
+`runClaimedDdlAction` exception path (releases the claim via the fenced `IF holder = ?` CAS added
+for #91, then rethrows) already handles it correctly with no further change needed there.
+
+Verified with a new `AutoMigrateKeyColumnGuardTest` (`kandra-ktor`, real Testcontainers cluster):
+- A new partition key column and a new clustering key column, each added to an entity whose table
+  already exists, both cause `install(Kandra)` under `AUTO_MIGRATE` to throw `KandraSchemaException`
+  naming the column and its key role -- and the column is confirmed absent from
+  `system_schema.columns` afterward (never silently added as a plain column).
+- A new plain (non-key) column added the same way still gets added by `AUTO_MIGRATE` exactly as
+  before -- the fix only rejects key columns, not the whole column-diff feature.
