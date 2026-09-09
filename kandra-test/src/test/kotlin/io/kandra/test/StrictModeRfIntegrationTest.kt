@@ -1,5 +1,6 @@
 package io.kandra.test
 
+import com.datastax.oss.driver.api.core.CqlSession
 import io.kandra.core.InternalKandraApi
 import io.kandra.core.schema.EntityReflection
 import io.kandra.core.schema.TableSchema
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Test
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import java.lang.reflect.Method
+import java.util.UUID
 import kotlin.reflect.full.memberFunctions
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.full.primaryConstructor
@@ -125,5 +127,61 @@ class StrictModeRfIntegrationTest {
         }
 
         assertFalse(output.contains("strictMode"), "expected no WARN when strictMode is disabled, got: $output")
+    }
+
+    // ── GH #98 / ISS-085: NetworkTopologyStrategy RF math for LOCAL_* levels ───
+    //
+    // A genuine multi-DC false-positive repro (RF=1 per DC across several real DCs) needs actual
+    // multi-DC topology to test against -- Cassandra's CREATE KEYSPACE validates that every DC named
+    // in a NetworkTopologyStrategy replication map actually exists in the cluster, which this
+    // single-node Testcontainers container can't provide (confirmed empirically: a replication map
+    // referencing a second, non-existent DC is rejected with InvalidConfigurationInQueryException).
+    // The exact-vs-fallback RF math itself (StatementBuilder.replicationFactorOrNull) is covered by
+    // fully deterministic unit tests against a scripted multi-DC replication map instead, in
+    // kandra-runtime's StrictModeRfMultiDcMathTest -- no real cluster (single- or multi-DC) required
+    // there. This test only proves NetworkTopologyStrategy in general (a single, real DC) resolves
+    // correctly end-to-end through a real driver session, which SimpleStrategy alone didn't cover.
+
+    @Test
+    fun `strict mode resolves RF correctly on a single-DC NetworkTopologyStrategy keyspace`() {
+        val keyspace = "kandra_test_nts_${UUID.randomUUID().toString().replace("-", "")}"
+        val container = KandraTestcontainers.container
+        val localDc = container.localDatacenter
+
+        val bootstrapSession = CqlSession.builder()
+            .addContactPoint(container.contactPoint)
+            .withLocalDatacenter(localDc)
+            .build()
+        bootstrapSession.execute(
+            "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
+            "{'class': 'NetworkTopologyStrategy', '$localDc': 3}"
+        )
+        bootstrapSession.close()
+
+        val session = CqlSession.builder()
+            .addContactPoint(container.contactPoint)
+            .withLocalDatacenter(localDc)
+            .withKeyspace(keyspace)
+            .build()
+        try {
+            val builder = StatementBuilder(
+                session = session,
+                consistencyConfig = ConsistencyConfig().apply { strictMode = true }
+            )
+
+            val output = captureStderr {
+                resolveWriteMethod().invoke(builder, schema(), null)
+            }
+
+            // Local RF=3: R=1 (LOCAL_ONE) + W=2 (LOCAL_QUORUM of 3) = 3, not > 3 -- warns, exactly
+            // like the equivalent SimpleStrategy RF=3 case above, proving the exact-local-DC-match
+            // branch of replicationFactorOrNull resolves the same real driver-reported RF correctly
+            // for NetworkTopologyStrategy.
+            assertTrue(output.contains("strictMode"), "expected RF strict-mode WARN, got: $output")
+            assertTrue(output.contains("replication factor 3"), "expected WARN to mention RF=3, got: $output")
+        } finally {
+            runCatching { session.execute("DROP KEYSPACE IF EXISTS $keyspace") }
+            runCatching { session.close() }
+        }
     }
 }

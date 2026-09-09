@@ -2,6 +2,7 @@ package io.kandra.runtime
 
 import com.datastax.oss.driver.api.core.CqlSession
 import com.datastax.oss.driver.api.core.DefaultConsistencyLevel
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption
 import com.datastax.oss.driver.api.core.cql.BoundStatement
 import com.datastax.oss.driver.api.core.cql.PreparedStatement
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -143,9 +144,15 @@ class StatementBuilder(
      */
     private fun warnIfRfConsistencyMismatch(schema: TableSchema, readLevel: KandraConsistency, writeLevel: KandraConsistency) {
         if (!consistencyConfig.strictMode) return
-        val rf = replicationFactorOrNull() ?: return
-        val readWeight = quorumWeight(readLevel, rf)
-        val writeWeight = quorumWeight(writeLevel, rf)
+        val readRf = replicationFactorOrNull(readLevel) ?: return
+        val writeRf = replicationFactorOrNull(writeLevel) ?: return
+        val readWeight = quorumWeight(readLevel, readRf)
+        val writeWeight = quorumWeight(writeLevel, writeRf)
+        // readRf and writeRf can differ when one level is LOCAL_* (confined to a single DC's
+        // replicas) and the other is cluster-wide -- the pigeonhole overlap argument only holds
+        // against the smaller of the two replica sets: R + W exceeding the *larger* RF doesn't
+        // guarantee overlap if one side's actual replica set is the smaller one. See GH #98 / ISS-085.
+        val rf = minOf(readRf, writeRf)
         // Cassandra's own documented rule is the *strict* inequality R + W > RF, not R + W >= RF: with
         // R + W == RF, an adversarial replica placement can still make the read set and write set fully
         // disjoint (e.g. RF=3, W=2 lands on {A,B}, R=1 reads only {C} -- no overlap). Only R + W > RF
@@ -153,27 +160,36 @@ class StatementBuilder(
         if (readWeight + writeWeight > rf) return
         logger.warn {
             "Kandra strictMode: table '${schema.tableName}' has replication factor $rf, but the resolved " +
-            "read=$readLevel (effective $readWeight) + write=$writeLevel (effective $writeWeight) = " +
-            "${readWeight + writeWeight}, which does not exceed RF ($rf). Read-your-writes requires " +
-            "R + W > RF (not just >=) -- with R + W == RF, an unlucky replica placement can still make " +
-            "the read and write sets disjoint. Raise consistency { defaultRead/defaultWrite = ... }, add a " +
-            "@ReadConsistency/@WriteConsistency annotation, or pass a stronger per-call override so " +
+            "read=$readLevel (effective $readWeight, RF=$readRf) + write=$writeLevel (effective $writeWeight, RF=$writeRf) = " +
+            "${readWeight + writeWeight}, which does not exceed the relevant RF ($rf). Read-your-writes " +
+            "requires R + W > RF (not just >=) -- with R + W == RF, an unlucky replica placement can still " +
+            "make the read and write sets disjoint. Raise consistency { defaultRead/defaultWrite = ... }, " +
+            "add a @ReadConsistency/@WriteConsistency annotation, or pass a stronger per-call override so " +
             "R + W > RF."
         }
     }
 
     /**
-     * Best-effort replication factor for the session's current keyspace, read from live driver
-     * metadata. Returns `null` (never throws) if the session has no current keyspace, the driver has
-     * no metadata for it, or the replication map can't be parsed — any of which simply skips the
-     * RF check above rather than treating it as "safe" or raising an error.
+     * Best-effort replication factor relevant to [level], read from live driver metadata for the
+     * session's current keyspace. Returns `null` (never throws) if the session has no current
+     * keyspace, the driver has no metadata for it, or the replication map can't be parsed — any of
+     * which simply skips the RF check above rather than treating it as "safe" or raising an error.
      *
-     * Sums every non-`class` entry in [com.datastax.oss.driver.api.core.metadata.schema.KeyspaceMetadata.getReplication]
-     * — correct for `SimpleStrategy` (a single `replication_factor` entry) and a reasonable proxy for
-     * `NetworkTopologyStrategy` (summing per-DC factors), though the latter overstates the RF that
-     * actually matters for a `LOCAL_*` consistency level, which is satisfied by *one* DC's replicas,
-     * not the cluster-wide total. Good enough for catching the common single-DC/RF>3 case this issue
-     * targets; a precise per-DC accounting is out of scope here.
+     * For a non-`LOCAL_*` level (`QUORUM`, `EACH_QUORUM`, `ALL`, ...), sums every non-`class` entry
+     * in [com.datastax.oss.driver.api.core.metadata.schema.KeyspaceMetadata.getReplication] — correct
+     * for `SimpleStrategy` (a single `replication_factor` entry) and for `NetworkTopologyStrategy`
+     * levels that genuinely span every DC.
+     *
+     * For a `LOCAL_*` level — satisfied by *one* DC's replicas, not the cluster-wide total (GH #98 /
+     * ISS-085; summing across DCs for these previously produced false-positive warnings on legitimate
+     * multi-DC configs, e.g. RF=1 per DC across 3 DCs) — this instead looks up the replication entry
+     * for the driver's configured local datacenter ([DefaultDriverOption.LOAD_BALANCING_LOCAL_DATACENTER]),
+     * when it's determinable. If the local DC can't be determined (not configured, or this session's
+     * driver context isn't inspectable, e.g. some test doubles) or doesn't match a DC name in the
+     * replication map (e.g. `SimpleStrategy`, whose one non-`class` entry is keyed `replication_factor`,
+     * not a DC name), falls back to the per-DC average (cluster-wide sum divided by DC count, rounded
+     * up) as a reasonable approximation — still far closer to the truth than the cluster-wide sum, and
+     * identical to it whenever there's only one DC/entry to begin with.
      *
      * GH-109 item 5: this lookup is not cached — it re-reads and re-sums the keyspace's replication
      * map on every call while [ConsistencyConfig.strictMode] is on, i.e. on every read/write for as
@@ -184,13 +200,33 @@ class StatementBuilder(
      * on a keyspace replication change (rare, but not impossible mid-process), so it's left uncached
      * here rather than adding that invalidation complexity speculatively.
      */
-    private fun replicationFactorOrNull(): Int? {
+    private fun replicationFactorOrNull(level: KandraConsistency): Int? {
         val ksId = session.keyspace?.orElse(null) ?: return null
         val ksMeta = session.metadata?.getKeyspace(ksId)?.orElse(null) ?: return null
-        return ksMeta.replication.entries
+        val perDc = ksMeta.replication.entries
             .filter { it.key != "class" }
-            .sumOf { it.value.toIntOrNull() ?: 0 }
-            .takeIf { it > 0 }
+            .mapNotNull { (dc, rf) -> rf.toIntOrNull()?.let { dc to it } }
+        if (perDc.isEmpty()) return null
+
+        if (!level.isLocalLevel()) return perDc.sumOf { it.second }.takeIf { it > 0 }
+
+        val localDc = localDatacenterOrNull()
+        val localRf = localDc?.let { dc -> perDc.firstOrNull { it.first == dc }?.second }
+        val approximated = localRf ?: run {
+            val total = perDc.sumOf { it.second }
+            (total + perDc.size - 1) / perDc.size // ceil(total / perDc.size)
+        }
+        return approximated.takeIf { it > 0 }
+    }
+
+    private fun KandraConsistency.isLocalLevel(): Boolean =
+        this == KandraConsistency.LOCAL_ONE || this == KandraConsistency.LOCAL_QUORUM || this == KandraConsistency.LOCAL_SERIAL
+
+    /** The driver's configured local datacenter, if any and if this session's context is inspectable. */
+    private fun localDatacenterOrNull(): String? = try {
+        session.context?.config?.defaultProfile?.getString(DefaultDriverOption.LOAD_BALANCING_LOCAL_DATACENTER, null)
+    } catch (_: Exception) {
+        null
     }
 
     /** Effective replica count a given [KandraConsistency] level guarantees to have acknowledged, for RF [rf]. */
