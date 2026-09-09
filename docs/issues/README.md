@@ -8,13 +8,43 @@ policy; nothing was lost, they're just not represented here.
 
 ## Open
 
-None currently. The pre-multi-DC-cluster-testing review batch (`ISS-070`–`ISS-076` / GH #78–#84,
-filed 2026-09-08 from a second, critical library-wide review — security, performance, consistency,
-scalability, developer experience — done specifically ahead of experimental testing against a real
-**multi-cluster DC** topology) is now fully closed out; every item is in the `Fixed` table below.
-See
+Filed 2026-09-09 from a critical post-fix audit — seven independent read-only reviews covering
+every part of a distributed ORM's surface (consistency/batching, caching/read-path, driver/connection/
+security wiring, migrations/schema, codegen/DI, test infrastructure, and cross-cutting security) —
+commissioned specifically to re-check the ISS-070–ISS-076 fixes below (none of which had a second
+reviewer before merging) and to give the rest of the library a fresh, critical look ahead of
+experimental multi-DC cluster testing. See
+[docs/reviews/2026-09-09-post-fix-critical-audit.md](../reviews/2026-09-09-post-fix-critical-audit.md)
+for the full write-up, including which findings are genuine regressions in the brand-new fix code
+versus longer-standing gaps this audit was the first to catch.
+
+| ID | GH | Severity | Title |
+|---|---|---|---|
+| [ISS-077](ISS-077-ddl-bootstrap-claim-never-resets.md) | [#90](https://github.com/Dev-Pasaka/kandra/issues/90) | Critical | Schema DDL bootstrap claim never resets — AUTO_CREATE/AUTO_MIGRATE runs at most once ever per keyspace |
+| [ISS-078](ISS-078-ddl-claim-no-holder-fencing-clock-fallback.md) | [#91](https://github.com/Dev-Pasaka/kandra/issues/91) | Critical | DDL claim completion/release has no holder fencing; clock-skew check has a local-clock fallback bug |
+| [ISS-079](ISS-079-auto-migrate-key-column-add-corrupts-data.md) | [#92](https://github.com/Dev-Pasaka/kandra/issues/92) | Critical | AUTO_MIGRATE can silently ALTER TABLE ADD a missing key column as a plain column, causing row collisions |
+| [ISS-080](ISS-080-counter-column-null-decode-throws.md) | [#93](https://github.com/Dev-Pasaka/kandra/issues/93) | Critical | Counter columns throw on decode whenever any counter cell is untouched (NULL) |
+| [ISS-081](ISS-081-findactive-no-row-cap.md) | [#94](https://github.com/Dev-Pasaka/kandra/issues/94) | Critical | `findActive()`/`findActiveSuspend()` have no row cap — OOM risk on `ALLOW FILTERING` |
+| [ISS-082](ISS-082-findbyid-cache-hit-ignores-consistency.md) | [#95](https://github.com/Dev-Pasaka/kandra/issues/95) | Critical | `findById()` cache hits silently ignore the caller's consistency override |
+| [ISS-083](ISS-083-lookup-index-bypasses-consistency.md) | [#96](https://github.com/Dev-Pasaka/kandra/issues/96) | Critical | Lookup-index reads and versioned-update lookup-table writes both bypass configured consistency |
+| [ISS-084](ISS-084-multidc-tests-not-run-in-ci.md) | [#97](https://github.com/Dev-Pasaka/kandra/issues/97) | Critical | `kandra-multidc`'s entire test suite is tagged "manual" with zero CI/scheduled execution |
+| [ISS-085](ISS-085-strict-mode-rf-math-wrong-multidc.md) | [#98](https://github.com/Dev-Pasaka/kandra/issues/98) | High | Strict Mode's RF-vs-consistency math is wrong for multi-DC `NetworkTopologyStrategy` (false positives) |
+| [ISS-086](ISS-086-batch-suspend-split-bypassable.md) | [#99](https://github.com/Dev-Pasaka/kandra/issues/99) | High | Suspend/blocking batch-collection split is bypassable by mixing repository types |
+| [ISS-087](ISS-087-cache-invalidate-race-per-process-undocumented.md) | [#100](https://github.com/Dev-Pasaka/kandra/issues/100) | High | Cache invalidate-after-write race can pin a stale value indefinitely; cache is undocumented per-process |
+| [ISS-088](ISS-088-migration-claim-applied-vs-claimed-conflated.md) | [#101](https://github.com/Dev-Pasaka/kandra/issues/101) | High | Migration claim resolution conflates losing to an APPLIED row with losing to a CLAIMED row |
+| [ISS-089](ISS-089-migration-checksum-misses-lambda-classes.md) | [#102](https://github.com/Dev-Pasaka/kandra/issues/102) | High | Migration checksum misses sibling lambda/anonymous class files |
+| [ISS-090](ISS-090-throttle-exception-not-wrapped.md) | [#103](https://github.com/Dev-Pasaka/kandra/issues/103) | High | Backpressure throttle rejections leak as an unwrapped driver exception |
+| [ISS-091](ISS-091-codegen-nested-class-collision-nondata-class.md) | [#104](https://github.com/Dev-Pasaka/kandra/issues/104) | High | Codegen can crash on same-simple-name nested entity classes; non-data-class entities fail late |
+| [ISS-092](ISS-092-ktor-driver-config-hardening-gaps.md) | [#105](https://github.com/Dev-Pasaka/kandra/issues/105) | Medium | `kandra-ktor` driver-config hardening gaps (TLS silent downgrade, reverse-DNS hostname verification, pool size validation) |
+| [ISS-093](ISS-093-runtime-read-path-metrics-polish.md) | [#106](https://github.com/Dev-Pasaka/kandra/issues/106) | Medium | `kandra-runtime` read-path/metrics polish (no implicit `LIMIT 1`, non-atomic `getOrPut`, no stampede protection, generic metrics labels) |
+| [ISS-094](ISS-094-security-defense-in-depth-gaps.md) | [#107](https://github.com/Dev-Pasaka/kandra/issues/107) | Medium | Security defense-in-depth gaps (silent skip-auth, unguarded `existsQuery`, unvalidated `KandraPredicate`) |
+| [ISS-095](ISS-095-multidc-fixture-hardening.md) | [#108](https://github.com/Dev-Pasaka/kandra/issues/108) | Medium | Multi-DC test fixture hardening (fixed ports, pause-vs-partition realism, missing hostname-mismatch test) |
+| [ISS-096](ISS-096-assorted-low-severity-post-fix-audit.md) | [#109](https://github.com/Dev-Pasaka/kandra/issues/109) | Low | Assorted low-severity findings (codegen NPE risk, redundant Jakarta factory, missing edge-case tests, metrics/RF-cache minutiae) |
+
+The prior pre-multi-DC-cluster-testing review batch (`ISS-070`–`ISS-076` / GH #78–#84, filed
+2026-09-08) is fully closed out — every item is in the `Fixed` table below. See
 [docs/reviews/2026-09-08-pre-multidc-cluster-review.md](../reviews/2026-09-08-pre-multidc-cluster-review.md)
-for the full write-up.
+for that write-up.
 
 ## Fixed — pending live-cluster verification
 

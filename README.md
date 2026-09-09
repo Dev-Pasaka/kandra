@@ -709,25 +709,31 @@ Logs a WARN whenever a query resolves to `LOCAL_ONE`/`ONE` **and** the deploymen
 observability — never changes query behavior. See [`docs/features/multidc.md`](docs/features/multidc.md)
 and [ISS-037](docs/issues/ISS-037-consistency-strict-mode.md).
 
-**Before testing against a real multi-cluster DC topology**, read
-[`docs/reviews/2026-09-08-pre-multidc-cluster-review.md`](docs/reviews/2026-09-08-pre-multidc-cluster-review.md)
-for the full background — everything it originally flagged is now fixed:
-- The `LOCAL_ONE`/`LOCAL_QUORUM` defaults only guarantee read-your-writes when `R + W > RF`
-  (strictly greater — safe up to `RF ≤ 2` with these defaults, not `RF ≤ 3`). Strict Mode now
-  reads the target table's actual replication factor from cluster metadata and warns whenever the
-  resolved read/write consistency fails that inequality, independent of the existing
-  `LOCAL_ONE`/`ONE`-in-multi-DC check
-  ([ISS-075](docs/issues/ISS-075-strict-mode-rf-consistency-math.md)).
-- `SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE`'s DDL, and `KandraMigrationRunner`'s own bookkeeping-table
-  bootstrap, are guarded by an LWT claim so only one of several concurrently-starting instances
-  actually runs the DDL — see [`docs/features/schema-modes.md`](docs/features/schema-modes.md#concurrent-instance-coordination)
-  and [ISS-071](docs/issues/ISS-071-concurrent-ddl-bootstrap-race.md) for exactly how it behaves
-  under a slow or crashed claim-holder.
-- Connection-pool size (`pool { localPoolSize; remotePoolSize }`) and request backpressure
-  (`throttle { }`, off by default) are now configurable through Kandra — size them for your
-  expected concurrency before load testing
-  ([ISS-072](docs/issues/ISS-072-connection-pool-size-unconfigurable.md),
-  [ISS-073](docs/issues/ISS-073-no-backpressure-admission-control.md)).
+**Do not begin experimental testing against a real multi-cluster DC topology yet.** A follow-up
+critical audit done immediately after the 2026-09-08 review's fixes landed
+([`docs/reviews/2026-09-09-post-fix-critical-audit.md`](docs/reviews/2026-09-09-post-fix-critical-audit.md))
+found that two of those fixes have real, confirmed bugs, and surfaced several severe pre-existing
+gaps nobody had caught before. Most urgently:
+- **`SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE`'s DDL claim never resets after its first successful
+  run** — schema changes (new tables, new columns) silently stop applying after the very first
+  successful startup, for the lifetime of the keyspace
+  ([ISS-077](docs/issues/ISS-077-ddl-bootstrap-claim-never-resets.md)).
+- **Counter columns throw on decode** the moment any counter cell in a row is untouched (NULL) —
+  a routine outcome under the library's own documented multi-counter-column pattern
+  ([ISS-080](docs/issues/ISS-080-counter-column-null-decode-throws.md)).
+- **Three separate places silently ignore configured/overridden consistency**: `findById()` cache
+  hits, lookup-index reads, and versioned-update lookup-table writes
+  ([ISS-082](docs/issues/ISS-082-findbyid-cache-hit-ignores-consistency.md),
+  [ISS-083](docs/issues/ISS-083-lookup-index-bypasses-consistency.md)) — undermining exactly the
+  guarantee a multi-DC test round exists to validate.
+- Strict Mode's RF-vs-consistency check has **inverted math for multi-DC `NetworkTopologyStrategy`**
+  and will false-positive-warn on correctly-configured clusters
+  ([ISS-085](docs/issues/ISS-085-strict-mode-rf-math-wrong-multidc.md)).
+
+See the audit write-up and [`docs/issues/README.md`](docs/issues/README.md)'s Open table (ISS-077
+through ISS-096) for the full list, including AUTO_MIGRATE's key-column data-collision risk, an
+unbounded `findActive()` OOM risk, and the fact that `kandra-multidc`'s entire test suite currently
+runs nowhere in CI.
 
 ---
 
