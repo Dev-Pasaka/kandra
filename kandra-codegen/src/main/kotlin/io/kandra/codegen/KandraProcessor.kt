@@ -70,6 +70,26 @@ class KandraProcessor(
     private val logger: KSPLogger
 ) : SymbolProcessor {
 
+    /**
+     * Tracks every `"$packageName.$objectName"` this processor instance has already generated a
+     * `*Table.kt` file for, mapped to the qualified name of the entity that claimed it (GH-104).
+     *
+     * `processClass` derives `objectName` from [KSClassDeclaration.simpleName] alone, never the
+     * enclosing class — two distinct `@ScyllaTable` entities nested under different outer types but
+     * sharing a simple name (e.g. `Ns1.User` and `Ns2.User`, both in package `com.example.app`) both
+     * compute `objectName = "UserTable"`, so both calls to [CodeGenerator.createNewFile] would target
+     * the identical virtual file. KSP's own guard against that throws a raw
+     * `FileAlreadyExistsException` with no Kandra context — a confusing build crash rather than an
+     * actionable diagnostic. This map lets [processClass] detect the collision itself and fail with a
+     * clear [KSPLogger.error] instead, before ever calling `createNewFile` a second time.
+     *
+     * A single [KandraProcessor] instance is reused across every round of one KSP invocation (see
+     * [KandraProcessorProvider.create]), so this persists for the lifetime of one compilation — exactly
+     * the scope a genuine same-simple-name collision needs to be caught in. Re-processing the *same*
+     * entity (identified by its qualified name) across rounds is not treated as a collision.
+     */
+    private val generatedTableNames = mutableMapOf<String, String>()
+
     override fun process(resolver: Resolver): List<KSAnnotated> {
         val symbols = resolver.getSymbolsWithAnnotation("io.kandra.core.annotations.ScyllaTable")
         val unprocessed = symbols.filter { !it.validate() }.toList()
@@ -91,6 +111,27 @@ class KandraProcessor(
         val packageName = classDecl.packageName.asString()
         val className = classDecl.simpleName.asString()
         val objectName = "${className}Table"
+        val qualifiedName = classDecl.qualifiedName?.asString() ?: "$packageName.$className"
+
+        // GH-104: same-simple-name collision guard. Two distinct entities that compute the same
+        // "$packageName/$objectName" (e.g. two differently-nested classes both named "User" in the
+        // same package) would otherwise both reach codeGenerator.createNewFile below, and KSP's own
+        // duplicate-file guard would crash the build with a raw, un-Kandra-flavored exception. Catch
+        // it here instead and fail with a clear diagnostic naming both classes.
+        val collisionKey = "$packageName.$objectName"
+        val previousOwner = generatedTableNames[collisionKey]
+        if (previousOwner != null && previousOwner != qualifiedName) {
+            logger.error(
+                "Kandra codegen: cannot generate '$objectName' for '$qualifiedName' — that file name is " +
+                    "already claimed by '$previousOwner'. Both classes have the simple name '$className' " +
+                    "in package '$packageName', and the generated table object/file name is derived only " +
+                    "from the simple class name, so they collide. Rename one of the classes, move one to a " +
+                    "different package, or give one entity a distinct simple name.",
+                classDecl
+            )
+            return
+        }
+        generatedTableNames[collisionKey] = qualifiedName
 
         val properties = classDecl.getAllProperties().toList()
 
