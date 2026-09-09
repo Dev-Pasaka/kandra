@@ -504,6 +504,14 @@ implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
 
 If Caffeine is absent at runtime, Kandra logs a `WARN` and disables the cache transparently — all calls fall through to ScyllaDB.
 
+**Per-process only.** This cache lives entirely in the JVM heap of the instance that built it —
+there is no distributed invalidation channel. In a horizontally-scaled or multi-DC deployment
+(typically one or more app instances per DC), a write on instance A never invalidates instance
+B/C's cached copy of the same row; those instances keep serving their own stale entries until
+their own `ttlSeconds` expires, independent of any consistency level configured for the write.
+For tables where cross-instance freshness matters, avoid `@CacheResult`, or pair it with a short
+`ttlSeconds` to bound how stale a read from another instance can be.
+
 ---
 
 ## Schema Modes
