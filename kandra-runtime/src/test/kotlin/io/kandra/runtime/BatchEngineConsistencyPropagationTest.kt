@@ -5,6 +5,7 @@ import com.datastax.oss.driver.api.core.cql.BatchStatement
 import io.kandra.core.InternalKandraApi
 import io.kandra.core.KandraConsistency
 import io.kandra.core.SchemaRegistry
+import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.annotations.Version
@@ -35,6 +36,13 @@ class BatchEngineConsistencyPropagationTest {
     data class VersionedBalance(
         @PartitionKey val accountId: UUID,
         val amountCents: Long,
+        @Version val version: Long = 1L
+    )
+
+    @ScyllaTable("versioned_lookup_widgets")
+    data class VersionedLookupWidget(
+        @PartitionKey val id: UUID,
+        @LookupIndex(tableSuffix = "by_email") val email: String,
         @Version val version: Long = 1L
     )
 
@@ -166,5 +174,55 @@ class BatchEngineConsistencyPropagationTest {
         engine.update(schema, old, old.copy(amountCents = 200L), consistency = KandraConsistency.ALL)
 
         assertEquals(DefaultConsistencyLevel.ALL, session.lastBoundConsistencyLevel)
+    }
+
+    // ── updateLookups / updateLookupsSuspend (GH #96) ────────────────────────
+
+    @Test
+    fun `versioned update's lookup-table batch resolves the configured write consistency`() {
+        val schema = SchemaRegistry.register(VersionedLookupWidget::class)
+        val session = ScriptedCqlSession()
+        val config = ConsistencyConfig().apply { defaultWrite = KandraConsistency.LOCAL_QUORUM }
+        val engine = newEngine(session, config)
+
+        val old = VersionedLookupWidget(UUID.randomUUID(), "old@example.com", version = 1L)
+        engine.update(schema, old, old.copy(email = "new@example.com"))
+
+        val batch = session.lastStatement as? BatchStatement
+            ?: error("Expected the lookup-table LOGGED BATCH to be the last statement executed")
+        assertEquals(
+            DefaultConsistencyLevel.LOCAL_QUORUM, batch.consistencyLevel,
+            "updateLookups must resolve write consistency like every other write batch, not default to LOCAL_ONE"
+        )
+    }
+
+    @Test
+    fun `versioned updateSuspend's lookup-table batch resolves the configured write consistency`() = runBlocking {
+        val schema = SchemaRegistry.register(VersionedLookupWidget::class)
+        val session = ScriptedCqlSession()
+        val config = ConsistencyConfig().apply { defaultWrite = KandraConsistency.LOCAL_QUORUM }
+        val engine = newEngine(session, config)
+
+        val old = VersionedLookupWidget(UUID.randomUUID(), "old@example.com", version = 1L)
+        engine.updateSuspend(schema, old, old.copy(email = "new@example.com"))
+
+        val batch = session.lastStatement as? BatchStatement
+            ?: error("Expected the lookup-table LOGGED BATCH to be the last statement executed")
+        assertEquals(DefaultConsistencyLevel.LOCAL_QUORUM, batch.consistencyLevel)
+    }
+
+    @Test
+    fun `versioned update's lookup-table batch honors a per-call consistency override`() {
+        val schema = SchemaRegistry.register(VersionedLookupWidget::class)
+        val session = ScriptedCqlSession()
+        val config = ConsistencyConfig().apply { defaultWrite = KandraConsistency.LOCAL_QUORUM }
+        val engine = newEngine(session, config)
+
+        val old = VersionedLookupWidget(UUID.randomUUID(), "old@example.com", version = 1L)
+        engine.update(schema, old, old.copy(email = "new@example.com"), consistency = KandraConsistency.ALL)
+
+        val batch = session.lastStatement as? BatchStatement
+            ?: error("Expected the lookup-table LOGGED BATCH to be the last statement executed")
+        assertEquals(DefaultConsistencyLevel.ALL, batch.consistencyLevel)
     }
 }

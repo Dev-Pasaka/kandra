@@ -529,7 +529,7 @@ class StatementBuilder(
             .setConsistencyLevel(resolveReadConsistency(schema, consistency).toDriverLevel())
     }
 
-    fun selectByLookup(lookup: LookupTableSchema, value: Any, consistency: KandraConsistency? = null): BoundStatement {
+    fun selectByLookup(schema: TableSchema, lookup: LookupTableSchema, value: Any, consistency: KandraConsistency? = null): BoundStatement {
         // Select both partition AND clustering key columns of the primary table -- a lookup row must
         // be able to reconstruct the primary table's FULL key, not just its partition key, since
         // selectById requires the full key (see ISS-029).
@@ -538,15 +538,17 @@ class StatementBuilder(
         val prepared = prepare(cql)
         return prepared.bind(codec.encode(value, lookup.indexColumn.type))
             .setIdempotent(true)
+            .setConsistencyLevel(resolveReadConsistency(schema, consistency).toDriverLevel())
     }
 
     /** Suspend counterpart of [selectByLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
-    suspend fun selectByLookupSuspend(lookup: LookupTableSchema, value: Any, consistency: KandraConsistency? = null): BoundStatement {
+    suspend fun selectByLookupSuspend(schema: TableSchema, lookup: LookupTableSchema, value: Any, consistency: KandraConsistency? = null): BoundStatement {
         val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlName }
         val cql = "SELECT $keyCols FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
         val prepared = prepareSuspend(cql)
         return prepared.bind(codec.encode(value, lookup.indexColumn.type))
             .setIdempotent(true)
+            .setConsistencyLevel(resolveReadConsistency(schema, consistency).toDriverLevel())
     }
 
     fun selectByPartitionKeyIn(schema: TableSchema, ids: List<Any>, consistency: KandraConsistency? = null): BoundStatement {

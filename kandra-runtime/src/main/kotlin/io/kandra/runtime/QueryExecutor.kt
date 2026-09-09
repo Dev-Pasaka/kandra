@@ -109,7 +109,7 @@ class QueryExecutor(
             val lookup = schema.lookupTables.first { it.indexColumn.cqlName == lookupColName }
             val lookupValue = (lookupPredicate as? KandraPredicate.Eq)?.value
                 ?: throw KandraQueryException("Lookup table pagination only supports equality predicates.")
-            val lookupRow = session.execute(statementBuilder.selectByLookup(lookup, lookupValue!!, consistency))
+            val lookupRow = session.execute(statementBuilder.selectByLookup(schema, lookup, lookupValue!!, consistency))
                 .one() ?: return KandraPage(emptyList(), null, false)
 
             // Full key (partition + clustering), not partition-only -- a lookup value maps to exactly
@@ -227,7 +227,7 @@ class QueryExecutor(
             val lookup = schema.lookupTables.first { it.indexColumn.cqlName == lookupColName }
             val lookupValue = (lookupPredicate as? KandraPredicate.Eq)?.value
                 ?: throw KandraQueryException("Lookup table pagination only supports equality predicates.")
-            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(lookup, lookupValue!!, consistency))
+            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(schema, lookup, lookupValue!!, consistency))
                 .one() ?: return KandraPage(emptyList(), null, false)
 
             // Full key (partition + clustering), not partition-only -- a lookup value maps to exactly
@@ -430,7 +430,7 @@ class QueryExecutor(
                 else -> throw KandraQueryException("Lookup table queries only support equality predicates.")
             } ?: throw KandraQueryException("Lookup predicate value must not be null.")
 
-            val lookupRow = session.execute(statementBuilder.selectByLookup(lookup, lookupValue, consistency))
+            val lookupRow = session.execute(statementBuilder.selectByLookup(schema, lookup, lookupValue, consistency))
                 .one() ?: return emptyList()
 
             // Full key (partition + clustering) -- selectById requires all of it (see ISS-029).
@@ -531,7 +531,7 @@ class QueryExecutor(
                 else -> throw KandraQueryException("Lookup table queries only support equality predicates.")
             } ?: throw KandraQueryException("Lookup predicate value must not be null.")
 
-            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(lookup, lookupValue, consistency))
+            val lookupRow = session.executeSuspend(statementBuilder.selectByLookupSuspend(schema, lookup, lookupValue, consistency))
                 .one() ?: return emptyList()
 
             // Full key (partition + clustering) -- selectById requires all of it (see ISS-029).

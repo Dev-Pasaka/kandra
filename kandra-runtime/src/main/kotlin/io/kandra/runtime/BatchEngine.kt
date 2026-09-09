@@ -395,7 +395,7 @@ class BatchEngine(
             val rs = executeOnce(stmt, schema.tableName, "update")
             val applied = rs.one()?.getBoolean("[applied]") ?: false
             if (!applied) throwOptimisticLockException(schema, old, oldVersion)
-            updateLookups(schema, old, stampedWithVersion)
+            updateLookups(schema, old, stampedWithVersion, consistency)
             return
         }
 
@@ -713,7 +713,7 @@ class BatchEngine(
             val rs = executeOnceSuspend(stmt, schema.tableName, "update")
             val applied = rs.currentPage().firstOrNull()?.getBoolean("[applied]") ?: false
             if (!applied) throwOptimisticLockException(schema, old, oldVersion)
-            updateLookupsSuspend(schema, old, stampedWithVersion)
+            updateLookupsSuspend(schema, old, stampedWithVersion, consistency)
             return
         }
 
@@ -991,19 +991,23 @@ class BatchEngine(
 
     // ── Lookup update helpers ─────────────────────────────────────────────────
 
-    private fun updateLookups(schema: TableSchema, old: Any, new: Any) {
+    private fun updateLookups(schema: TableSchema, old: Any, new: Any, consistency: KandraConsistency? = null) {
         val (batchStmts, eventualStmts) = buildUpdateStatements(schema, old, new)
         if (batchStmts.isNotEmpty()) {
-            val batch = batchStmts.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, s -> acc.add(s) }
+            // GH #96: route through newLoggedBatch (resolveWriteConsistency + Strict Mode RF check),
+            // same as every other write batch in this file -- this used to build a bare unconfigured
+            // batch, bypassing consistency resolution entirely for the lookup-table half of every
+            // @Version-checked update().
+            val batch = batchStmts.fold(newLoggedBatch(schema, consistency)) { acc, s -> acc.add(s) }
             executeWithRetry(batch)
         }
         fireEventualStatements(eventualStmts, new, "(version update)", schema.tableName)
     }
 
-    private suspend fun updateLookupsSuspend(schema: TableSchema, old: Any, new: Any) {
+    private suspend fun updateLookupsSuspend(schema: TableSchema, old: Any, new: Any, consistency: KandraConsistency? = null) {
         val (batchStmts, eventualStmts) = buildUpdateStatementsSuspend(schema, old, new)
         if (batchStmts.isNotEmpty()) {
-            val batch = batchStmts.fold(BatchStatement.newInstance(DefaultBatchType.LOGGED)) { acc, s -> acc.add(s) }
+            val batch = batchStmts.fold(newLoggedBatch(schema, consistency)) { acc, s -> acc.add(s) }
             executeWithRetrySuspend(batch)
         }
         fireEventualStatementsSuspend(eventualStmts, new, "(version update)", schema.tableName)
