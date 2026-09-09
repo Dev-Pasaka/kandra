@@ -362,14 +362,14 @@ class QueryExecutor(
         val marker = requireActiveMarker()
         val cql = buildActiveQueryCql(marker, allowFullScan)
         val rs = session.execute(session.prepare(cql).bind(false))
-        return rs.all().map { decodeEntity(it, entityClass) }
+        return boundedAll(rs).map { decodeEntity(it, entityClass) }
     }
 
     suspend fun <T : Any> findActiveSuspend(entityClass: KClass<T>, allowFullScan: Boolean = false): List<T> {
         val marker = requireActiveMarker()
         val cql = buildActiveQueryCql(marker, allowFullScan)
         val prepared = session.prepareSuspend(cql)
-        return session.executeSuspendAll(prepared.bind(false)).map { decodeEntity(it, entityClass) }
+        return boundedSuspendAll(prepared.bind(false)).map { decodeEntity(it, entityClass) }
     }
 
     private fun predicateColumn(pred: KandraPredicate): String = when (pred) {
