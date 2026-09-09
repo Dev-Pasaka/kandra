@@ -36,8 +36,26 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Duration
+import java.time.Instant
+import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
+
+/**
+ * How long a DDL bootstrap claim (see [claimAndRunDdlBootstrap]) is given the benefit of the doubt
+ * before a waiting instance treats it as abandoned by a crashed claimant and reclaims it itself.
+ * Deliberately much shorter than [io.kandra.migrate.KandraMigrationRunner]'s own
+ * `staleClaimThreshold` for per-migration claims (default 10 minutes) -- `CREATE TABLE IF NOT
+ * EXISTS`/`ALTER TABLE ADD` for a handful of registered entities is a matter of seconds, not the
+ * potentially long-running, arbitrary CQL a hand-written migration's `up()` can execute. Not
+ * user-configurable today (see ISS-071/GH #79) -- raise this if a deployment genuinely has enough
+ * registered entities that AUTO_MIGRATE's column-diff pass takes longer than this on a slow cluster.
+ */
+private val DDL_CLAIM_STALE_THRESHOLD: Duration = Duration.ofMinutes(2)
+
+/** How long to sleep between polls while waiting for another instance's DDL claim to resolve. */
+private const val DDL_CLAIM_POLL_MS = 200L
 
 /**
  * Ktor plugin that wires ScyllaDB/Cassandra via the DataStax Java driver.
@@ -117,63 +135,74 @@ val Kandra: ApplicationPlugin<KandraConfig> =
 
         when (config.schemaMode) {
             SchemaMode.AUTO_CREATE -> {
-                SchemaRegistry.all().forEach { schema ->
-                    DdlGenerator.allStatements(schema).forEach { ddl ->
-                        session.execute(ddl)
-                        logger.debug { "Kandra: DDL executed: $ddl" }
+                // GH #79/ISS-071: a rolling deploy of N replicas otherwise races N instances' worth
+                // of `CREATE TABLE IF NOT EXISTS` against the same keyspace concurrently -- a known
+                // schema-disagreement risk on Cassandra/Scylla. Guard the whole pass behind a single
+                // cluster-wide LWT claim so exactly one instance runs it per startup wave; the rest
+                // wait for it to finish rather than racing the same DDL. See claimAndRunDdlBootstrap.
+                claimAndRunDdlBootstrap(session, DDL_BOOTSTRAP_SCHEMA_LOCK) {
+                    SchemaRegistry.all().forEach { schema ->
+                        DdlGenerator.allStatements(schema).forEach { ddl ->
+                            session.execute(ddl)
+                            logger.debug { "Kandra: DDL executed: $ddl" }
+                        }
                     }
                 }
             }
             SchemaMode.AUTO_MIGRATE -> {
-                SchemaRegistry.all().forEach { schema ->
-                    // Step 1: CREATE TABLE IF NOT EXISTS
-                    DdlGenerator.allStatements(schema).forEach { ddl ->
-                        session.execute(ddl)
-                        logger.debug { "Kandra: DDL executed: $ddl" }
-                    }
-                    // Step 2: Diff entity vs Scylla columns and ALTER TABLE ADD for new ones
-                    // GH #65: bound params instead of a string-interpolated literal -- keyspace_name
-                    // was previously spliced directly into a single-quoted CQL string literal.
-                    val rs = session.execute(
-                        "SELECT column_name, type FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
-                        config.keyspace, schema.tableName
-                    )
-                    val existingColumns = rs.all().associate { row ->
-                        row.getString("column_name")!! to row.getString("type")!!
-                    }
-                    val entityColumns = buildList {
-                        addAll(schema.partitionKeys)
-                        addAll(schema.clusteringKeys)
-                        addAll(schema.columns)
-                        addAll(schema.lookupTables.map { it.indexColumn })
-                    }.distinctBy { it.cqlName }
+                // Same claim guard as AUTO_CREATE above -- this branch also runs ALTER TABLE ADD,
+                // which is exactly the multi-statement, multi-table DDL the guard exists to serialize.
+                claimAndRunDdlBootstrap(session, DDL_BOOTSTRAP_SCHEMA_LOCK) {
+                    SchemaRegistry.all().forEach { schema ->
+                        // Step 1: CREATE TABLE IF NOT EXISTS
+                        DdlGenerator.allStatements(schema).forEach { ddl ->
+                            session.execute(ddl)
+                            logger.debug { "Kandra: DDL executed: $ddl" }
+                        }
+                        // Step 2: Diff entity vs Scylla columns and ALTER TABLE ADD for new ones
+                        // GH #65: bound params instead of a string-interpolated literal -- keyspace_name
+                        // was previously spliced directly into a single-quoted CQL string literal.
+                        val rs = session.execute(
+                            "SELECT column_name, type FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
+                            config.keyspace, schema.tableName
+                        )
+                        val existingColumns = rs.all().associate { row ->
+                            row.getString("column_name")!! to row.getString("type")!!
+                        }
+                        val entityColumns = buildList {
+                            addAll(schema.partitionKeys)
+                            addAll(schema.clusteringKeys)
+                            addAll(schema.columns)
+                            addAll(schema.lookupTables.map { it.indexColumn })
+                        }.distinctBy { it.cqlName }
 
-                    entityColumns.forEach { col ->
-                        if (col.cqlName !in existingColumns) {
-                            val alterDdl = DdlGenerator.alterTableAddColumn(schema, col)
-                            session.execute(alterDdl)
-                            logger.info { "Kandra AUTO_MIGRATE: added column '${col.cqlName}' to '${schema.tableName}'" }
-                        } else {
-                            val scyllaType = existingColumns[col.cqlName]!!.lowercase()
-                            val expectedType = DdlGenerator.cqlTypeString(col).lowercase()
-                            if (scyllaType != expectedType) {
-                                logger.error {
-                                    "Kandra AUTO_MIGRATE: type mismatch on '${schema.tableName}.${col.cqlName}' — " +
-                                    "ScyllaDB has '$scyllaType' but entity declares '$expectedType'. " +
-                                    "This will cause codec errors at runtime. " +
-                                    "Fix the entity type to match the DB, or run: " +
-                                    "ALTER TABLE ${schema.tableName} DROP ${col.cqlName}; then re-add."
+                        entityColumns.forEach { col ->
+                            if (col.cqlName !in existingColumns) {
+                                val alterDdl = DdlGenerator.alterTableAddColumn(schema, col)
+                                session.execute(alterDdl)
+                                logger.info { "Kandra AUTO_MIGRATE: added column '${col.cqlName}' to '${schema.tableName}'" }
+                            } else {
+                                val scyllaType = existingColumns[col.cqlName]!!.lowercase()
+                                val expectedType = DdlGenerator.cqlTypeString(col).lowercase()
+                                if (scyllaType != expectedType) {
+                                    logger.error {
+                                        "Kandra AUTO_MIGRATE: type mismatch on '${schema.tableName}.${col.cqlName}' — " +
+                                        "ScyllaDB has '$scyllaType' but entity declares '$expectedType'. " +
+                                        "This will cause codec errors at runtime. " +
+                                        "Fix the entity type to match the DB, or run: " +
+                                        "ALTER TABLE ${schema.tableName} DROP ${col.cqlName}; then re-add."
+                                    }
                                 }
                             }
                         }
-                    }
-                    // Columns in Scylla but not in entity — warn only
-                    existingColumns.keys.filter { col -> entityColumns.none { it.cqlName == col } }.forEach { col ->
-                        logger.warn {
-                            "Kandra: Column '$col' exists in Scylla table '${schema.tableName}' but is not mapped in ${schema.entityClass.simpleName} entity. " +
-                            "The data is still stored in ScyllaDB but will not be readable via Kandra. " +
-                            "To remove it permanently, run: ALTER TABLE ${schema.tableName} DROP $col; " +
-                            "Never run DROP COLUMN on a column with active data without a migration plan."
+                        // Columns in Scylla but not in entity — warn only
+                        existingColumns.keys.filter { col -> entityColumns.none { it.cqlName == col } }.forEach { col ->
+                            logger.warn {
+                                "Kandra: Column '$col' exists in Scylla table '${schema.tableName}' but is not mapped in ${schema.entityClass.simpleName} entity. " +
+                                "The data is still stored in ScyllaDB but will not be readable via Kandra. " +
+                                "To remove it permanently, run: ALTER TABLE ${schema.tableName} DROP $col; " +
+                                "Never run DROP COLUMN on a column with active data without a migration plan."
+                            }
                         }
                     }
                 }
@@ -358,6 +387,182 @@ val Kandra: ApplicationPlugin<KandraConfig> =
             pluginScope.cancel("Kandra plugin stopped")
         }
     }
+
+/**
+ * Lock key used for the [SchemaMode.AUTO_CREATE]/[SchemaMode.AUTO_MIGRATE] DDL bootstrap pass.
+ * One key covers every registered entity for a given install -- see [claimAndRunDdlBootstrap]'s
+ * KDoc for why this is a single claim for the whole pass rather than one per table.
+ */
+private const val DDL_BOOTSTRAP_SCHEMA_LOCK = "schema-bootstrap"
+
+/**
+ * Runs [action] under a cluster-wide LWT claim keyed by [lockName], so that when several
+ * application instances start concurrently against the same keyspace -- a rolling deploy of N
+ * replicas is the normal topology this guards against (GH #79/ISS-071) -- only one of them
+ * actually executes [action] (the [SchemaMode.AUTO_CREATE]/[SchemaMode.AUTO_MIGRATE] DDL), while
+ * the others detect the claim and wait for it to finish rather than racing the same `CREATE
+ * TABLE`/`ALTER TABLE` statements against the cluster concurrently -- a known schema-disagreement
+ * risk on Cassandra/Scylla.
+ *
+ * Mirrors the claim/staleness pattern [io.kandra.migrate.KandraMigrationRunner] already uses for
+ * its own per-migration claims (GH #26/#64), backed by a small coordination table,
+ * `kandra_ddl_locks`, holding one row per [lockName]:
+ * - **Claim**: `INSERT ... IF NOT EXISTS` -- exactly one racing instance wins.
+ * - **Losers wait**: poll the row every [DDL_CLAIM_POLL_MS] until it reads `DONE` (the winner
+ *   finished -- skip running [action] here at all) or its claim goes stale.
+ * - **Staleness**: measured entirely by the cluster's own clock (`toTimestamp(now())`, never this
+ *   JVM's `Instant.now()`) against [DDL_CLAIM_STALE_THRESHOLD] -- the same clock-skew-proof
+ *   approach as [io.kandra.migrate.KandraMigrationRunner] (see its KDoc, "Clock source for
+ *   staleness", GH #64). A claim older than the threshold is presumed abandoned by a crashed
+ *   claimant (OOM, `SIGKILL`, an uncaught `Error` mid-DDL); one waiter reclaims it via a
+ *   compare-and-set `UPDATE ... IF claimed_at = ?` (so only one of several simultaneous waiters
+ *   wins the reclaim) and runs [action] itself.
+ *
+ * Unlike [io.kandra.migrate.KandraMigrationRunner]'s migration claims -- which deliberately halt
+ * (or throw) rather than let a caller barrel ahead of an unresolved claim, because later
+ * migrations may depend on earlier DDL -- a waiting instance here always converges on running
+ * (startup should not hang indefinitely, and `CREATE TABLE IF NOT EXISTS`/`ALTER TABLE ADD` are
+ * idempotent, so there's no ordering hazard in retrying).
+ *
+ * The one race this cannot remove: creating `kandra_ddl_locks` itself, the first time it doesn't
+ * yet exist. That's a single `CREATE TABLE IF NOT EXISTS` for one small, schema-stable table (no
+ * column is ever added to it after creation) -- a far narrower and lower-impact race than the one
+ * this guards against, which is N instances concurrently running `CREATE TABLE`/`ALTER TABLE`
+ * across every registered entity. [io.kandra.migrate.KandraMigrationRunner]'s own bootstrap of its
+ * `kandra_migrations` table carries the identical, already-accepted residual race (see its class
+ * KDoc, "Multi-instance caveat").
+ */
+@InternalKandraApi
+internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, action: () -> Unit) {
+    ensureDdlLockTable(session)
+    val holder = UUID.randomUUID().toString()
+
+    if (tryClaimDdlLock(session, lockName, holder)) {
+        logger.info { "Kandra: claimed DDL bootstrap lock '$lockName' -- running schema DDL." }
+        runClaimedDdlAction(session, lockName, action)
+        return
+    }
+
+    logger.info {
+        "Kandra: another instance holds the DDL bootstrap lock '$lockName' -- waiting for it to " +
+        "finish rather than racing the same DDL concurrently."
+    }
+    while (true) {
+        val row = session.execute(
+            session.prepare("SELECT holder, status, claimed_at FROM kandra_ddl_locks WHERE lock_name = ?")
+                .bind(lockName)
+        ).one()
+
+        if (row == null) {
+            // The row vanished between our failed claim and this read (shouldn't normally happen
+            // outside of a manual operator intervention) -- treat it like nobody has claimed it.
+            if (tryClaimDdlLock(session, lockName, holder)) {
+                runClaimedDdlAction(session, lockName, action)
+                return
+            }
+            continue
+        }
+
+        if (row.getString("status") == "DONE") {
+            logger.info { "Kandra: DDL bootstrap lock '$lockName' was completed by another instance -- skipping DDL here." }
+            return
+        }
+
+        val claimedAt = row.getInstant("claimed_at") ?: Instant.EPOCH
+        val age = Duration.between(claimedAt, ddlLockServerNow(session, lockName))
+        if (age > DDL_CLAIM_STALE_THRESHOLD) {
+            logger.warn {
+                "Kandra: DDL bootstrap lock '$lockName' has been CLAIMED for ${age.seconds}s, " +
+                "exceeding the staleness threshold of ${DDL_CLAIM_STALE_THRESHOLD.seconds}s -- the " +
+                "previous claimant is presumed crashed. Reclaiming and running the DDL here."
+            }
+            if (reclaimStaleDdlLock(session, lockName, holder, claimedAt)) {
+                runClaimedDdlAction(session, lockName, action)
+                return
+            }
+            // Someone else reclaimed (or finished) it between our staleness check and the reclaim
+            // attempt -- loop and re-check rather than assume anything about the outcome.
+            continue
+        }
+
+        Thread.sleep(DDL_CLAIM_POLL_MS)
+    }
+}
+
+/** Runs [action] for the instance that just won (or reclaimed) [lockName], releasing the claim on failure so a later attempt can retry, or marking it DONE on success. */
+private fun runClaimedDdlAction(session: CqlSession, lockName: String, action: () -> Unit) {
+    try {
+        action()
+    } catch (e: Exception) {
+        releaseDdlLock(session, lockName)
+        throw e
+    }
+    markDdlLockDone(session, lockName)
+    logger.info { "Kandra: DDL bootstrap lock '$lockName' released (done)." }
+}
+
+/**
+ * Coordination table backing [claimAndRunDdlBootstrap]. Deliberately minimal and schema-stable
+ * (no column is ever added after creation) to keep its own bootstrap -- the one race this
+ * mechanism cannot itself guard, see [claimAndRunDdlBootstrap]'s KDoc -- as narrow as possible.
+ */
+private fun ensureDdlLockTable(session: CqlSession) {
+    session.execute(
+        """
+        CREATE TABLE IF NOT EXISTS kandra_ddl_locks (
+            lock_name   TEXT PRIMARY KEY,
+            holder      TEXT,
+            status      TEXT,
+            claimed_at  TIMESTAMP
+        )
+        """.trimIndent()
+    )
+}
+
+/** Returns `true` if this call won the claim on [lockName]. */
+private fun tryClaimDdlLock(session: CqlSession, lockName: String, holder: String): Boolean {
+    val prepared = session.prepare(
+        "INSERT INTO kandra_ddl_locks (lock_name, holder, status, claimed_at) " +
+        "VALUES (?, ?, 'CLAIMED', toTimestamp(now())) IF NOT EXISTS"
+    )
+    return session.execute(prepared.bind(lockName, holder)).wasApplied()
+}
+
+/**
+ * Reclaims a stale claim via compare-and-set on its previously-observed `claimed_at`, so that if
+ * several waiters independently decide the same claim is stale, only one of them wins.
+ */
+private fun reclaimStaleDdlLock(session: CqlSession, lockName: String, holder: String, previousClaimedAt: Instant): Boolean {
+    val prepared = session.prepare(
+        "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) " +
+        "WHERE lock_name = ? IF claimed_at = ?"
+    )
+    return session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
+}
+
+private fun markDdlLockDone(session: CqlSession, lockName: String) {
+    session.execute(
+        session.prepare("UPDATE kandra_ddl_locks SET status = 'DONE' WHERE lock_name = ?").bind(lockName)
+    )
+}
+
+/** Releases a claim (deletes its row) so a later attempt can retry cleanly after [action] fails. */
+private fun releaseDdlLock(session: CqlSession, lockName: String) {
+    session.execute(session.prepare("DELETE FROM kandra_ddl_locks WHERE lock_name = ?").bind(lockName))
+}
+
+/**
+ * The current time as seen by the ScyllaDB/Cassandra coordinator serving this query -- *not* this
+ * JVM's [Instant.now]. See [claimAndRunDdlBootstrap]'s KDoc, "Staleness" (GH #64's approach reused
+ * here for the same reason: never compare timestamps across independently-clocked app instances).
+ */
+private fun ddlLockServerNow(session: CqlSession, lockName: String): Instant {
+    val row = session.execute(
+        session.prepare("SELECT toTimestamp(now()) AS server_now FROM kandra_ddl_locks WHERE lock_name = ?")
+            .bind(lockName)
+    ).one()
+    return row?.getInstant("server_now") ?: Instant.now()
+}
 
 @InternalKandraApi
 private fun validatePermissions(session: CqlSession, keyspace: String, schemaMode: SchemaMode) {

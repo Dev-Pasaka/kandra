@@ -716,14 +716,16 @@ In short:
   (`R + W ≥ RF`) — raise `defaultRead` (e.g. to `LOCAL_QUORUM`) if your keyspace's replication
   factor is higher, since Strict Mode does not currently check this for you
   ([ISS-075](docs/issues/ISS-075-strict-mode-rf-consistency-math.md)).
-- `SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE` run DDL from every instance at every startup with no
-  coordination guard — safe for a single instance, a real risk if several replicas start
-  concurrently against the same keyspace
-  ([ISS-071](docs/issues/ISS-071-concurrent-ddl-bootstrap-race.md)).
-- Connection-pool size and request backpressure are not yet configurable through Kandra
+- `SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE`'s DDL, and `KandraMigrationRunner`'s own bookkeeping-table
+  bootstrap, are now guarded by an LWT claim so only one of several concurrently-starting instances
+  actually runs the DDL — see [`docs/features/schema-modes.md`](docs/features/schema-modes.md#concurrent-instance-coordination)
+  and [ISS-071](docs/issues/ISS-071-concurrent-ddl-bootstrap-race.md) for exactly how it behaves
+  under a slow or crashed claim-holder.
+- Connection-pool size (`pool { localPoolSize; remotePoolSize }`) and request backpressure
+  (`throttle { }`, off by default) are now configurable through Kandra — size them for your
+  expected concurrency before load testing
   ([ISS-072](docs/issues/ISS-072-connection-pool-size-unconfigurable.md),
-  [ISS-073](docs/issues/ISS-073-no-backpressure-admission-control.md)) — worth knowing before load
-  testing.
+  [ISS-073](docs/issues/ISS-073-no-backpressure-admission-control.md)).
 
 ---
 
