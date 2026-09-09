@@ -1,12 +1,16 @@
 package io.kandra.migrate
 
 import com.datastax.oss.driver.api.core.CqlSession
+import io.kandra.core.exception.KandraSchemaException
 import io.kandra.test.KandraTestcontainers
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -209,5 +213,85 @@ class DdlBootstrapClaimTest {
         val lockRow = session.execute("SELECT status, holder FROM kandra_ddl_locks WHERE lock_name = ?", "stale-lock").one()
         assertEquals("DONE", lockRow?.getString("status"))
         assertTrue(lockRow?.getString("holder") != "crashed-instance", "the reclaiming instance should be a different holder")
+    }
+
+    /**
+     * GH #91 / ISS-078 -- holder fencing on completion. Simulates the scenario the issue describes:
+     * a claimant's `action()` is still genuinely running when another instance judges the claim
+     * stale and reclaims it (a real risk under multi-DC latency, since staleness is a heuristic
+     * timeout, not a lease). Here that reclaim is simulated with a direct, unconditional write
+     * inside `action()` itself -- indistinguishable, from `runClaimedDdlAction`'s point of view,
+     * from a real `reclaimStaleDdlLock` CAS by another instance. Before the fix, the original
+     * claimant's unconditional `markDdlLockDone` would have silently clobbered the new holder's
+     * active claim; now the fenced `IF holder = ?` write loses its CAS and throws instead of
+     * no-oping, and the new holder's row is left untouched.
+     */
+    @Test
+    fun `completing action() after losing the lock to a reclaim throws instead of clobbering the new holder`() {
+        val session = freshSession()
+        val lockName = "still-alive-lock"
+
+        val ex = assertThrows(KandraSchemaException::class.java) {
+            claimAndRunDdlBootstrap(session, lockName) {
+                // Simulates another instance's reclaimStaleDdlLock winning its CAS while we are
+                // still (unbeknownst to it) alive and running -- same net effect on the row.
+                session.execute(
+                    "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) WHERE lock_name = ?",
+                    "other-instance", lockName
+                )
+            }
+        }
+        assertTrue(ex.message!!.contains(lockName), "the exception should name the lock that was lost: ${ex.message}")
+
+        val lockRow = session.execute("SELECT holder, status FROM kandra_ddl_locks WHERE lock_name = ?", lockName).one()
+        assertEquals("other-instance", lockRow?.getString("holder"), "the reclaiming instance's holder must survive our lost-fencing completion")
+        assertNotEquals("DONE", lockRow?.getString("status"), "the reclaiming instance's claim must not be marked DONE by the instance that lost it")
+    }
+
+    /**
+     * GH #91 / ISS-078 companion: the same lost-fencing scenario, but `action()` itself also fails.
+     * The original failure must still propagate (never masked by the fencing outcome), and the
+     * fenced `releaseDdlLock` losing its CAS must not delete the new holder's row out from under it.
+     */
+    @Test
+    fun `action() failing after losing the lock to a reclaim still propagates the original failure, without deleting the new holder's claim`() {
+        val session = freshSession()
+        val lockName = "still-alive-lock-failure"
+        val actionFailure = RuntimeException("boom")
+
+        val thrown = assertThrows(RuntimeException::class.java) {
+            claimAndRunDdlBootstrap(session, lockName) {
+                session.execute(
+                    "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) WHERE lock_name = ?",
+                    "other-instance-2", lockName
+                )
+                throw actionFailure
+            }
+        }
+        assertEquals(actionFailure, thrown, "the original action() failure must propagate unmasked")
+
+        val lockRow = session.execute("SELECT holder FROM kandra_ddl_locks WHERE lock_name = ?", lockName).one()
+        assertEquals("other-instance-2", lockRow?.getString("holder"), "the reclaiming instance's row must survive our failed release")
+    }
+
+    /**
+     * GH #91 / ISS-078 -- [ddlLockServerNow] previously read `toTimestamp(now())` from the specific
+     * `kandra_ddl_locks` row under staleness inspection, which could fall back to this JVM's own
+     * clock if that row didn't exist. It now reads from `system.local`, which exists on every node
+     * regardless of `kandra_ddl_locks`'s state -- proven here by calling it against a keyspace where
+     * `kandra_ddl_locks` hasn't even been created yet.
+     */
+    @Test
+    fun `ddlLockServerNow returns a real cluster timestamp even when kandra_ddl_locks does not exist`() {
+        val session = freshSession()
+        val before = Instant.now().minus(Duration.ofSeconds(5))
+
+        val serverNow = ddlLockServerNow(session)
+
+        val after = Instant.now().plus(Duration.ofSeconds(5))
+        assertTrue(
+            serverNow.isAfter(before) && serverNow.isBefore(after),
+            "server time should be a real, current cluster timestamp, not a degenerate fallback: $serverNow"
+        )
     }
 }

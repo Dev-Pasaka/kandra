@@ -490,7 +490,7 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
 
     if (tryClaimDdlLock(session, lockName, holder)) {
         logger.info { "Kandra: claimed DDL bootstrap lock '$lockName' -- running schema DDL." }
-        runClaimedDdlAction(session, lockName, action)
+        runClaimedDdlAction(session, lockName, holder, action)
         return
     }
 
@@ -508,7 +508,7 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
             // The row vanished between our failed claim and this read (shouldn't normally happen
             // outside of a manual operator intervention) -- treat it like nobody has claimed it.
             if (tryClaimDdlLock(session, lockName, holder)) {
-                runClaimedDdlAction(session, lockName, action)
+                runClaimedDdlAction(session, lockName, holder, action)
                 return
             }
             continue
@@ -520,7 +520,7 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
         }
 
         val claimedAt = row.getInstant("claimed_at") ?: Instant.EPOCH
-        val age = Duration.between(claimedAt, ddlLockServerNow(session, lockName))
+        val age = Duration.between(claimedAt, ddlLockServerNow(session))
         if (age > DDL_CLAIM_STALE_THRESHOLD) {
             logger.warn {
                 "Kandra: DDL bootstrap lock '$lockName' has been CLAIMED for ${age.seconds}s, " +
@@ -528,7 +528,7 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
                 "previous claimant is presumed crashed. Reclaiming and running the DDL here."
             }
             if (reclaimStaleDdlLock(session, lockName, holder, claimedAt)) {
-                runClaimedDdlAction(session, lockName, action)
+                runClaimedDdlAction(session, lockName, holder, action)
                 return
             }
             // Someone else reclaimed (or finished) it between our staleness check and the reclaim
@@ -540,15 +540,45 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
     }
 }
 
-/** Runs [action] for the instance that just won (or reclaimed) [lockName], releasing the claim on failure so a later attempt can retry, or marking it DONE on success. */
-private fun runClaimedDdlAction(session: CqlSession, lockName: String, action: () -> Unit) {
+/**
+ * Runs [action] for the instance that just won (or reclaimed) [lockName] as [holder], releasing
+ * the claim on failure so a later attempt can retry, or marking it DONE on success.
+ *
+ * GH #91/ISS-078: both the release and the DONE write are fenced by `holder` (`IF holder = ?`),
+ * not unconditional -- otherwise a stale-claim reclaim by another instance while [action] is still
+ * genuinely running here (a real risk under multi-DC latency, since a claim's staleness threshold
+ * is a heuristic, not a lease) would let this instance's completion clobber that other instance's
+ * active claim, or its release delete the row out from under it. A lost CAS here means this
+ * instance's ownership of [lockName] was taken over mid-run -- exactly the schema-disagreement
+ * risk #79 exists to prevent -- so it's surfaced loudly rather than silently no-oping.
+ */
+private fun runClaimedDdlAction(session: CqlSession, lockName: String, holder: String, action: () -> Unit) {
     try {
         action()
     } catch (e: Exception) {
-        releaseDdlLock(session, lockName)
+        if (!releaseDdlLock(session, lockName, holder)) {
+            logger.warn {
+                "Kandra: DDL bootstrap lock '$lockName' could not be released by holder '$holder' " +
+                "after its action() failed -- the lock was already reclaimed by another instance " +
+                "(its action() is presumably now running, or has already finished). The original " +
+                "failure below is what this instance should still report; no further action is " +
+                "needed here since another instance now owns the retry."
+            }
+        }
         throw e
     }
-    markDdlLockDone(session, lockName)
+    if (!markDdlLockDone(session, lockName, holder)) {
+        throw KandraSchemaException(
+            "Kandra: DDL bootstrap lock '$lockName' was reclaimed by another instance while holder " +
+            "'$holder' was still running its DDL action. The action completed successfully here, but " +
+            "this instance lost ownership of the coordination lock before it could record that -- " +
+            "meaning a second instance may have concurrently run (or is about to run) the same DDL, " +
+            "the exact schema-disagreement risk this claim mechanism exists to prevent. This means the " +
+            "DDL pass took longer than the ${DDL_CLAIM_STALE_THRESHOLD.seconds}s staleness threshold. " +
+            "Verify the resulting schema in '$lockName' is consistent, and investigate why the DDL " +
+            "pass (or cluster latency) exceeded the staleness threshold."
+        )
+    }
     logger.info { "Kandra: DDL bootstrap lock '$lockName' released (done)." }
 }
 
@@ -591,27 +621,46 @@ private fun reclaimStaleDdlLock(session: CqlSession, lockName: String, holder: S
     return session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
 }
 
-private fun markDdlLockDone(session: CqlSession, lockName: String) {
-    session.execute(
-        session.prepare("UPDATE kandra_ddl_locks SET status = 'DONE' WHERE lock_name = ?").bind(lockName)
+/**
+ * Marks [lockName] DONE, but only if [holder] is still its current holder (GH #91/ISS-078) --
+ * fenced the same way [reclaimStaleDdlLock] already fences its own CAS, so a claim that was
+ * reclaimed out from under [holder] (a stale-claim reclaim racing a still-alive, still-running
+ * claimant) can't have its completion silently overwrite the new holder's active claim. Returns
+ * `false` if the CAS lost -- see [runClaimedDdlAction] for how that's handled.
+ */
+private fun markDdlLockDone(session: CqlSession, lockName: String, holder: String): Boolean {
+    val prepared = session.prepare(
+        "UPDATE kandra_ddl_locks SET status = 'DONE' WHERE lock_name = ? IF holder = ?"
     )
+    return session.execute(prepared.bind(lockName, holder)).wasApplied()
 }
 
-/** Releases a claim (deletes its row) so a later attempt can retry cleanly after [action] fails. */
-private fun releaseDdlLock(session: CqlSession, lockName: String) {
-    session.execute(session.prepare("DELETE FROM kandra_ddl_locks WHERE lock_name = ?").bind(lockName))
+/**
+ * Releases a claim (deletes its row) so a later attempt can retry cleanly after [action] fails --
+ * but only if [holder] is still its current holder (GH #91/ISS-078), for the same reason
+ * [markDdlLockDone] is fenced: an unconditional delete could remove another instance's active
+ * claim out from under it, after this holder's claim was itself reclaimed as stale while it was
+ * still (unbeknownst to the reclaimer) alive and running. Returns `false` if the CAS lost.
+ */
+private fun releaseDdlLock(session: CqlSession, lockName: String, holder: String): Boolean {
+    val prepared = session.prepare("DELETE FROM kandra_ddl_locks WHERE lock_name = ? IF holder = ?")
+    return session.execute(prepared.bind(lockName, holder)).wasApplied()
 }
 
 /**
  * The current time as seen by the ScyllaDB/Cassandra coordinator serving this query -- *not* this
  * JVM's [Instant.now]. See [claimAndRunDdlBootstrap]'s KDoc, "Staleness" (GH #64's approach reused
  * here for the same reason: never compare timestamps across independently-clocked app instances).
+ *
+ * Reads from `system.local` (GH #91/ISS-078) rather than the `kandra_ddl_locks` row for [lockName]
+ * itself: that row's existence is exactly what a staleness check is reasoning about, and it can be
+ * deleted out from under a concurrent caller by [releaseDdlLock] -- falling back to this JVM's own
+ * clock in that window is precisely the clock-skew risk this whole mechanism exists to avoid.
+ * `system.local` always has exactly one row (the local node's own), on every Cassandra/ScyllaDB
+ * node, so this has nothing to fall back to except a genuinely unreachable cluster.
  */
-private fun ddlLockServerNow(session: CqlSession, lockName: String): Instant {
-    val row = session.execute(
-        session.prepare("SELECT toTimestamp(now()) AS server_now FROM kandra_ddl_locks WHERE lock_name = ?")
-            .bind(lockName)
-    ).one()
+internal fun ddlLockServerNow(session: CqlSession): Instant {
+    val row = session.execute("SELECT toTimestamp(now()) AS server_now FROM system.local").one()
     return row?.getInstant("server_now") ?: Instant.now()
 }
 

@@ -1,6 +1,6 @@
 # ISS-078: DDL bootstrap claim's completion/release writes have no holder fencing; clock-skew staleness check has a local-clock fallback bug
 
-**Status:** Open
+**Status:** Fixed
 
 ## Problem
 
@@ -31,3 +31,46 @@ High. Both gaps are more likely to trigger under real multi-DC latency (the exac
 `kandra-ktor/src/main/kotlin/io/kandra/ktor/Kandra.kt`, `kandra-migrate/src/main/kotlin/io/kandra/migrate/KandraMigrationRunner.kt`
 
 Filed from a critical post-fix audit (2026-09-09) ahead of experimental multi-DC cluster testing, re-reviewing the brand-new #79 fix. Related to the previous issue (same mechanism, different bug).
+
+## Fix
+
+Applied both of the first two "Suggested fix" bullets above, in both `Kandra.kt` and
+`KandraMigrationRunner.kt`. The third bullet (heartbeat renewal / configurable staleness
+threshold) was left as a "Consider" item, not implemented here — it addresses a different concern
+(making the staleness *window* itself more accurate for genuinely slow DDL) than the two
+correctness gaps this issue is actually about, and would add real scope (a new config knob, a
+background renewal loop) beyond what's needed to fix the fencing/clock bugs.
+
+**1. Holder fencing.** `markDdlLockDone` and `releaseDdlLock` both now take the caller's `holder`
+and bind it into an `IF holder = ?` CAS (`UPDATE ... IF holder = ?` / `DELETE ... IF holder = ?`),
+mirroring `reclaimStaleDdlLock`'s existing CAS pattern. Both now return `Boolean` (whether the CAS
+applied) instead of `Unit`. `runClaimedDdlAction` (renamed call sites to pass `holder` through)
+now treats a lost CAS as a real error condition rather than silently no-oping:
+- If `action()` succeeded but `markDdlLockDone` loses its CAS (this holder's claim was reclaimed by
+  another instance while `action()` was still running), it throws `KandraSchemaException` — the DDL
+  did complete, but ownership was lost mid-run, meaning a second instance may have concurrently run
+  (or is about to run) the same DDL. That's exactly the schema-disagreement risk #79 exists to
+  prevent, so it's surfaced loudly rather than silently marking done (which would have clobbered the
+  new holder's active claim).
+- If `action()` failed and the subsequent `releaseDdlLock` also loses its CAS (someone else already
+  reclaimed this lock), the original exception from `action()` is still what propagates — a WARN is
+  logged noting the lock was already taken over, but no new exception is raised, since another
+  instance already owns the retry and there's nothing left to release.
+
+**2. Clock source.** `ddlLockServerNow` no longer takes a `lockName` / reads from the specific
+`kandra_ddl_locks` row. It now runs `SELECT toTimestamp(now()) AS server_now FROM system.local` —
+a table/row that exists on every Cassandra/ScyllaDB node regardless of `kandra_ddl_locks`'s state,
+so the `Instant.now()` fallback path is only reachable if the cluster itself is unreachable, not
+merely because a specific lock row was deleted by a concurrent `releaseDdlLock`.
+
+Verified with three new tests added to `DdlBootstrapClaimTest` in **both** `kandra-ktor` and
+`kandra-migrate` (six tests total), run against a real Testcontainers cluster:
+- A claimant whose `action()` triggers a simulated concurrent reclaim (a direct row write inside
+  `action()`, indistinguishable from a real `reclaimStaleDdlLock` CAS by another instance) now
+  throws `KandraSchemaException` on completion instead of clobbering the new holder's row — and the
+  new holder's row is asserted to survive with its own holder/status intact.
+- The same scenario with `action()` itself also failing: the original failure still propagates
+  unmasked, and the new holder's row still survives the failed, fenced release.
+- `ddlLockServerNow` (`internal` now, was `private`, purely for this direct test) returns a real,
+  current cluster timestamp even when called against a keyspace where `kandra_ddl_locks` doesn't
+  exist at all yet.
