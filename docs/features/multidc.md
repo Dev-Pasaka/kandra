@@ -38,3 +38,17 @@ Behavior:
 
 See [`ConsistencyConfig`](../USER_GUIDE.md#strict-mode-multi-dc-local_oneone-warning) in the User Guide
 for the full consistency-resolution example.
+
+## Testing against a real multi-DC topology
+
+`kandra-test`'s `KandraMultiDcTestcontainers` (GH #84 / ISS-076) spins up a real, two-datacenter,
+one-node-per-DC Cassandra cluster via Testcontainers' `ComposeContainer` — `dc1`/`dc2`, plain
+`cassandra:4.1`, `GossipingPropertyFileSnitch`, gossiped into one cluster — for tests that need
+genuine `NetworkTopologyStrategy` replication and real DC-aware failover, not a single-node stand-in.
+It follows `KandraTestcontainers`'s lazy-singleton convention (one topology per JVM) and adds
+`pause`/`unpause` helpers (via the Docker API) to simulate a DC going unreachable mid-test. See
+`kandra-multidc/src/test/kotlin/io/kandra/multidc/MultiDcFailoverTest.kt` for real
+`dcAwareFailover`/`FailoverPolicy` and Strict Mode tests built on it, and
+`KandraMultiDcTestcontainers`'s own KDoc for why the topology is scoped to one node per DC. This
+suite is slower than a typical unit-test run (real two-node gossip convergence), so it's tagged out
+of the default `test` task — run it explicitly with `./gradlew :kandra-multidc:multiDcTest`.

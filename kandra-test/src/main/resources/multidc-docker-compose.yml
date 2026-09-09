@@ -1,0 +1,87 @@
+# Two-datacenter, one-node-per-DC Cassandra topology backing `KandraMultiDcTestcontainers`
+# (GH #84 / ISS-076). See that class's KDoc for why this is scoped to 1 node per DC (2 containers
+# total) rather than 2+ nodes per DC.
+#
+# Both services boot from the stock `cassandra:4.1` image (matching the single-node convention in
+# `KandraTestcontainers`) -- everything needed for a genuine two-DC topology is expressible
+# entirely through the image's own environment-variable contract (`docker-entrypoint.sh`, verified
+# against the actual image for this fix): `CASSANDRA_DC` / `CASSANDRA_RACK` write
+# `cassandra-rackdc.properties`, `CASSANDRA_ENDPOINT_SNITCH` selects `GossipingPropertyFileSnitch`
+# (DC/rack-aware, required for `NetworkTopologyStrategy` to mean anything), and `CASSANDRA_SEEDS`
+# points both nodes at `cassandra-dc1` so they gossip into one cluster instead of two independent
+# single-node clusters that happen to share a Docker network.
+#
+# `cassandra-dc2` waits on `cassandra-dc1` being healthy (not just started) before its own
+# container starts, so it never races dc1's gossip/native-transport bring-up -- gossip convergence
+# across two real nodes is inherently slower than the single-node case, so generous
+# healthcheck/startup timeouts are used throughout (see `KandraMultiDcTestcontainers` for the
+# matching Testcontainers-side wait strategy timeouts).
+#
+# ## Why fixed, distinct host ports (9042 / 9043) instead of Testcontainers' usual dynamic mapping
+#
+# A client connecting to *any* node in a Cassandra cluster discovers the rest of the ring via
+# `system.peers`/`system.peers_v2` and then opens its own direct connections to those peers --
+# there is no proxying through whichever node it first contacted. Testcontainers' single-node
+# `CassandraContainer` never has to deal with this (no peers to discover), but a real 2-node
+# cluster does: if peers advertise Docker's *internal* bridge-network address (the default), a
+# client running on the host (outside that Docker network) can resolve the initial contact point
+# fine but then fails to open connections to the discovered peer at all -- exactly the
+# `NoNodeAvailableException`/`NotYetConnectedException` failure mode hit while building this
+# fixture. `CASSANDRA_BROADCAST_RPC_ADDRESS=localhost` fixes the *address* half of that (each node
+# advertises the address the host-side driver can actually reach), but Cassandra's peer discovery
+# (`system.peers_v2`, protocol v5+) also advertises a per-node `native_port` -- each node's own
+# `native_transport_port` -- so the two nodes cannot share the same port once they're both
+# reachable at `localhost`. `cassandra-dc2` therefore runs on `native_transport_port: 9043` (see
+# `multidc-dc2-cassandra.yaml`, a full copy of the image's own default `cassandra.yaml` with only
+# that one line changed) instead of the default `9042`, and each port is published 1:1 (host port
+# == container port) so the advertised `native_port` is also the real, host-reachable port.
+services:
+  cassandra-dc1:
+    image: cassandra:4.1
+    environment:
+      CASSANDRA_CLUSTER_NAME: KandraMultiDcTest
+      CASSANDRA_DC: dc1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-dc1
+      # See the file-level comment above -- lets a driver running on the host (outside this
+      # compose network) actually reach this node once discovered as a peer, not just as the
+      # initial contact point.
+      CASSANDRA_BROADCAST_RPC_ADDRESS: localhost
+    ports:
+      # Fixed and 1:1 (host 9042 == container 9042) -- see file-level comment above for why this
+      # can't be a dynamic Testcontainers-assigned port here.
+      - "9042:9042"
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'SELECT release_version FROM system.local' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+
+  cassandra-dc2:
+    image: cassandra:4.1
+    environment:
+      CASSANDRA_CLUSTER_NAME: KandraMultiDcTest
+      CASSANDRA_DC: dc2
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      # Both nodes list dc1 as the seed -- dc2 joins the same cluster/gossip ring dc1 already
+      # started, rather than the two nodes forming two separate single-node clusters.
+      CASSANDRA_SEEDS: cassandra-dc1
+      CASSANDRA_BROADCAST_RPC_ADDRESS: localhost
+    volumes:
+      # Only `native_transport_port` differs from the image's default cassandra.yaml -- see the
+      # file-level comment above for why dc2 can't share dc1's port once both are host-reachable.
+      - ./multidc-dc2-cassandra.yaml:/etc/cassandra/cassandra.yaml
+    ports:
+      - "9043:9043"
+    depends_on:
+      cassandra-dc1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9043 -e 'SELECT release_version FROM system.local' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
