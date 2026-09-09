@@ -29,8 +29,11 @@ private val logger = KotlinLogging.logger {}
 /**
  * Matches a single-quoted string literal (`'...'`) or a double-quoted identifier immediately
  * followed by `=` (`"col"=`) anywhere in a CQL string. See [QueryExecutor.checkRawInjectionRisk].
+ *
+ * `internal` (not file-private) so [StatementBuilder.existsQuery] can apply the same heuristic to
+ * its own raw `whereCql` fragment (GH #107) without maintaining a second copy of this regex.
  */
-private val SUSPICIOUS_LITERAL_PATTERN = Regex("""'[^']*'|"[^"]*"\s*=""")
+internal val SUSPICIOUS_LITERAL_PATTERN = Regex("""'[^']*'|"[^"]*"\s*=""")
 
 /**
  * Translates [QueryContext] predicates into CQL SELECT statements and decodes results.

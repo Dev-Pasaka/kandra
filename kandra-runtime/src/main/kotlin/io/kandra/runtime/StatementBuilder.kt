@@ -9,6 +9,7 @@ import io.kandra.core.InternalKandraApi
 import io.kandra.core.KandraConsistency
 import io.kandra.core.annotations.ReadConsistency
 import io.kandra.core.annotations.WriteConsistency
+import io.kandra.core.exception.KandraQueryException
 import io.kandra.core.exception.KandraSchemaException
 import io.kandra.core.schema.LookupTableSchema
 import io.kandra.core.schema.TableSchema
@@ -746,7 +747,29 @@ class StatementBuilder(
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
 
+    /**
+     * GH #107: [whereCql] is spliced directly into the generated CQL with no identifier/heuristic
+     * validation of its own -- exactly the same shape of raw-CQL splicing
+     * [QueryExecutor.checkRawInjectionRisk] guards for `raw()`/`rawQuery()` (GH #50 / ISS-050).
+     * [StatementBuilder] is a public class with a public constructor, reachable cross-module (e.g.
+     * from `kandra-kodein`), so `existsQuery` isn't purely internal plumbing even though nothing in
+     * this codebase currently calls it -- guarded the same way every other raw-CQL entry point is,
+     * rather than relying on it staying unreachable.
+     */
+    private fun checkRawInjectionRisk(cql: String, callerName: String) {
+        if (!SUSPICIOUS_LITERAL_PATTERN.containsMatchIn(cql)) return
+        val message = "$callerName() CQL appears to contain a string literal spliced directly into the " +
+            "query (independent of any other bound parameters). If any of it came from user input this " +
+            "is a CQL injection risk. Build the WHERE clause from parameterized predicates instead."
+        if (debugConfig.rawQueryStrictMode) {
+            throw KandraQueryException(message)
+        } else {
+            logger.warn { message }
+        }
+    }
+
     fun existsQuery(schema: TableSchema, whereCql: String, values: List<Any?>): BoundStatement {
+        checkRawInjectionRisk(whereCql, "existsQuery")
         val pkCols = schema.partitionKeys.joinToString(", ") { it.cqlName }
         val cql = "SELECT $pkCols FROM ${schema.tableName} WHERE $whereCql LIMIT 1"
         val prepared = prepare(cql)

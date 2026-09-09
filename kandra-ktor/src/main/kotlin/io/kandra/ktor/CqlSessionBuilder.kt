@@ -285,6 +285,21 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
             val provider = ProgrammaticPlainTextAuthProvider(creds.username, creds.password)
             builder.withAuthProvider(provider)
             liveAuthProvider = provider
+        } else {
+            // GH #107: this used to be a silent no-op -- against a cluster with
+            // AllowAllAuthenticator, a misconfigured KandraAuthProvider (or an env var explicitly
+            // set to "" instead of left unset -- KandraAuth.fromEnv() only throws on null, not
+            // blank) put the deployment into permanent no-auth mode with zero startup signal. The
+            // only place this was ever surfaced was the credential-rotation WARN branch in
+            // Kandra.kt, which only exists when auth.refreshIntervalSeconds is configured (not the
+            // default). Logged unconditionally here instead, independent of rotation config.
+            logger.warn {
+                "Kandra: auth.provider returned a blank username -- opening the ScyllaDB session " +
+                    "WITHOUT authentication. This is only safe against a cluster configured with " +
+                    "AllowAllAuthenticator. If this is unintentional, check auth.provider / the " +
+                    "environment variables it reads from (an env var set to an empty string is " +
+                    "indistinguishable from a real blank username here)."
+            }
         }
     } catch (e: KandraAuthException) {
         throw e
