@@ -63,11 +63,16 @@ class KandraRuntime(
 
     /**
      * Blocking variant of [batch] for use in non-suspend contexts.
+     *
+     * Takes a distinct [KandraBlockingBatchScope] receiver (GH #99 / ISS-086) rather than sharing
+     * [KandraBatchScope] — a suspend `KandraSuspendRepository.saveInBatch`/`deleteInBatch` call
+     * made no sense here anyway, but keeping the overload sets on separate types means the compiler
+     * enforces it instead of it merely being true by convention.
      */
     @ExperimentalKandraApi
-    fun batchBlocking(block: KandraBatchScope.() -> Unit) {
+    fun batchBlocking(block: KandraBlockingBatchScope.() -> Unit) {
         checkNotShuttingDown()
-        val scope = KandraBatchScope(batchEngine)
+        val scope = KandraBlockingBatchScope(batchEngine)
         scope.block()
         scope.execute()
     }

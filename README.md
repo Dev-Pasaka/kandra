@@ -756,6 +756,13 @@ application.kandra.batch {
 same-named repository member over an extension, even a member-extension of the batch scope
 itself, so a same-named batch method would silently never be reachable.
 
+`batch { }` is suspend and only accepts `KandraSuspendRepository.saveInBatch`/`deleteInBatch` calls
+(its scope type is `KandraBatchScope`); `batchBlocking { }` is its non-suspend counterpart and only
+accepts `KandraRepository.saveInBatch`/`deleteInBatch` calls (`KandraBlockingBatchScope`). The two
+scope types are deliberately distinct so calling the blocking repository's `saveInBatch` from inside
+a suspend `batch { }` block (which would block the calling coroutine's dispatcher thread) is a
+compile error rather than a silent foot-gun.
+
 Limitations: reads are not available inside a batch; `saveIfNotExists` throws (LWT cannot be mixed with regular statements in a batch).
 
 ---
