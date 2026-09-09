@@ -623,10 +623,18 @@ ssl {
 
 SSL handshake failures are wrapped as `KandraAuthException`. Keyspace permission validation runs at startup — disable with `validatePermissions = false` in restricted environments.
 
-> `SslConfig` also declares `requireEncryption`, `minimumTlsVersion`, and `cipherSuites` fields —
-> these are not yet wired into the driver/`SSLContext` and currently have no effect
-> ([ISS-070](docs/issues/ISS-070-ssl-config-dead-fields.md)). Only `enabled`, `hostnameVerification`,
-> and the trust/key store settings shown above are live.
+`SslConfig` also supports `minimumTlsVersion` (default `"TLSv1.2"`, must be one of `TLSv1`/`TLSv1.1`/`TLSv1.2`/`TLSv1.3`), `cipherSuites` (restricts the handshake to exactly this list), and `requireEncryption` (off by default — set to `true` to make Kandra refuse to start with `ssl.enabled = false`, as a hard guard against TLS being accidentally left off). All three are enforced ([ISS-070](docs/issues/ISS-070-ssl-config-dead-fields.md)):
+
+```kotlin
+ssl {
+    enabled = true
+    requireEncryption = true
+    minimumTlsVersion = "TLSv1.3"
+    cipherSuites = listOf("TLS_AES_256_GCM_SHA384")
+    trustStorePath = "/etc/ssl/scylla-truststore.jks"
+    trustStorePassword = System.getenv("TRUST_STORE_PASSWORD")
+}
+```
 
 ---
 
@@ -713,10 +721,11 @@ In short:
   actually runs the DDL — see [`docs/features/schema-modes.md`](docs/features/schema-modes.md#concurrent-instance-coordination)
   and [ISS-071](docs/issues/ISS-071-concurrent-ddl-bootstrap-race.md) for exactly how it behaves
   under a slow or crashed claim-holder.
-- Connection-pool size and request backpressure are not yet configurable through Kandra
+- Connection-pool size (`pool { localPoolSize; remotePoolSize }`) and request backpressure
+  (`throttle { }`, off by default) are now configurable through Kandra — size them for your
+  expected concurrency before load testing
   ([ISS-072](docs/issues/ISS-072-connection-pool-size-unconfigurable.md),
-  [ISS-073](docs/issues/ISS-073-no-backpressure-admission-control.md)) — worth knowing before load
-  testing.
+  [ISS-073](docs/issues/ISS-073-no-backpressure-admission-control.md)).
 
 ---
 
