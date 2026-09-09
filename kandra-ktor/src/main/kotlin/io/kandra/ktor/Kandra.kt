@@ -10,6 +10,7 @@ import io.kandra.core.KandraEventListener
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.exception.KandraAuthException
 import io.kandra.core.exception.KandraSchemaException
+import io.kandra.core.schema.TableSchema
 import io.kandra.runtime.BatchEngine
 import io.kandra.runtime.DebugConfig
 import io.kandra.runtime.KandraRuntime
@@ -36,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -140,7 +142,13 @@ val Kandra: ApplicationPlugin<KandraConfig> =
                 // schema-disagreement risk on Cassandra/Scylla. Guard the whole pass behind a single
                 // cluster-wide LWT claim so exactly one instance runs it per startup wave; the rest
                 // wait for it to finish rather than racing the same DDL. See claimAndRunDdlBootstrap.
-                claimAndRunDdlBootstrap(session, DDL_BOOTSTRAP_SCHEMA_LOCK) {
+                //
+                // GH #90/ISS-077: the claim is keyed by a fingerprint of the currently-registered
+                // schema, not a fixed constant -- a claim marked DONE for an earlier fingerprint must
+                // never block a later deploy whose registered entities (or their columns) changed,
+                // or AUTO_CREATE/AUTO_MIGRATE would only ever run once per keyspace's entire lifetime.
+                // See schemaFingerprint's KDoc.
+                claimAndRunDdlBootstrap(session, ddlBootstrapLockName(SchemaRegistry.all())) {
                     SchemaRegistry.all().forEach { schema ->
                         DdlGenerator.allStatements(schema).forEach { ddl ->
                             session.execute(ddl)
@@ -150,9 +158,10 @@ val Kandra: ApplicationPlugin<KandraConfig> =
                 }
             }
             SchemaMode.AUTO_MIGRATE -> {
-                // Same claim guard as AUTO_CREATE above -- this branch also runs ALTER TABLE ADD,
-                // which is exactly the multi-statement, multi-table DDL the guard exists to serialize.
-                claimAndRunDdlBootstrap(session, DDL_BOOTSTRAP_SCHEMA_LOCK) {
+                // Same claim guard and fingerprinted lock name as AUTO_CREATE above (GH #79, GH #90)
+                // -- this branch also runs ALTER TABLE ADD, which is exactly the multi-statement,
+                // multi-table DDL the guard exists to serialize.
+                claimAndRunDdlBootstrap(session, ddlBootstrapLockName(SchemaRegistry.all())) {
                     SchemaRegistry.all().forEach { schema ->
                         // Step 1: CREATE TABLE IF NOT EXISTS
                         DdlGenerator.allStatements(schema).forEach { ddl ->
@@ -389,11 +398,53 @@ val Kandra: ApplicationPlugin<KandraConfig> =
     }
 
 /**
- * Lock key used for the [SchemaMode.AUTO_CREATE]/[SchemaMode.AUTO_MIGRATE] DDL bootstrap pass.
- * One key covers every registered entity for a given install -- see [claimAndRunDdlBootstrap]'s
- * KDoc for why this is a single claim for the whole pass rather than one per table.
+ * Lock key prefix used for the [SchemaMode.AUTO_CREATE]/[SchemaMode.AUTO_MIGRATE] DDL bootstrap
+ * pass. One key covers every registered entity for a given install -- see
+ * [claimAndRunDdlBootstrap]'s KDoc for why this is a single claim for the whole pass rather than
+ * one per table. Always used together with [schemaFingerprint] via [ddlBootstrapLockName] -- see
+ * that function's KDoc (GH #90/ISS-077) for why the fixed prefix alone is not a safe lock key.
  */
 private const val DDL_BOOTSTRAP_SCHEMA_LOCK = "schema-bootstrap"
+
+/**
+ * Lock name for the [SchemaMode.AUTO_CREATE]/[SchemaMode.AUTO_MIGRATE] DDL bootstrap claim (GH
+ * #90/ISS-077). Combines the fixed [DDL_BOOTSTRAP_SCHEMA_LOCK] prefix with a fingerprint of the
+ * currently-registered [schemas] so that a claim marked `DONE` for one schema generation never
+ * blocks a later deploy whose registered entities (or their columns) have changed.
+ *
+ * Before this existed, the lock was keyed by [DDL_BOOTSTRAP_SCHEMA_LOCK] alone: once any deploy
+ * won the claim and finished, every later deploy -- including one that registered a brand new
+ * entity, or added a column to an existing one under `AUTO_MIGRATE` -- found the row already
+ * `DONE` and skipped running DDL entirely, silently. Fingerprinting the lock name means a changed
+ * schema lands on a fresh, never-claimed row and runs its own DDL pass, while replicas within the
+ * *same* deploy wave (identical registered schema, identical fingerprint) still correctly
+ * serialize against each other exactly as before -- only one of them wins the claim, the rest wait
+ * and skip. See [schemaFingerprint] for what participates in the fingerprint.
+ */
+internal fun ddlBootstrapLockName(schemas: List<TableSchema>): String =
+    "$DDL_BOOTSTRAP_SCHEMA_LOCK-${schemaFingerprint(schemas)}"
+
+/**
+ * Fingerprints the registered schema by hashing the exact DDL each table would emit
+ * ([DdlGenerator.allStatements]) -- so the fingerprint changes whenever the physical DDL that
+ * `AUTO_CREATE`/`AUTO_MIGRATE` would run changes: a new table, a new column, a changed clustering
+ * order, and so on. Hashing rendered DDL rather than, say, just table names keeps this in lockstep
+ * with what the bootstrap pass actually does, without needing to independently reason about which
+ * [TableSchema] fields matter.
+ *
+ * Order-independent: [schemas] is sorted by table name before hashing, so registering the same
+ * entities in a different order (e.g. `register(B::class, A::class)` vs `register(A::class,
+ * B::class)`) produces the same fingerprint and does not spuriously trigger a new claim.
+ */
+internal fun schemaFingerprint(schemas: List<TableSchema>): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    schemas.sortedBy { it.tableName }.forEach { schema ->
+        DdlGenerator.allStatements(schema).forEach { ddl ->
+            digest.update(ddl.toByteArray(Charsets.UTF_8))
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
 
 /**
  * Runs [action] under a cluster-wide LWT claim keyed by [lockName], so that when several
