@@ -88,6 +88,15 @@ class KandraCodec {
         // `emptySet()`-initialized non-nullable property must stay readable after a round-trip.
         val isCollection = classifier == List::class || classifier == Set::class || classifier == Map::class
 
+        // A Cassandra/Scylla counter cell that has never been incremented reads back as NULL,
+        // not 0 — counters are independent per-cell and there's no implicit zero row. The
+        // driver's own getLong() returns the primitive default (0L) for a NULL column, so
+        // routing a NULL counter cell through the normal Long decode path below yields the
+        // correct semantic value regardless of the Kotlin property's declared nullability.
+        if (column.isCounter && row.isNull(name)) {
+            return 0L
+        }
+
         if (!isCollection && row.isNull(name)) {
             if (type.isMarkedNullable) return null
             throw KandraQueryException(
