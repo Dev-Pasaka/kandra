@@ -1,6 +1,6 @@
 # ISS-072: Connection-pool size (local/remote) has no Kandra-level configuration
 
-**Status:** Open
+**Status:** Fixed
 
 ## Problem
 
@@ -39,3 +39,29 @@ them.
 
 **Files:** `kandra-ktor/src/main/kotlin/io/kandra/ktor/KandraConfig.kt`,
 `kandra-ktor/src/main/kotlin/io/kandra/ktor/CqlSessionBuilder.kt`.
+
+## Fix
+
+Added `PoolConfig.localPoolSize` (default `1`) and `PoolConfig.remotePoolSize` (default `1`) —
+matching the DataStax driver's own defaults, so an unconfigured `pool { }` block changes nothing.
+Wired in `CqlSessionBuilder.buildDriverConfig` to
+`DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE`/`CONNECTION_POOL_REMOTE_SIZE`.
+
+KDoc on both fields documents sizing guidance: the real per-node concurrency ceiling is
+`localPoolSize * maxRequestsPerConnection` (pool size and per-connection request multiplexing
+compound), so raise `localPoolSize` only after profiling actual per-node concurrency under load, and
+`remotePoolSize` only matters once cross-DC failover is actually enabled
+(`loadBalancing.dcAwareFailover = true` + `failover.onLocalDcUnavailable = RETRY_REMOTE_DC`, per
+GH #58 / ISS-057). Also cross-references the still-open, larger architectural point from
+`ISS-069`/GH #70 item 4: Kandra uses the stock OSS DataStax driver, not a shard-aware ScyllaDB
+driver, so pool size is a coarser lever than shard-aware routing would be — out of scope here.
+
+## Tests
+
+`kandra-ktor/src/test/kotlin/io/kandra/ktor/CqlSessionBuilderTest.kt` (new):
+
+- `buildDriverConfig` defaults both `CONNECTION_POOL_LOCAL_SIZE` and `CONNECTION_POOL_REMOTE_SIZE`
+  to `1` when `pool { }` is untouched.
+- `buildDriverConfig` reflects configured `localPoolSize`/`remotePoolSize` values exactly.
+
+`./gradlew :kandra-ktor:test --no-daemon` and the full `./gradlew test --no-daemon` both pass.

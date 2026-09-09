@@ -43,6 +43,36 @@ class PoolConfig {
     var requestTimeoutMillis: Long = 5000
     /** How long to wait when establishing a TCP connection to a ScyllaDB node. Default is 5 000 ms. */
     var connectionTimeoutMillis: Long = 5000
+
+    /**
+     * Number of pooled connections held open to each node in the **local** datacenter. Wired to
+     * the driver's `advanced.connection.pool.local.size` (`CONNECTION_POOL_LOCAL_SIZE`) option
+     * (GH #80 / ISS-072); the driver's own default -- and this field's default -- is 1.
+     *
+     * Each pooled connection multiplexes up to [maxRequestsPerConnection] concurrent requests, so
+     * the real per-node concurrency ceiling is `localPoolSize * maxRequestsPerConnection`. Raise
+     * this only after profiling actual per-node concurrency under real load -- more connections
+     * isn't free (each is a TCP socket plus driver-side heap bookkeeping), and going from 1 to a
+     * handful of connections per node is almost always enough headroom before
+     * [maxRequestsPerConnection] becomes the real bottleneck. Note Kandra uses the stock OSS
+     * DataStax driver, not a shard-aware ScyllaDB driver, so pool size alone can't route directly
+     * to the owning shard on wide nodes (see `docs/issues/ISS-069-assorted-low-severity-findings.md`
+     * item 4) -- widening the pool is a coarser lever than shard-aware routing would be, but it's
+     * the lever Kandra currently exposes.
+     */
+    var localPoolSize: Int = 1
+
+    /**
+     * Number of pooled connections held open to each node in a **remote** datacenter. Wired to
+     * `advanced.connection.pool.remote.size` (`CONNECTION_POOL_REMOTE_SIZE`) option (GH #80 /
+     * ISS-072); default is 1, matching the driver's own default. Only relevant once cross-DC
+     * failover is actually enabled (`loadBalancing.dcAwareFailover = true` together with
+     * `failover.onLocalDcUnavailable = FailoverPolicy.RETRY_REMOTE_DC`) -- otherwise the driver
+     * never opens connections to remote-DC nodes at all and this value has no effect. Typically
+     * left at or below [localPoolSize] since sustained traffic to a remote DC should be the
+     * failover exception, not the steady state.
+     */
+    var remotePoolSize: Int = 1
 }
 
 /**
@@ -65,10 +95,37 @@ class AuthConfig {
  *
  * Enable with `ssl { enabled = true; trustStorePath = "..." }` for one-way TLS.
  * Add [keyStorePath] for mutual TLS (client certificate authentication).
+ *
+ * [minimumTlsVersion], [cipherSuites], and [hostnameVerification] are all applied through a
+ * custom `SslEngineFactory` (GH #78 / ISS-070) rather than `CqlSession.builder().withSslContext(...)`
+ * alone, which builds the driver's `ProgrammaticSslEngineFactory` with no cipher-suite restriction
+ * and no hostname validation regardless of driver config -- an `SSLContext` has no place to express
+ * a minimum protocol version or per-connection cipher restriction; that's an `SSLEngine`/
+ * `SSLParameters` concern applied per connection.
  */
 class SslConfig {
     var enabled: Boolean = false
-    var requireEncryption: Boolean = true
+
+    /**
+     * When true, refuses to build a [com.datastax.oss.driver.api.core.CqlSession] unless [enabled]
+     * is also true -- fails fast with [io.kandra.core.exception.KandraSchemaException] before any
+     * connection attempt. Defaults to `false`: SSL itself is opt-in ([enabled] defaults to `false`),
+     * so defaulting this to `true` would break every default [KandraConfig] that doesn't touch the
+     * `ssl { }` block at all. Turn this on explicitly in deployments where TLS must never
+     * accidentally be left off -- e.g. a staging/prod config bundle that sets
+     * `ssl { enabled = true; requireEncryption = true; ... }` as a guard against that `enabled` line
+     * being dropped later, or an environment-variable override silently disabling it. (GH #78 /
+     * ISS-070 -- this field used to be declared but never enforced at any default; enforcing it at
+     * its *old* default of `true` would have been a breaking change for every non-SSL deployment,
+     * which is why the default moved to `false` alongside adding real enforcement.)
+     */
+    var requireEncryption: Boolean = false
+
+    /**
+     * Enables hostname validation (`HTTPS`-style endpoint identification) against the server
+     * certificate. Applied directly on the [javax.net.ssl.SSLEngine] built for each connection
+     * (see class doc) -- only takes effect when [enabled] is also true.
+     */
     var hostnameVerification: Boolean = true
     var trustStorePath: String? = null
     var trustStorePassword: String? = null
@@ -76,8 +133,56 @@ class SslConfig {
     var keyStorePath: String? = null
     var keyStorePassword: String? = null
     var keyStoreType: String = "JKS"
+
+    /**
+     * Minimum TLS protocol version accepted during the handshake. Must be one of `"TLSv1"`,
+     * `"TLSv1.1"`, `"TLSv1.2"`, or `"TLSv1.3"` -- any other value throws
+     * [io.kandra.core.exception.KandraSchemaException] at session-build time (only checked when
+     * [enabled] is true). All protocol versions at or above this one that the JVM's SSL provider
+     * actually supports are enabled; versions below it are disabled outright.
+     */
     var minimumTlsVersion: String = "TLSv1.2"
+
+    /**
+     * Restricts the TLS cipher suites offered during the handshake to exactly this list, or `null`
+     * (default) to use the JVM/JSSE provider's own default enabled suites. An unsupported suite
+     * name throws `IllegalArgumentException` from the JSSE layer itself the first time the driver
+     * opens a connection -- Kandra does not pre-validate suite names against the JVM's supported
+     * list, since that list is provider- and JVM-version-dependent.
+     */
     var cipherSuites: List<String>? = null
+}
+
+/**
+ * Concurrency-limiting request admission control (GH #81 / ISS-073). Wires the DataStax driver's
+ * own `ConcurrencyLimitingRequestThrottler` -- caps how many requests the driver will have
+ * in-flight against the cluster at once, queuing additional requests up to [maxQueueSize] instead
+ * of dispatching everything unbounded, and rejecting anything beyond that queue immediately with
+ * `RequestThrottlingException`.
+ *
+ * Off by default: the driver's own default throttler (`PassThroughRequestThrottler`) never queues
+ * or rejects, which is what every existing Kandra deployment already runs under -- turning this on
+ * is an explicit choice a deployment makes once it wants controlled client-side backpressure
+ * against a slow or overloaded cluster (compaction storms, a partial multi-DC outage, a burst of
+ * application-side concurrency), rather than a behavior change that should surprise anyone who
+ * hasn't touched this block.
+ *
+ * This only throttles at the driver/session level (`session.execute`/`executeAsync` admission).
+ * It is unrelated to and does not replace `BatchEngine.inFlightCount`, which is Kandra's own
+ * separate in-flight tracker used purely for graceful-shutdown draining.
+ */
+class ThrottleConfig {
+    var enabled: Boolean = false
+
+    /** Maximum number of requests the driver will have in flight at once, once [enabled]. */
+    var maxConcurrentRequests: Int = 10_000
+
+    /**
+     * Maximum number of additional requests allowed to queue once [maxConcurrentRequests] is
+     * already in flight. Requests beyond this queue are rejected immediately with
+     * `RequestThrottlingException` rather than queued indefinitely.
+     */
+    var maxQueueSize: Int = 10_000
 }
 
 /**
@@ -262,6 +367,7 @@ class KandraConfig {
     val speculativeExecution: SpeculativeExecutionConfig = SpeculativeExecutionConfig()
     val shutdown: ShutdownConfig = ShutdownConfig()
     val metrics: MetricsConfig = MetricsConfig()
+    val throttle: ThrottleConfig = ThrottleConfig()
 
     var eventListener: KandraEventListener? = null
 
@@ -281,6 +387,7 @@ class KandraConfig {
     fun speculativeExecution(block: SpeculativeExecutionConfig.() -> Unit) { speculativeExecution.block() }
     fun shutdown(block: ShutdownConfig.() -> Unit) { shutdown.block() }
     fun metrics(block: MetricsConfig.() -> Unit) { metrics.block() }
+    fun throttle(block: ThrottleConfig.() -> Unit) { throttle.block() }
 
     fun <T : Any> validate(klass: KClass<T>, validator: KandraValidator<T>) {
         validators[klass] = validator

@@ -603,7 +603,10 @@ install(Kandra) {
 install(Kandra) {
     ssl {
         enabled              = true
+        requireEncryption    = true   // refuse to start if `enabled` is ever flipped back to false
         hostnameVerification = true
+        minimumTlsVersion    = "TLSv1.3"
+        cipherSuites         = listOf("TLS_AES_256_GCM_SHA384")
         trustStorePath       = "/etc/kandra/truststore.jks"
         trustStorePassword   = System.getenv("TRUST_STORE_PASSWORD")
 
@@ -614,11 +617,11 @@ install(Kandra) {
 }
 ```
 
-> `SslConfig` also declares `requireEncryption`, `minimumTlsVersion`, and `cipherSuites` fields —
-> these are not yet wired into the driver/`SSLContext` and currently have no effect
-> ([ISS-070](issues/ISS-070-ssl-config-dead-fields.md)). Only `enabled`, `hostnameVerification`, and
-> the trust/key store settings shown above are live; leaving the dead fields out of this example on
-> purpose so it doesn't imply they do something.
+`requireEncryption` defaults to `false` (SSL itself is opt-in via `enabled`, so defaulting this to
+`true` would fail startup for every non-SSL deployment) — set it explicitly when TLS must never
+accidentally be left off. `minimumTlsVersion` must be one of `TLSv1`/`TLSv1.1`/`TLSv1.2`/`TLSv1.3`
+(anything else throws `KandraSchemaException` at startup). All fields shown above are live and
+enforced ([ISS-070](issues/ISS-070-ssl-config-dead-fields.md)).
 
 ---
 
