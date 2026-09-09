@@ -24,6 +24,18 @@ import io.kandra.runtime.repository.KandraSuspendRepository
  * method — never this class's statement-collecting one — with no compiler warning. Distinct
  * names route the call correctly and make it a compile error to reach for the wrong one.
  *
+ * **`suspend fun batch { }` vs. `fun batchBlocking { }` (ISS-059 / GH #60)**: the two
+ * [KandraSuspendRepository] extensions (`saveInBatch`/`deleteInBatch`) below are themselves
+ * declared `suspend` and collect statements via [BatchEngine.collectSaveSuspend]/
+ * [BatchEngine.collectDeleteSuspend] — which use [StatementBuilder]'s suspend prepare path
+ * ([StatementBuilder.insertPrimarySuspend] etc.) so a prepared-statement cache miss during
+ * collection never blocks the calling coroutine's dispatcher thread. Being `suspend`, they can
+ * only be called from [KandraRuntime.batch]'s suspend block — not from [KandraRuntime.batchBlocking]'s
+ * plain `() -> Unit` block, which is a compile error, not a runtime foot-gun. The two
+ * [KandraRepository] extensions (blocking) are unchanged: non-suspend, backed by
+ * [BatchEngine.collectSave]/[BatchEngine.collectDelete], and remain the only pair usable from
+ * [KandraRuntime.batchBlocking].
+ *
  * Restrictions:
  * - `findAll`, `findById`, and all read operations are **not** available — reads cannot be batched.
  * - `saveIfNotExists` throws [KandraQueryException] — LWT cannot be mixed with regular statements.
@@ -36,28 +48,35 @@ class KandraBatchScope internal constructor(
     private val statements = mutableListOf<BatchableStatement<*>>()
     private var schema: TableSchema? = null
 
-    /** Adds the entity save (primary + BATCH lookups) to this batch. */
-    fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null) {
+    /**
+     * Adds the entity save (primary + BATCH lookups) to this batch. Suspend — only callable from
+     * [KandraRuntime.batch]'s suspend block. Uses the suspend prepare path (see class doc, ISS-059 /
+     * GH #60) so a prepared-statement cache miss never blocks the calling coroutine's dispatcher thread.
+     */
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null) {
         @OptIn(InternalKandraApi::class)
-        statements.addAll(batchEngine.collectSave(schema, entity, ttlSeconds))
+        statements.addAll(batchEngine.collectSaveSuspend(schema, entity, ttlSeconds))
         this@KandraBatchScope.schema = schema
     }
 
-    /** Adds the entity save (primary + BATCH lookups) to this batch. */
+    /** Adds the entity save (primary + BATCH lookups) to this batch. Blocking — for [KandraRuntime.batchBlocking] only. */
     fun <T : Any> KandraRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null) {
         @OptIn(InternalKandraApi::class)
         statements.addAll(batchEngine.collectSave(schema, entity, ttlSeconds))
         this@KandraBatchScope.schema = schema
     }
 
-    /** Adds the entity delete (primary + all lookup tables) to this batch. */
-    fun <T : Any> KandraSuspendRepository<T>.deleteInBatch(entity: T) {
+    /**
+     * Adds the entity delete (primary + all lookup tables) to this batch. Suspend — only callable
+     * from [KandraRuntime.batch]'s suspend block. See [saveInBatch]'s doc (ISS-059 / GH #60).
+     */
+    suspend fun <T : Any> KandraSuspendRepository<T>.deleteInBatch(entity: T) {
         @OptIn(InternalKandraApi::class)
-        statements.addAll(batchEngine.collectDelete(schema, entity))
+        statements.addAll(batchEngine.collectDeleteSuspend(schema, entity))
         this@KandraBatchScope.schema = schema
     }
 
-    /** Adds the entity delete (primary + all lookup tables) to this batch. */
+    /** Adds the entity delete (primary + all lookup tables) to this batch. Blocking — for [KandraRuntime.batchBlocking] only. */
     fun <T : Any> KandraRepository<T>.deleteInBatch(entity: T) {
         @OptIn(InternalKandraApi::class)
         statements.addAll(batchEngine.collectDelete(schema, entity))

@@ -1,6 +1,6 @@
 # ISS-059: `KandraBatchScope`'s statement collection still blocks the coroutine dispatcher on prepared-statement cache misses (ISS-049 leftover gap)
 
-**Status:** Open
+**Status:** Fixed (GH #60)
 
 ## Problem
 
@@ -43,3 +43,26 @@ the same scope type, keep the existing blocking methods for that entry point (sa
 
 **Files:** `kandra-runtime/src/main/kotlin/io/kandra/runtime/BatchEngine.kt`,
 `kandra-runtime/src/main/kotlin/io/kandra/runtime/KandraBatchScope.kt`.
+
+## Fix
+
+Added `BatchEngine.collectSaveSuspend`/`collectDeleteSuspend`, mirroring `collectSave`/`collectDelete`
+but built on `StatementBuilder`'s suspend prepare path (`insertPrimarySuspend`, `insertLookupSuspend`,
+`deleteByIdSuspend`, `deleteLookupSuspend`) so a prepared-statement cache miss during collection never
+blocks the calling coroutine's dispatcher thread.
+
+`KandraBatchScope.saveInBatch`/`deleteInBatch` on `KandraSuspendRepository` are now themselves declared
+`suspend` and call the new suspend collectors. This is the API-shape change the original report
+anticipated: since these are `suspend` functions, Kotlin now enforces at compile time that they can
+only be called from `KandraRuntime.batch`'s suspend block — reaching for them inside
+`KandraRuntime.batchBlocking`'s plain `() -> Unit` block is a compile error, not a runtime foot-gun. The
+`KandraRepository` (blocking) overloads of `saveInBatch`/`deleteInBatch` are unchanged — still
+non-suspend, still backed by the original blocking `collectSave`/`collectDelete` — and remain the only
+pair usable from `batchBlocking { }`. No behavior changed for either entry point; only the suspend path's
+internal prepare mechanism did.
+
+Verified with `KandraBatchScopeSafetyTest`, using the existing `PrepareCallTrackingSession` fake
+(blocking `CqlSession.prepare()` throws an `AssertionError`, `prepareAsync()` succeeds normally): the
+suspend `batch { }` path collects `saveInBatch`/`deleteInBatch` statements purely through `prepareAsync`
+on a cold cache, with zero calls to the blocking `prepare()`; a control test confirms `batchBlocking { }`
+still uses the blocking path as intended (unchanged).

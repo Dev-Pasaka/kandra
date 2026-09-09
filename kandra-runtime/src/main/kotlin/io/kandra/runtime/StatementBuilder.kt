@@ -82,6 +82,9 @@ class StatementBuilder(
             ?: schema.entityClass.findAnnotation<WriteConsistency>()?.level
             ?: consistencyConfig.defaultWrite
         warnIfStrictModeViolation(schema, resolved)
+        // The write side of the pair is what we just resolved; pair it with the currently configured
+        // read default, since a per-call read override (if any) isn't visible from here. See ISS-075.
+        warnIfRfConsistencyMismatch(schema, readLevel = consistencyConfig.defaultRead, writeLevel = resolved)
         return resolved
     }
 
@@ -91,6 +94,7 @@ class StatementBuilder(
             ?: schema.entityClass.findAnnotation<ReadConsistency>()?.level
             ?: consistencyConfig.defaultRead
         warnIfStrictModeViolation(schema, resolved)
+        warnIfRfConsistencyMismatch(schema, readLevel = resolved, writeLevel = consistencyConfig.defaultWrite)
         return resolved
     }
 
@@ -111,6 +115,76 @@ class StatementBuilder(
             "@ReadConsistency/@WriteConsistency annotation, or consistency { defaultRead/defaultWrite = " +
             "... } if $resolved is intentional here."
         }
+    }
+
+    /**
+     * Strict Mode RF-vs-(R+W) check (ISS-075 / GH #83) — opt-in via [ConsistencyConfig.strictMode]
+     * (deliberately *not* gated on [ConsistencyConfig.multiDcTopology] like [warnIfStrictModeViolation]:
+     * an RF/consistency mismatch is just as real on a single-DC cluster with RF > 3 as it is in a
+     * multi-DC deployment). Reads the resolved table's actual replication factor from live driver
+     * metadata (`session.getMetadata().getKeyspace(...)`) — not from any static config — and warns
+     * when the resolved read/write consistency pair can no longer guarantee read-your-writes, i.e.
+     * when `R + W < RF`. Never throws; RF is looked up on a best-effort basis and the check is
+     * silently skipped (not "assumed safe") if the session has no current keyspace or the driver has
+     * no metadata for it yet (e.g. a bare CqlSession in a unit test).
+     *
+     * Each call only knows *one* side of the pair for certain (the value it just resolved); the other
+     * side is taken from the currently configured default, since a per-call override on that other
+     * side isn't visible from here. This can under- or over-report relative to what a given caller
+     * actually mixes at runtime, but it's the same "best information available at this call site"
+     * trade-off [warnIfStrictModeViolation] already makes for its own check.
+     */
+    private fun warnIfRfConsistencyMismatch(schema: TableSchema, readLevel: KandraConsistency, writeLevel: KandraConsistency) {
+        if (!consistencyConfig.strictMode) return
+        val rf = replicationFactorOrNull() ?: return
+        val readWeight = quorumWeight(readLevel, rf)
+        val writeWeight = quorumWeight(writeLevel, rf)
+        // Cassandra's own documented rule is the *strict* inequality R + W > RF, not R + W >= RF: with
+        // R + W == RF, an adversarial replica placement can still make the read set and write set fully
+        // disjoint (e.g. RF=3, W=2 lands on {A,B}, R=1 reads only {C} -- no overlap). Only R + W > RF
+        // guarantees overlap by pigeonhole. See ISS-075 / GH #83.
+        if (readWeight + writeWeight > rf) return
+        logger.warn {
+            "Kandra strictMode: table '${schema.tableName}' has replication factor $rf, but the resolved " +
+            "read=$readLevel (effective $readWeight) + write=$writeLevel (effective $writeWeight) = " +
+            "${readWeight + writeWeight}, which does not exceed RF ($rf). Read-your-writes requires " +
+            "R + W > RF (not just >=) -- with R + W == RF, an unlucky replica placement can still make " +
+            "the read and write sets disjoint. Raise consistency { defaultRead/defaultWrite = ... }, add a " +
+            "@ReadConsistency/@WriteConsistency annotation, or pass a stronger per-call override so " +
+            "R + W > RF."
+        }
+    }
+
+    /**
+     * Best-effort replication factor for the session's current keyspace, read from live driver
+     * metadata. Returns `null` (never throws) if the session has no current keyspace, the driver has
+     * no metadata for it, or the replication map can't be parsed — any of which simply skips the
+     * RF check above rather than treating it as "safe" or raising an error.
+     *
+     * Sums every non-`class` entry in [com.datastax.oss.driver.api.core.metadata.schema.KeyspaceMetadata.getReplication]
+     * — correct for `SimpleStrategy` (a single `replication_factor` entry) and a reasonable proxy for
+     * `NetworkTopologyStrategy` (summing per-DC factors), though the latter overstates the RF that
+     * actually matters for a `LOCAL_*` consistency level, which is satisfied by *one* DC's replicas,
+     * not the cluster-wide total. Good enough for catching the common single-DC/RF>3 case this issue
+     * targets; a precise per-DC accounting is out of scope here.
+     */
+    private fun replicationFactorOrNull(): Int? {
+        val ksId = session.keyspace?.orElse(null) ?: return null
+        val ksMeta = session.metadata?.getKeyspace(ksId)?.orElse(null) ?: return null
+        return ksMeta.replication.entries
+            .filter { it.key != "class" }
+            .sumOf { it.value.toIntOrNull() ?: 0 }
+            .takeIf { it > 0 }
+    }
+
+    /** Effective replica count a given [KandraConsistency] level guarantees to have acknowledged, for RF [rf]. */
+    private fun quorumWeight(level: KandraConsistency, rf: Int): Int = when (level) {
+        KandraConsistency.ONE, KandraConsistency.LOCAL_ONE -> 1
+        KandraConsistency.TWO -> 2
+        KandraConsistency.THREE -> 3
+        KandraConsistency.QUORUM, KandraConsistency.LOCAL_QUORUM,
+        KandraConsistency.EACH_QUORUM, KandraConsistency.LOCAL_SERIAL, KandraConsistency.SERIAL -> (rf / 2) + 1
+        KandraConsistency.ALL -> rf
     }
 
     private fun KandraConsistency.toDriverLevel() =

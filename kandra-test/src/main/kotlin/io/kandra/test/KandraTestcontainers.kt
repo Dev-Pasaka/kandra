@@ -5,6 +5,7 @@ import io.kandra.core.InternalKandraApi
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.exception.KandraSchemaException
 import io.kandra.runtime.BatchEngine
+import io.kandra.runtime.ConsistencyConfig
 import io.kandra.runtime.KandraRuntime
 import io.kandra.runtime.StatementBuilder
 import io.kandra.runtime.codec.KandraCodec
@@ -47,9 +48,24 @@ object KandraTestcontainers {
      * Creates a fresh keyspace with a random name, registers [classes], and creates tables.
      *
      * Call [KandraRuntimeHandle.close] in `@AfterEach` to drop the keyspace.
+     *
+     * @param replicationFactor `SimpleStrategy` replication factor for the created keyspace. Defaults
+     *   to `1` (the only sensible choice for a single-node Testcontainers cluster to actually serve
+     *   reads/writes at). A higher value is useful when a test only needs the keyspace *metadata* to
+     *   reflect a given RF — e.g. exercising Strict Mode's RF-vs-(R+W) check (ISS-075 / GH #83) — since
+     *   `SimpleStrategy` will happily declare `replication_factor: 3` on a one-node cluster even though
+     *   only one real replica ever exists; such a keyspace can't safely serve queries above `ONE`/
+     *   `LOCAL_ONE`, so callers passing a higher factor should stick to metadata-only assertions.
+     * @param statementBuilderConsistencyConfig [ConsistencyConfig] used for the [StatementBuilder]
+     *   backing the returned runtime's repositories — e.g. to enable `strictMode` for a test. Defaults
+     *   to a plain `ConsistencyConfig()`, matching prior behavior.
      */
     @OptIn(InternalKandraApi::class)
-    fun freshKeyspace(vararg classes: KClass<*>): KandraRuntimeHandle {
+    fun freshKeyspace(
+        vararg classes: KClass<*>,
+        replicationFactor: Int = 1,
+        statementBuilderConsistencyConfig: ConsistencyConfig = ConsistencyConfig()
+    ): KandraRuntimeHandle {
         val keyspace = "kandra_test_${UUID.randomUUID().toString().replace("-", "")}"
         val cp = container.contactPoint
         val contactPoint = "${cp.hostString}:${cp.port}"
@@ -60,7 +76,8 @@ object KandraTestcontainers {
             .build()
 
         bootstrapSession.execute(
-            "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}"
+            "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
+            "{'class': 'SimpleStrategy', 'replication_factor': $replicationFactor}"
         )
         bootstrapSession.close()
 
@@ -79,7 +96,7 @@ object KandraTestcontainers {
         }
 
         val codec = KandraCodec.default
-        val statementBuilder = StatementBuilder(session, codec)
+        val statementBuilder = StatementBuilder(session, codec, consistencyConfig = statementBuilderConsistencyConfig)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val batchEngine = BatchEngine(session, statementBuilder, scope)
         val runtime = KandraRuntime(session, batchEngine, codec)

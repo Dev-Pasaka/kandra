@@ -710,14 +710,16 @@ observability — never changes query behavior. See [`docs/features/multidc.md`]
 and [ISS-037](docs/issues/ISS-037-consistency-strict-mode.md).
 
 **Before testing against a real multi-cluster DC topology**, read
-[`docs/reviews/2026-09-08-pre-multidc-cluster-review.md`](docs/reviews/2026-09-08-pre-multidc-cluster-review.md).
-In short:
-- The `LOCAL_ONE`/`LOCAL_QUORUM` defaults only guarantee read-your-writes for `RF ≤ 3`
-  (`R + W ≥ RF`) — raise `defaultRead` (e.g. to `LOCAL_QUORUM`) if your keyspace's replication
-  factor is higher, since Strict Mode does not currently check this for you
+[`docs/reviews/2026-09-08-pre-multidc-cluster-review.md`](docs/reviews/2026-09-08-pre-multidc-cluster-review.md)
+for the full background — everything it originally flagged is now fixed:
+- The `LOCAL_ONE`/`LOCAL_QUORUM` defaults only guarantee read-your-writes when `R + W > RF`
+  (strictly greater — safe up to `RF ≤ 2` with these defaults, not `RF ≤ 3`). Strict Mode now
+  reads the target table's actual replication factor from cluster metadata and warns whenever the
+  resolved read/write consistency fails that inequality, independent of the existing
+  `LOCAL_ONE`/`ONE`-in-multi-DC check
   ([ISS-075](docs/issues/ISS-075-strict-mode-rf-consistency-math.md)).
 - `SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE`'s DDL, and `KandraMigrationRunner`'s own bookkeeping-table
-  bootstrap, are now guarded by an LWT claim so only one of several concurrently-starting instances
+  bootstrap, are guarded by an LWT claim so only one of several concurrently-starting instances
   actually runs the DDL — see [`docs/features/schema-modes.md`](docs/features/schema-modes.md#concurrent-instance-coordination)
   and [ISS-071](docs/issues/ISS-071-concurrent-ddl-bootstrap-race.md) for exactly how it behaves
   under a slow or crashed claim-holder.
