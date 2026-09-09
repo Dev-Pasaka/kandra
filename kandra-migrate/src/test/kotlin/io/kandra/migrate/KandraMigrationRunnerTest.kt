@@ -138,6 +138,67 @@ class KandraMigrationRunnerTest {
         assertTrue(ex.message!!.contains("checksum mismatch"))
     }
 
+    // ── GH #101 / ISS-088: losing the claim race against an already-APPLIED row ───────────
+    //
+    // claim()'s "lost race" return can carry status = CLAIMED (genuinely in progress/crashed
+    // elsewhere) or status = APPLIED (the other instance already finished). These two tests
+    // deterministically force the latter, single-threaded: v1's up() simulates "another
+    // instance" fully applying v2 (INSERT ... status='APPLIED') *after* run()'s one-time
+    // loadApplied() snapshot (taken before v1 ran, so it still misses v2) but *before* the loop
+    // reaches v2's own claim() call -- exactly the window the real bug report describes, just
+    // pinned to a single thread instead of relying on a real race to land in it.
+
+    @Test
+    fun `losing the claim race against an already-APPLIED row verifies checksum and skips, without throwing`() {
+        val session = freshSession()
+        // Zero threshold: the pre-fix code unconditionally routed every lost race through
+        // handleUnresolvedClaim, which treats any non-zero age as exceeding a Duration.ZERO
+        // threshold and throws -- so this threshold is what makes the old bug fail loudly here
+        // instead of merely warning.
+        val runner = KandraMigrationRunner(session, staleClaimThreshold = Duration.ZERO)
+        val v2 = RecordingMigration(2)
+
+        val v1 = object : KandraMigration(1, "v1-that-races-v2") {
+            override fun up(session: CqlSession) {
+                session.execute(
+                    "INSERT INTO kandra_migrations (version, name, status, claimed_at, applied_at, checksum) " +
+                    "VALUES (2, ?, 'APPLIED', ?, ?, ?)",
+                    v2.name, Instant.now(), Instant.now(), v2.checksum()
+                )
+            }
+        }
+
+        runner.run(v1, v2) // must not throw despite the zero staleness threshold
+
+        assertEquals(0, v2.applyCount) // v2's up() must never run -- another instance already finished it
+        val history = runner.history()
+        assertEquals(2, history.size)
+        assertEquals(MigrationRowStatus.APPLIED, history.first { it.version == 2 }.status)
+    }
+
+    @Test
+    fun `losing the claim race against an already-APPLIED row with a mismatched checksum still throws`() {
+        val session = freshSession()
+        val runner = KandraMigrationRunner(session, staleClaimThreshold = Duration.ZERO)
+        val v2 = RecordingMigration(2)
+
+        val v1 = object : KandraMigration(1, "v1-that-races-v2-with-bad-checksum") {
+            override fun up(session: CqlSession) {
+                session.execute(
+                    "INSERT INTO kandra_migrations (version, name, status, claimed_at, applied_at, checksum) " +
+                    "VALUES (2, ?, 'APPLIED', ?, ?, 'stale-mismatched-checksum')",
+                    v2.name, Instant.now(), Instant.now()
+                )
+            }
+        }
+
+        val ex = assertThrows(KandraMigrationException::class.java) {
+            runner.run(v1, v2)
+        }
+        assertTrue(ex.message!!.contains("checksum mismatch"))
+        assertEquals(0, v2.applyCount)
+    }
+
     // ── Unresolved CLAIMED rows: fresh (halt, no throw) vs. stale (throw) ──────────────────
 
     @Test
