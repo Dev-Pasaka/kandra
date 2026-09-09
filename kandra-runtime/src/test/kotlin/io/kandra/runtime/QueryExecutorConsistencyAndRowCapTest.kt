@@ -5,6 +5,8 @@ import io.kandra.core.KandraConsistency
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
+import io.kandra.core.annotations.SecondaryIndex
+import io.kandra.core.annotations.SoftDelete
 import io.kandra.runtime.dsl.KandraColumnRef
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
@@ -14,6 +16,13 @@ import java.util.UUID
 
 @ScyllaTable("qerc_items")
 data class QercItem(@PartitionKey val id: UUID, val group: String)
+
+@ScyllaTable("qerc_soft_delete_items")
+@SoftDelete(markerProperty = "deleted")
+data class QercSoftDeleteItem(
+    @PartitionKey val id: UUID,
+    @SecondaryIndex val deleted: Boolean = false
+)
 
 /**
  * Regression coverage for GH #55 (ISS-054) and GH #67 (ISS-066).
@@ -140,5 +149,45 @@ class QueryExecutorConsistencyAndRowCapTest {
         val results = executor.findAllSuspend(QercItem::class) { KandraColumnRef<String>("group") eq "g1" }
 
         assertEquals(3, results.size)
+    }
+
+    // ── GH #94: findActive() row cap ──────────────────────────────────────────
+
+    private fun softDeleteRow(id: UUID, deleted: Boolean = false) = fakeRow(mapOf("id" to id, "deleted" to deleted))
+
+    @Test
+    fun `findActive truncates to maxUnpagedResultRows when the query returns more`() {
+        val schema = SchemaRegistry.register(QercSoftDeleteItem::class)
+        val manyRows = (1..10).map { softDeleteRow(UUID.randomUUID()) }
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Rows(manyRows)))
+        val executor = QueryExecutor(session, schema, StatementBuilder(session), maxUnpagedResultRows = 3)
+
+        val results = executor.findActive(QercSoftDeleteItem::class)
+
+        assertEquals(3, results.size)
+    }
+
+    @Test
+    fun `findActiveSuspend truncates to maxUnpagedResultRows when the query returns more`() = runBlocking {
+        val schema = SchemaRegistry.register(QercSoftDeleteItem::class)
+        val manyRows = (1..10).map { softDeleteRow(UUID.randomUUID()) }
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Rows(manyRows)))
+        val executor = QueryExecutor(session, schema, StatementBuilder(session), maxUnpagedResultRows = 3)
+
+        val results = executor.findActiveSuspend(QercSoftDeleteItem::class)
+
+        assertEquals(3, results.size)
+    }
+
+    @Test
+    fun `findActive returns everything when under the cap`() {
+        val schema = SchemaRegistry.register(QercSoftDeleteItem::class)
+        val fewRows = (1..2).map { softDeleteRow(UUID.randomUUID()) }
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Rows(fewRows)))
+        val executor = QueryExecutor(session, schema, StatementBuilder(session), maxUnpagedResultRows = 3)
+
+        val results = executor.findActive(QercSoftDeleteItem::class)
+
+        assertEquals(2, results.size)
     }
 }
