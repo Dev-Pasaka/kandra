@@ -7,6 +7,7 @@ import com.datastax.oss.driver.api.core.cql.BatchStatement
 import com.datastax.oss.driver.api.core.cql.BatchableStatement
 import com.datastax.oss.driver.api.core.cql.BoundStatement
 import com.datastax.oss.driver.api.core.cql.DefaultBatchType
+import com.datastax.oss.driver.api.core.RequestThrottlingException
 import com.datastax.oss.driver.api.core.cql.Statement
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.kandra.core.ExperimentalKandraApi
@@ -21,6 +22,7 @@ import io.kandra.core.annotations.LookupConsistency
 import io.kandra.core.annotations.UuidStrategy
 import io.kandra.core.exception.KandraOptimisticLockException
 import io.kandra.core.exception.KandraQueryException
+import io.kandra.core.exception.KandraThrottledException
 import io.kandra.core.schema.ColumnSchema
 import io.kandra.core.schema.LookupTableSchema
 import io.kandra.core.schema.TableSchema
@@ -171,6 +173,14 @@ class BatchEngine(
                     }
                     metricsRecorder?.record(tableName, operation, elapsed, attempt + 1)
                     return rs
+                } catch (e: RequestThrottlingException) {
+                    // A backpressure rejection, not a transient network fault -- retrying it
+                    // immediately just adds another request on top of an already-overloaded
+                    // throttler, so this is deliberately never retried regardless of retryOn.
+                    // Wrapped into Kandra's documented exception hierarchy instead of leaking the
+                    // raw driver type. See GH #103 / ISS-090.
+                    metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, attempt + 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+                    throw KandraThrottledException("Request throttled on '$tableName' ($operation): ${e.message}", e)
                 } catch (e: Throwable) {
                     if (retryConfig.retryOn.none { it.isInstance(e) }) {
                         // Immediate non-retryable exception (ISS-074 / GH #82) — record it, since this
@@ -231,6 +241,10 @@ class BatchEngine(
                     }
                     metricsRecorder?.record(tableName, operation, elapsed, attempt + 1)
                     return rs
+                } catch (e: RequestThrottlingException) {
+                    // See the blocking executeWithRetry's identical catch for why — GH #103 / ISS-090.
+                    metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, attempt + 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+                    throw KandraThrottledException("Request throttled on '$tableName' ($operation): ${e.message}", e)
                 } catch (e: Throwable) {
                     if (retryConfig.retryOn.none { it.isInstance(e) }) {
                         // Immediate non-retryable exception (ISS-074 / GH #82) — record it, since this
@@ -291,6 +305,10 @@ class BatchEngine(
             }
             metricsRecorder?.record(tableName, operation, elapsed, 1)
             return rs
+        } catch (e: RequestThrottlingException) {
+            // See executeWithRetry's identical catch for why — GH #103 / ISS-090.
+            metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+            throw KandraThrottledException("Request throttled on '$tableName' ($operation): ${e.message}", e)
         } catch (e: Throwable) {
             // executeOnce has no retry loop, but an immediate failure here (e.g. a transient exception
             // propagated as-is per its doc) previously recorded nothing at all. See ISS-074 / GH #82.
@@ -318,6 +336,10 @@ class BatchEngine(
             }
             metricsRecorder?.record(tableName, operation, elapsed, 1)
             return rs
+        } catch (e: RequestThrottlingException) {
+            // See the blocking executeOnce's identical catch — GH #103 / ISS-090.
+            metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+            throw KandraThrottledException("Request throttled on '$tableName' ($operation): ${e.message}", e)
         } catch (e: Throwable) {
             // See the blocking executeOnce's identical comment — ISS-074 / GH #82.
             metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
