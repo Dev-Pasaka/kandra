@@ -4,6 +4,7 @@ import com.datastax.oss.driver.api.core.config.DefaultDriverOption
 import com.datastax.oss.driver.internal.core.metadata.DefaultEndPoint
 import com.datastax.oss.driver.internal.core.session.throttling.ConcurrencyLimitingRequestThrottler
 import io.kandra.core.exception.KandraSchemaException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import javax.net.ssl.SSLContext
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -178,6 +179,46 @@ class CqlSessionBuilderTest {
         assertEquals(defaultEnabled, engine.enabledCipherSuites.toSet())
     }
 
+    // ── resolveEnabledProtocols / minimumTlsVersion fail-closed behavior (GH #105) ───
+
+    @Test
+    fun `resolveEnabledProtocols returns the intersection when non-empty`() {
+        val result = KandraSslEngineFactory.resolveEnabledProtocols(
+            setOf("TLSv1", "TLSv1.1", "TLSv1.2", "TLSv1.3"),
+            "TLSv1.2"
+        )
+        assertEquals(listOf("TLSv1.2", "TLSv1.3"), result)
+    }
+
+    @Test
+    fun `resolveEnabledProtocols throws instead of silently falling back when no supported protocol meets the floor`() {
+        val ex = assertThrows(KandraSchemaException::class.java) {
+            KandraSslEngineFactory.resolveEnabledProtocols(setOf("TLSv1", "TLSv1.1"), "TLSv1.3")
+        }
+        assertTrue(ex.message!!.contains("TLSv1.3"))
+        assertTrue(ex.message!!.contains("TLSv1.1"))
+    }
+
+    // ── newSslEngine hostname resolution (GH #105) ───────────────────────────
+
+    @Test
+    fun `newSslEngine uses the raw IP literal via hostString, never a reverse-DNS-resolved hostName`() {
+        // Constructing an InetSocketAddress from raw IP bytes (InetAddress.getByAddress) is exactly
+        // how a gossip/system.peers-discovered EndPoint looks -- no hostname, just an IP.
+        // `.hostString` returns this IP literal immediately with no reverse-DNS lookup; `.hostName`
+        // (the pre-fix behavior) would trigger one. Asserting on `engine.peerHost` (set from
+        // whatever was passed to `sslContext.createSSLEngine(host, port)`) proves which one was used
+        // without actually depending on reverse-DNS behavior in the test environment.
+        val sslContext = trustAllSslContext()
+        val ipOnlyAddress = InetSocketAddress(InetAddress.getByAddress(byteArrayOf(10, 0, 0, 1)), 9042)
+        val endpoint = DefaultEndPoint(ipOnlyAddress)
+
+        val engine = KandraSslEngineFactory(sslContext, "TLSv1.2", null, hostnameVerification = false)
+            .newSslEngine(endpoint)
+
+        assertEquals("10.0.0.1", engine.peerHost)
+    }
+
     @Test
     fun `newSslEngine sets HTTPS endpoint identification when hostnameVerification is true`() {
         val sslContext = trustAllSslContext()
@@ -308,5 +349,50 @@ class CqlSessionBuilderTest {
         )
         assertEquals(500, profile.getInt(DefaultDriverOption.REQUEST_THROTTLER_MAX_CONCURRENT_REQUESTS))
         assertEquals(250, profile.getInt(DefaultDriverOption.REQUEST_THROTTLER_MAX_QUEUE_SIZE))
+    }
+
+    // ── PoolConfig.localPoolSize / remotePoolSize validation (GH #105) ───────
+
+    @Test
+    fun `buildCqlSession throws when localPoolSize is zero`() {
+        val config = KandraConfig().apply {
+            contactPoints = "localhost:19999"
+            localDatacenter = "dc1"
+            pool { localPoolSize = 0 }
+        }
+        val ex = assertThrows(KandraSchemaException::class.java) { buildCqlSession(config) }
+        assertTrue(ex.message!!.contains("localPoolSize"))
+    }
+
+    @Test
+    fun `buildCqlSession throws when localPoolSize is negative`() {
+        val config = KandraConfig().apply {
+            contactPoints = "localhost:19999"
+            localDatacenter = "dc1"
+            pool { localPoolSize = -3 }
+        }
+        assertThrows(KandraSchemaException::class.java) { buildCqlSession(config) }
+    }
+
+    @Test
+    fun `buildCqlSession throws when remotePoolSize is zero`() {
+        val config = KandraConfig().apply {
+            contactPoints = "localhost:19999"
+            localDatacenter = "dc1"
+            pool { remotePoolSize = 0 }
+        }
+        val ex = assertThrows(KandraSchemaException::class.java) { buildCqlSession(config) }
+        assertTrue(ex.message!!.contains("remotePoolSize"))
+    }
+
+    @Test
+    fun `buildCqlSession does not reject pool sizes of exactly 1`() {
+        val config = KandraConfig().apply {
+            contactPoints = "localhost:19999"
+            localDatacenter = "dc1"
+            pool { localPoolSize = 1; remotePoolSize = 1 }
+        }
+        val ex = assertThrows(Exception::class.java) { buildCqlSession(config) }
+        assertFalse(ex is KandraSchemaException, "pool sizes of 1 must pass validation and fail only on connection")
     }
 }

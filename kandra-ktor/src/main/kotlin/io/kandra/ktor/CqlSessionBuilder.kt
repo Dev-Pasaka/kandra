@@ -11,6 +11,7 @@ import com.datastax.oss.driver.api.core.metadata.Node
 import com.datastax.oss.driver.api.core.ssl.SslEngineFactory
 import com.datastax.oss.driver.internal.core.loadbalancing.DefaultLoadBalancingPolicy
 import com.datastax.oss.driver.internal.core.session.throttling.ConcurrencyLimitingRequestThrottler
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.kandra.core.CqlNaming
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.exception.KandraAuthException
@@ -25,6 +26,8 @@ import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLParameters
 import javax.net.ssl.TrustManagerFactory
 import java.security.KeyStore
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Result of [buildCqlSession]: the live [CqlSession] plus, when the session was built with
@@ -92,24 +95,27 @@ internal class KandraSslEngineFactory(
     override fun newSslEngine(remoteEndpoint: EndPoint): SSLEngine {
         val remoteAddress = remoteEndpoint.resolve()
         val engine = if (remoteAddress is InetSocketAddress) {
-            sslContext.createSSLEngine(remoteAddress.hostName, remoteAddress.port)
+            // GH #105: `.hostName` performs a blocking reverse-DNS lookup whenever the address was
+            // constructed from a raw IP (exactly how the driver builds EndPoints for peers discovered
+            // via gossip/system.peers -- no hostname, just the IP), which (a) blocks the driver's I/O
+            // thread on every new connection to a newly-discovered peer, and (b) falls back to the IP
+            // string when reverse DNS isn't configured for cluster nodes, which then fails HTTPS
+            // endpoint identification against a DNS-named cert with no IP SANs. `.hostString` never
+            // triggers a reverse lookup -- it returns the original hostname/IP literal the address was
+            // constructed with. This matches the driver's own DefaultSslEngineFactory.
+            sslContext.createSSLEngine(remoteAddress.hostString, remoteAddress.port)
         } else {
             sslContext.createSSLEngine()
         }
         engine.useClientMode = true
 
-        val supportedProtocols = engine.supportedProtocols.toSet()
-        val enabledProtocols = TLS_PROTOCOL_ORDER.filter {
-            it in supportedProtocols && protocolAtLeast(it, minimumTlsVersion)
-        }
-        // Only override enabledProtocols when the intersection is non-empty -- an empty result
-        // (e.g. a JVM/provider that doesn't support any protocol in TLS_PROTOCOL_ORDER at all,
-        // which should never happen in practice) leaves the engine's own default untouched rather
-        // than disabling every protocol and turning every connection attempt into a handshake
-        // failure with a confusing cause.
-        if (enabledProtocols.isNotEmpty()) {
-            engine.enabledProtocols = enabledProtocols.toTypedArray()
-        }
+        // GH #105: resolveEnabledProtocols throws when the intersection of JVM/provider-supported
+        // protocols and "at least minimumTlsVersion" is empty, rather than silently leaving the
+        // engine's own (unrestricted) default protocol set in place -- a compliance-motivated
+        // minimumTlsVersion floor must fail loudly, not silently downgrade the security posture it
+        // exists to guard.
+        engine.enabledProtocols = resolveEnabledProtocols(engine.supportedProtocols.toSet(), minimumTlsVersion)
+            .toTypedArray()
 
         if (cipherSuites != null) {
             engine.enabledCipherSuites = cipherSuites.toTypedArray()
@@ -146,6 +152,37 @@ internal class KandraSslEngineFactory(
             if (protocolRank == -1 || minimumRank == -1) return false
             return protocolRank >= minimumRank
         }
+
+        /**
+         * Intersects [supportedProtocols] (whatever the JSSE provider actually supports on this
+         * JVM) with "at least [minimumTlsVersion]", in [TLS_PROTOCOL_ORDER]'s ascending order.
+         *
+         * GH #105: an earlier version left `engine.enabledProtocols` at the JSSE provider's own
+         * default set whenever this intersection came back empty (e.g. `minimumTlsVersion =
+         * "TLSv1.3"` configured against a JVM/provider that only supports up to TLSv1.2) -- silently
+         * downgrading the security posture the configured floor exists to enforce, with nothing
+         * logged. Now this fails loudly instead: logs an ERROR naming the requested floor and the
+         * actually-supported protocols, then throws [KandraSchemaException], matching the
+         * fail-closed philosophy `ssl.requireEncryption` already applies elsewhere in this file.
+         */
+        internal fun resolveEnabledProtocols(supportedProtocols: Set<String>, minimumTlsVersion: String): List<String> {
+            val enabledProtocols = TLS_PROTOCOL_ORDER.filter {
+                it in supportedProtocols && protocolAtLeast(it, minimumTlsVersion)
+            }
+            if (enabledProtocols.isEmpty()) {
+                logger.error {
+                    "Kandra: ssl.minimumTlsVersion = '$minimumTlsVersion' is not supported by this " +
+                        "JVM/TLS provider. Supported protocols: $supportedProtocols. Refusing to fall " +
+                        "back to the provider's unrestricted default protocol set."
+                }
+                throw KandraSchemaException(
+                    "ssl.minimumTlsVersion = '$minimumTlsVersion' is not supported by this JVM/TLS " +
+                        "provider. Supported protocols: $supportedProtocols. Lower minimumTlsVersion to " +
+                        "a supported protocol or upgrade the JVM/TLS provider."
+                )
+            }
+            return enabledProtocols
+        }
     }
 }
 
@@ -178,6 +215,28 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
         throw KandraSchemaException(
             "ssl.minimumTlsVersion = '${config.ssl.minimumTlsVersion}' is not one of " +
             "${KandraSslEngineFactory.TLS_PROTOCOL_ORDER}."
+        )
+    }
+
+    // GH #105 / ISS-072 follow-up: pool.localPoolSize/remotePoolSize previously accepted 0 or
+    // negative values with no validation. A localPoolSize of 0 means the driver opens no
+    // connections to the local DC at all -- every request fails once the session is live, but this
+    // didn't surface at config-build time; it surfaced later as a request-level
+    // NoNodeAvailableException, disguising a config typo as a cluster-health problem. Validated
+    // eagerly here, alongside the other config-shape checks in this function, so it fails at
+    // startup instead.
+    if (config.pool.localPoolSize < 1) {
+        throw KandraSchemaException(
+            "pool.localPoolSize = ${config.pool.localPoolSize} but must be >= 1. A pool size of 0 " +
+            "means the driver opens no connections to the local datacenter, and every request " +
+            "would fail once the session is live."
+        )
+    }
+    if (config.pool.remotePoolSize < 1) {
+        throw KandraSchemaException(
+            "pool.remotePoolSize = ${config.pool.remotePoolSize} but must be >= 1. A pool size of " +
+            "0 means the driver opens no connections to remote datacenters, defeating " +
+            "loadBalancing/failover configuration that relies on them."
         )
     }
 
