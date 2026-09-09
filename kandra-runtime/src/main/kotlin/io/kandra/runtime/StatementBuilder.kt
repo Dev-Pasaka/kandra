@@ -52,7 +52,16 @@ class StatementBuilder(
 
     private fun prepare(cql: String): PreparedStatement {
         if (debugConfig.logQueries) logger.debug { "Kandra CQL: $cql" }
-        return cache.getOrPut(cql) { session.prepare(cql) }
+        // computeIfAbsent (not the Kotlin stdlib's getOrPut, which is a non-atomic check-then-act
+        // even on a synchronized map) for true single-flight semantics -- otherwise a first-access
+        // race between two callers preparing the same not-yet-cached CQL string could both run the
+        // blocking session.prepare() round trip, with one result simply discarded. See GH #106 /
+        // ISS-093. Trade-off: Collections.synchronizedMap holds its single map-wide lock for the
+        // full duration of the mapping function, so a cache miss now briefly serializes *all*
+        // cache access (not just this key) behind the in-flight prepare() call, versus the previous
+        // get/prepare/put sequence, which only held the lock for the quick get and put. Judged
+        // acceptable here: cache misses are common only during startup warm-up, not steady state.
+        return cache.computeIfAbsent(cql) { session.prepare(cql) }
     }
 
     /**
@@ -71,7 +80,10 @@ class StatementBuilder(
         if (debugConfig.logQueries) logger.debug { "Kandra CQL: $cql" }
         cache[cql]?.let { return it }
         val prepared = session.prepareSuspend(cql)
-        return cache.getOrPut(cql) { prepared }
+        // computeIfAbsent, not getOrPut -- see prepare()'s doc. The mapping function here is trivial
+        // (just returns the already-suspend-prepared value), so there's no lock-during-I/O concern;
+        // this only ensures the final insert-if-still-absent is atomic against a concurrent winner.
+        return cache.computeIfAbsent(cql) { prepared }
     }
 
     @Suppress("UNCHECKED_CAST")

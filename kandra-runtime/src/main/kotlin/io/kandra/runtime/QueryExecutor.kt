@@ -89,8 +89,22 @@ class QueryExecutor(
         return entities
     }
 
-    fun <T : Any> find(entityClass: KClass<T>, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? =
-        findAll(entityClass, consistency, block).firstOrNull()
+    /**
+     * Like [findAll] but only ever needs the first matching row — passes `limitOne = true` into
+     * [resolveRows] (GH #106 / ISS-093) so the direct-CQL branch appends `LIMIT 1` instead of
+     * fetching up to [maxUnpagedResultRows] rows over the wire just to take the first. The `IN` and
+     * lookup-table branches are unaffected (`limitOne` isn't meaningful there — a lookup match is
+     * already exactly one row, and an `IN` scatter-gather ignores it, same as before).
+     */
+    fun <T : Any> find(entityClass: KClass<T>, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? {
+        val ctx = QueryContext().also(block)
+        val row = resolveRows(ctx, consistency = consistency, limitOne = true).firstOrNull() ?: return null
+        val entity = decodeEntity(row, entityClass)
+        if (debugConfig.logQueries) {
+            logger.debug { "Decoded entity: ${KandraEntityLogger.safeToString(entity, schema)}" }
+        }
+        return entity
+    }
 
     fun <T : Any> findPage(
         entityClass: KClass<T>,
@@ -207,8 +221,16 @@ class QueryExecutor(
         return entities
     }
 
-    suspend fun <T : Any> findSuspend(entityClass: KClass<T>, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? =
-        findAllSuspend(entityClass, consistency, block).firstOrNull()
+    /** Suspend counterpart of [find] — see its doc (GH #106 / ISS-093). */
+    suspend fun <T : Any> findSuspend(entityClass: KClass<T>, consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? {
+        val ctx = QueryContext().also(block)
+        val row = resolveRowsSuspend(ctx, consistency = consistency, limitOne = true).firstOrNull() ?: return null
+        val entity = decodeEntity(row, entityClass)
+        if (debugConfig.logQueries) {
+            logger.debug { "Decoded entity: ${KandraEntityLogger.safeToString(entity, schema)}" }
+        }
+        return entity
+    }
 
     suspend fun <T : Any> findPageSuspend(
         entityClass: KClass<T>,

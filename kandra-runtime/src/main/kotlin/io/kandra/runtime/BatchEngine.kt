@@ -380,7 +380,7 @@ class BatchEngine(
         val (batchLookups, eventualLookups) = schema.lookupTables.partition { it.consistency == LookupConsistency.BATCH }
         if (batchLookups.isNotEmpty()) {
             val lookupBatch = batchLookups.fold(newLoggedBatch(schema)) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stamped)) }
-            executeWithRetry(lookupBatch)
+            executeWithRetry(lookupBatch, schema.tableName, "saveIfNotExists")
         }
         fireEventual(schema, eventualLookups, stamped)
         return true
@@ -394,7 +394,7 @@ class BatchEngine(
             newLoggedBatch(schema, consistency)
                 .add(statementBuilder.insertPrimaryWithNulls(schema, stamped, ttlSeconds, consistency = consistency))
         ) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stamped)) }
-        executeWithRetry(batch)
+        executeWithRetry(batch, schema.tableName, "saveWithNulls")
         fireEventual(schema, eventualLookups, stamped)
     }
 
@@ -425,7 +425,7 @@ class BatchEngine(
         val batch = batchStmts.fold(
             newLoggedBatch(schema, consistency).add(statementBuilder.insertPrimary(schema, stamped, consistency = consistency))
         ) { acc, stmt -> acc.add(stmt) }
-        executeWithRetry(batch)
+        executeWithRetry(batch, schema.tableName, "update")
         fireEventualStatements(eventualStmts, new, "(update)", schema.tableName)
     }
 
@@ -435,7 +435,7 @@ class BatchEngine(
         val batch = batchStmts.fold(
             newLoggedBatch(schema, consistency).add(statementBuilder.insertPrimary(schema, stamped, consistency = consistency))
         ) { acc, stmt -> acc.add(stmt) }
-        executeWithRetry(batch)
+        executeWithRetry(batch, schema.tableName, "updateForce")
         fireEventualStatements(eventualStmts, entity, "(updateForce)", schema.tableName)
     }
 
@@ -456,7 +456,7 @@ class BatchEngine(
             val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@fold acc
             acc.add(statementBuilder.deleteLookup(lookup, indexValue))
         }
-        executeWithRetry(batch)
+        executeWithRetry(batch, schema.tableName, "delete")
     }
 
     /**
@@ -567,12 +567,12 @@ class BatchEngine(
             allStatements.chunked(batchMaxChunkSize).forEach { chunk ->
                 val chunkBatch = chunk.fold(newLoggedBatch(schema, consistency)) { acc, stmt -> acc.add(stmt) }
                 if (debugConfig.logBatches) logger.debug { "Executing saveAll chunk of ${chunk.size} for ${schema.tableName}" }
-                executeWithRetry(chunkBatch)
+                executeWithRetry(chunkBatch, schema.tableName, "saveAll")
             }
         } else {
             val batch = allStatements.fold(newLoggedBatch(schema, consistency)) { acc, stmt -> acc.add(stmt) }
             if (debugConfig.logBatches) logger.debug { "Executing saveAll LOGGED BATCH for ${schema.tableName} (${entities.size} entities)" }
-            executeWithRetry(batch)
+            executeWithRetry(batch, schema.tableName, "saveAll")
         }
         if (eventualInserts.isNotEmpty()) {
             val eventualLookups = schema.lookupTables.filter { it.consistency == LookupConsistency.EVENTUAL }
@@ -652,7 +652,7 @@ class BatchEngine(
     internal fun executeBatchScope(schema: TableSchema, statements: List<BatchableStatement<*>>, consistency: KandraConsistency? = null) {
         if (statements.isEmpty()) return
         val batch = statements.fold(newLoggedBatch(schema, consistency)) { acc, s -> acc.add(s) }
-        executeWithRetry(batch)
+        executeWithRetry(batch, schema.tableName, "batch")
     }
 
     /**
@@ -664,7 +664,7 @@ class BatchEngine(
     internal suspend fun executeBatchScopeSuspend(schema: TableSchema, statements: List<BatchableStatement<*>>, consistency: KandraConsistency? = null) {
         if (statements.isEmpty()) return
         val batch = statements.fold(newLoggedBatch(schema, consistency)) { acc, s -> acc.add(s) }
-        executeWithRetrySuspend(batch)
+        executeWithRetrySuspend(batch, schema.tableName, "batch")
     }
 
     // ── Suspend variants ─────────────────────────────────────────────────────
@@ -681,7 +681,7 @@ class BatchEngine(
             newLoggedBatch(schema, consistency).add(primaryStmt)
         ) { acc, l -> acc.add(statementBuilder.insertLookupSuspend(schema, l, stampedWithVersion)) }
         if (debugConfig.logBatches) logger.debug { "Executing LOGGED BATCH with ${batchLookups.size + 1} statements for ${schema.tableName}" }
-        executeWithRetrySuspend(batch)
+        executeWithRetrySuspend(batch, schema.tableName, "save")
         fireEventualSuspend(schema, eventualLookups, stampedWithVersion)
     }
 
@@ -699,7 +699,7 @@ class BatchEngine(
         val (batchLookups, eventualLookups) = schema.lookupTables.partition { it.consistency == LookupConsistency.BATCH }
         if (batchLookups.isNotEmpty()) {
             val lookupBatch = batchLookups.fold(newLoggedBatch(schema)) { acc, l -> acc.add(statementBuilder.insertLookupSuspend(schema, l, stamped)) }
-            executeWithRetrySuspend(lookupBatch)
+            executeWithRetrySuspend(lookupBatch, schema.tableName, "saveIfNotExists")
         }
         fireEventualSuspend(schema, eventualLookups, stamped)
         return true
@@ -713,7 +713,7 @@ class BatchEngine(
         val batch = batchLookups.fold(
             newLoggedBatch(schema, consistency).add(primaryStmt)
         ) { acc, l -> acc.add(statementBuilder.insertLookupSuspend(schema, l, stamped)) }
-        executeWithRetrySuspend(batch)
+        executeWithRetrySuspend(batch, schema.tableName, "saveWithNulls")
         fireEventualSuspend(schema, eventualLookups, stamped)
     }
 
@@ -744,7 +744,7 @@ class BatchEngine(
         val batch = batchStmts.fold(
             newLoggedBatch(schema, consistency).add(primaryStmt)
         ) { acc, stmt -> acc.add(stmt) }
-        executeWithRetrySuspend(batch)
+        executeWithRetrySuspend(batch, schema.tableName, "update")
         fireEventualStatementsSuspend(eventualStmts, new, "(update)", schema.tableName)
     }
 
@@ -755,7 +755,7 @@ class BatchEngine(
         val batch = batchStmts.fold(
             newLoggedBatch(schema, consistency).add(primaryStmt)
         ) { acc, stmt -> acc.add(stmt) }
-        executeWithRetrySuspend(batch)
+        executeWithRetrySuspend(batch, schema.tableName, "updateForce")
         fireEventualStatementsSuspend(eventualStmts, entity, "(updateForce)", schema.tableName)
     }
 
@@ -775,7 +775,7 @@ class BatchEngine(
             val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@fold acc
             acc.add(statementBuilder.deleteLookupSuspend(lookup, indexValue))
         }
-        executeWithRetrySuspend(batch)
+        executeWithRetrySuspend(batch, schema.tableName, "delete")
     }
 
     suspend fun deleteAllSuspend(schema: TableSchema, entities: List<Any>) {
@@ -815,12 +815,12 @@ class BatchEngine(
             allStatements.chunked(batchMaxChunkSize).forEach { chunk ->
                 val chunkBatch = chunk.fold(newLoggedBatch(schema, consistency)) { acc, stmt -> acc.add(stmt) }
                 if (debugConfig.logBatches) logger.debug { "Executing saveAllSuspend chunk of ${chunk.size} for ${schema.tableName}" }
-                executeWithRetrySuspend(chunkBatch)
+                executeWithRetrySuspend(chunkBatch, schema.tableName, "saveAll")
             }
         } else {
             val batch = allStatements.fold(newLoggedBatch(schema, consistency)) { acc, stmt -> acc.add(stmt) }
             if (debugConfig.logBatches) logger.debug { "Executing saveAllSuspend LOGGED BATCH for ${schema.tableName} (${entities.size} entities)" }
-            executeWithRetrySuspend(batch)
+            executeWithRetrySuspend(batch, schema.tableName, "saveAll")
         }
         if (eventualInserts.isNotEmpty()) {
             val eventualLookups = schema.lookupTables.filter { it.consistency == LookupConsistency.EVENTUAL }
@@ -852,14 +852,14 @@ class BatchEngine(
             val values = mutableListOf<Any?>()
             nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
             keyValues.forEach { values.add(it) }
-            executeWithRetry(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency))
+            executeWithRetry(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
         }
         // Marker column is written without TTL — it must outlive the other columns so
         // findActive() can still tell this row apart from a live one after they expire.
         if (marker != null) {
             val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
             val prepared = session.prepare(cql)
-            executeWithRetry(prepared.bind(true, *keyValues.toTypedArray()).setConsistencyLevel(resolvedConsistency))
+            executeWithRetry(prepared.bind(true, *keyValues.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
         }
         // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
         // until its TTL expires, so it must remain resolvable via its @LookupIndex too, exactly like
@@ -887,12 +887,12 @@ class BatchEngine(
             val values = mutableListOf<Any?>()
             nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
             keyValues.forEach { values.add(it) }
-            executeWithRetrySuspend(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency))
+            executeWithRetrySuspend(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
         }
         if (marker != null) {
             val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
             val prepared = session.prepareSuspend(cql)
-            executeWithRetrySuspend(prepared.bind(true, *keyValues.toTypedArray()).setConsistencyLevel(resolvedConsistency))
+            executeWithRetrySuspend(prepared.bind(true, *keyValues.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
         }
         // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
         // until its TTL expires, so it must remain resolvable via its @LookupIndex too, exactly like
@@ -1021,7 +1021,7 @@ class BatchEngine(
             // batch, bypassing consistency resolution entirely for the lookup-table half of every
             // @Version-checked update().
             val batch = batchStmts.fold(newLoggedBatch(schema, consistency)) { acc, s -> acc.add(s) }
-            executeWithRetry(batch)
+            executeWithRetry(batch, schema.tableName, "update")
         }
         fireEventualStatements(eventualStmts, new, "(version update)", schema.tableName)
     }
@@ -1030,7 +1030,7 @@ class BatchEngine(
         val (batchStmts, eventualStmts) = buildUpdateStatementsSuspend(schema, old, new)
         if (batchStmts.isNotEmpty()) {
             val batch = batchStmts.fold(newLoggedBatch(schema, consistency)) { acc, s -> acc.add(s) }
-            executeWithRetrySuspend(batch)
+            executeWithRetrySuspend(batch, schema.tableName, "update")
         }
         fireEventualStatementsSuspend(eventualStmts, new, "(version update)", schema.tableName)
     }
