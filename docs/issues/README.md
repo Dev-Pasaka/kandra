@@ -8,18 +8,6 @@ policy; nothing was lost, they're just not represented here.
 
 ## Open
 
-Filed 2026-09-08 from a deep technical review (data integrity/consistency, performance/concurrency,
-security, and distributed-systems correctness passes) done ahead of experimental testing against a
-real ScyllaDB cluster. None of these have fixes yet.
-
-| ID | GH | Severity | Title |
-|---|---|---|---|
-| [ISS-059](ISS-059-batchscope-blocking-collect.md) | [#60](https://github.com/Dev-Pasaka/kandra/issues/60) | High | `KandraBatchScope`'s statement collection still blocks the coroutine dispatcher on cache-miss prepare (ISS-049 leftover) |
-
-The last open item from the 2026-09-08 review batch (GH #54-#70) — needs an API-shape change to
-`KandraBatchScope`/`KandraRuntime` (differentiating `batch { }` from `batchBlocking { }` at the
-`saveInBatch`/`deleteInBatch` call sites) that deserves its own focused pass rather than being rushed.
-
 Filed 2026-09-08 from a second, critical library-wide review (security, performance, consistency,
 scalability, developer experience) done specifically ahead of experimental testing against a real
 **multi-cluster DC** topology. These form the pre-multi-DC-testing checklist — see
@@ -32,8 +20,6 @@ for the full write-up.
 | [ISS-071](ISS-071-concurrent-ddl-bootstrap-race.md) | [#79](https://github.com/Dev-Pasaka/kandra/issues/79) | High | Schema DDL bootstrap has no coordination guard across concurrently-starting instances |
 | [ISS-072](ISS-072-connection-pool-size-unconfigurable.md) | [#80](https://github.com/Dev-Pasaka/kandra/issues/80) | Medium | Connection-pool size (local/remote) has no Kandra-level configuration |
 | [ISS-073](ISS-073-no-backpressure-admission-control.md) | [#81](https://github.com/Dev-Pasaka/kandra/issues/81) | Medium | No backpressure/admission-control knob for in-flight requests |
-| [ISS-074](ISS-074-metrics-success-path-only.md) | [#82](https://github.com/Dev-Pasaka/kandra/issues/82) | Medium | `KandraMetrics.record()` is only ever called on the success path |
-| [ISS-075](ISS-075-strict-mode-rf-consistency-math.md) | [#83](https://github.com/Dev-Pasaka/kandra/issues/83) | Medium | Strict Mode warns on LOCAL_ONE/ONE but never checks RF vs (R+W) directly |
 | [ISS-076](ISS-076-ktor-migrate-test-coverage-gaps.md) | [#84](https://github.com/Dev-Pasaka/kandra/issues/84) | Low | `kandra-ktor` (SSL/pool/failover) and `kandra-migrate` have thin test coverage relative to their risk surface |
 
 ## Fixed — pending live-cluster verification
@@ -95,6 +81,7 @@ Docker before relying on them.
 | [ISS-056](ISS-056-saveifnotexists-blind-lwt-retry.md) | `saveIfNotExists`/`saveIfNotExistsSuspend` blindly retried their LWT, risking a false negative on the caller's own successful write |
 | [ISS-057](ISS-057-multidc-failover-inert.md) | Multi-DC failover/load-balancing config was validated and documented, but never wired into the driver |
 | [ISS-058](ISS-058-versioned-update-drops-ttl.md) | `@Version` LWT updates silently stripped TTL on every update to a `@Ttl`-annotated entity |
+| [ISS-059](ISS-059-batchscope-blocking-collect.md) | `KandraBatchScope`'s statement collection still blocked the coroutine dispatcher on cache-miss prepare (ISS-049 leftover) |
 | [ISS-060](ISS-060-credential-rotation-noop.md) | Credential rotation (`auth.refreshIntervalSeconds`) refreshed credentials but never applied them to the live session |
 | [ISS-061](ISS-061-softdelete-ignores-consistency.md) | Soft-delete writes bypassed the configured consistency level |
 | [ISS-062](ISS-062-migration-checksum-false-positive-risk.md) | `KandraMigration.checksum()`'s bytecode hash risked false-positive startup failures after cosmetic recompilation |
@@ -105,6 +92,8 @@ Docker before relying on them.
 | [ISS-067](ISS-067-decodeentity-rebuilds-column-map.md) | `QueryExecutor.decodeEntity` rebuilt the full column map on every row decoded instead of caching it |
 | [ISS-068](ISS-068-localrequestsperconnection-dead-config.md) | `PoolConfig.localRequestsPerConnection` was dead configuration — removed |
 | [ISS-069](ISS-069-assorted-low-severity-findings.md) | Assorted lower-severity findings — dead `@Sensitive` redaction (now wired in), no list-column warning (now added), retry backoff had no jitter (now added); RF>3 and injection-guard-default items documented; shard-awareness noted as an unaddressed architectural item |
+| [ISS-074](ISS-074-metrics-success-path-only.md) | `KandraMetrics.record()` was only ever called on the success path — retry exhaustion, non-retryable failures, and shutdown-rejections recorded nothing |
+| [ISS-075](ISS-075-strict-mode-rf-consistency-math.md) | Strict Mode warned on `LOCAL_ONE`/`ONE` but never checked RF vs (R+W) directly |
 
 ## Closed — not a bug
 

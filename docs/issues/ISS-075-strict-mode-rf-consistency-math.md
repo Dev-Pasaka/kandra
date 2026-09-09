@@ -1,6 +1,6 @@
 # ISS-075: Strict Mode warns on LOCAL_ONE/ONE but never checks RF vs (R+W) directly
 
-**Status:** Open
+**Status:** Fixed (GH #83)
 
 ## Problem
 
@@ -36,3 +36,31 @@ a proxy for it.
 `kandra-runtime/src/main/kotlin/io/kandra/runtime/StatementBuilder.kt`.
 
 Related: ISS-069 (item 3), ISS-037 (Strict Mode).
+
+## Fix
+
+`StatementBuilder` now reads the resolved table's actual replication factor from live driver metadata
+(`session.getMetadata().getKeyspace(session.getKeyspace())`, summing every non-`class` entry of
+`KeyspaceMetadata.getReplication()` — exact for `SimpleStrategy`, a documented best-effort proxy for
+`NetworkTopologyStrategy` since it sums per-DC factors rather than accounting for `LOCAL_*` levels being
+satisfied by one DC's replicas) and, when `ConsistencyConfig.strictMode` is `true`, warns whenever the
+resolved read/write consistency pair doesn't satisfy `R + W > RF` — note the **strict** inequality, not
+`>=`. Unlike the existing `LOCAL_ONE`/`ONE` check, this new check is intentionally **not** gated on
+`multiDcTopology`: an RF > 2 keyspace is not exclusive to multi-DC deployments, so the check fires on a
+single-DC cluster too. Never throws, matching the rest of Strict Mode's WARN-only contract.
+
+This also corrected a subtle inaccuracy in `ConsistencyConfig`'s own KDoc (added by ISS-069): it had
+claimed the library's defaults (`LOCAL_ONE` read + `LOCAL_QUORUM` write, weight `1 + quorum(RF)`)
+guarantee read-your-writes "for RF <= 3" using the non-strict `R + W >= RF`. Cassandra's own documented
+guidance is the strict `R + W > RF` — with `R + W == RF`, an unlucky replica placement can still make the
+read set and write set fully disjoint (e.g. `RF=3`, a write quorum of 2 lands on replicas `{A, B}`, and a
+single-replica read lands on `{C}` — no overlap; only `R + W > RF` guarantees overlap, by pigeonhole).
+Under the corrected strict formula, the library's defaults only actually guarantee read-your-writes for
+`RF <= 2`, not `RF <= 3` — both `ConsistencyConfig`'s KDoc and this new check now reflect that.
+
+Verified with `StrictModeRfIntegrationTest` (`kandra-test`), using a real single-node Testcontainers
+Cassandra cluster with a `SimpleStrategy` keyspace created at a chosen replication factor (only the
+keyspace *metadata* needs to reflect the RF — no real multi-replica execution is required, since the
+check reads declared RF, not runtime replica placement): the WARN fires for the library's
+`LOCAL_ONE`/`LOCAL_QUORUM` defaults at `RF=3`, does **not** fire at `RF=1`, and never fires at all when
+`strictMode` is left at its default (`false`), even at `RF=3`.

@@ -125,6 +125,18 @@ class BatchEngine(
         if (isShuttingDown.get()) throw KandraQueryException("Kandra is shutting down — new queries are rejected")
     }
 
+    /**
+     * Same shutdown gate as [checkNotShuttingDown], but also reports the rejection to
+     * [metricsRecorder] via [KandraMetrics.recordFailure] (ISS-074 / GH #82) — a shutdown rejection
+     * previously recorded nothing at all, leaving the failure invisible to metrics/alerting.
+     */
+    private fun checkNotShuttingDown(tableName: String, operation: String) {
+        if (isShuttingDown.get()) {
+            metricsRecorder?.recordFailure(tableName, operation, 0L, 0, "KandraQueryException")
+            throw KandraQueryException("Kandra is shutting down — new queries are rejected")
+        }
+    }
+
     // ── Execute with retry ───────────────────────────────────────────────────
 
     /**
@@ -145,7 +157,7 @@ class BatchEngine(
         tableName: String = "unknown",
         operation: String = "query"
     ): com.datastax.oss.driver.api.core.cql.ResultSet {
-        checkNotShuttingDown()
+        checkNotShuttingDown(tableName, operation)
         var lastError: Throwable? = null
         val start = System.currentTimeMillis()
         inFlightCount.incrementAndGet()
@@ -157,23 +169,37 @@ class BatchEngine(
                     if (debugConfig.logSlowQueriesMs > 0 && elapsed > debugConfig.logSlowQueriesMs) {
                         logger.warn { "Slow query detected: ${elapsed}ms (threshold ${debugConfig.logSlowQueriesMs}ms)" }
                     }
-                    metricsRecorder?.record(tableName, operation, elapsed)
+                    metricsRecorder?.record(tableName, operation, elapsed, attempt + 1)
                     return rs
                 } catch (e: Throwable) {
-                    if (retryConfig.retryOn.none { it.isInstance(e) }) throw e
+                    if (retryConfig.retryOn.none { it.isInstance(e) }) {
+                        // Immediate non-retryable exception (ISS-074 / GH #82) — record it, since this
+                        // never reaches the "exhausted retries" branch below.
+                        metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, attempt + 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+                        throw e
+                    }
                     // Never retry a statement that isn't explicitly marked idempotent — StatementBuilder
                     // sets this per-statement (see its setIdempotent call sites), and an unset flag on a
                     // BatchStatement (batches never explicitly mark themselves idempotent) is `null`,
                     // which fails safe here too. A blind retry of a non-idempotent write (plain INSERT,
                     // lookup INSERT, collection append/remove/put, counter increment/decrement) risks
                     // double-applying it server-side. See ISS-055 / GH #56.
-                    if (statement.isIdempotent() != true) throw e
+                    if (statement.isIdempotent() != true) {
+                        metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, attempt + 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+                        throw e
+                    }
                     lastError = e
                     val backoff = jitteredBackoff(attempt)
                     logger.warn { "Retrying after ${e::class.simpleName} (attempt ${attempt + 1}/${retryConfig.maxAttempts}, backoff ${backoff}ms)" }
                     Thread.sleep(backoff)
                 }
             }
+            // Retry loop exhausted (ISS-074 / GH #82) — this used to record nothing, silently hiding
+            // every retry-exhaustion failure from metrics/alerting.
+            metricsRecorder?.recordFailure(
+                tableName, operation, System.currentTimeMillis() - start, retryConfig.maxAttempts,
+                lastError?.let { it::class.qualifiedName ?: it::class.simpleName } ?: "Unknown"
+            )
             throw KandraQueryException("Query failed after ${retryConfig.maxAttempts} attempts", lastError)
         } finally {
             inFlightCount.decrementAndGet()
@@ -185,7 +211,7 @@ class BatchEngine(
         tableName: String = "unknown",
         operation: String = "query"
     ): AsyncResultSet {
-        checkNotShuttingDown()
+        checkNotShuttingDown(tableName, operation)
         var lastError: Throwable? = null
         val start = System.currentTimeMillis()
         inFlightCount.incrementAndGet()
@@ -197,18 +223,31 @@ class BatchEngine(
                     if (debugConfig.logSlowQueriesMs > 0 && elapsed > debugConfig.logSlowQueriesMs) {
                         logger.warn { "Slow query detected: ${elapsed}ms (threshold ${debugConfig.logSlowQueriesMs}ms)" }
                     }
-                    metricsRecorder?.record(tableName, operation, elapsed)
+                    metricsRecorder?.record(tableName, operation, elapsed, attempt + 1)
                     return rs
                 } catch (e: Throwable) {
-                    if (retryConfig.retryOn.none { it.isInstance(e) }) throw e
+                    if (retryConfig.retryOn.none { it.isInstance(e) }) {
+                        // Immediate non-retryable exception (ISS-074 / GH #82) — record it, since this
+                        // never reaches the "exhausted retries" branch below.
+                        metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, attempt + 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+                        throw e
+                    }
                     // See the blocking executeWithRetry's identical check for why — ISS-055 / GH #56.
-                    if (statement.isIdempotent() != true) throw e
+                    if (statement.isIdempotent() != true) {
+                        metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, attempt + 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+                        throw e
+                    }
                     lastError = e
                     val backoff = jitteredBackoff(attempt)
                     logger.warn { "Retrying after ${e::class.simpleName} (attempt ${attempt + 1}/${retryConfig.maxAttempts}, backoff ${backoff}ms)" }
                     delay(backoff)
                 }
             }
+            // Retry loop exhausted (ISS-074 / GH #82) — see the blocking counterpart's identical comment.
+            metricsRecorder?.recordFailure(
+                tableName, operation, System.currentTimeMillis() - start, retryConfig.maxAttempts,
+                lastError?.let { it::class.qualifiedName ?: it::class.simpleName } ?: "Unknown"
+            )
             throw KandraQueryException("Query failed after ${retryConfig.maxAttempts} attempts", lastError)
         } finally {
             inFlightCount.decrementAndGet()
@@ -232,7 +271,7 @@ class BatchEngine(
         tableName: String = "unknown",
         operation: String = "query"
     ): com.datastax.oss.driver.api.core.cql.ResultSet {
-        checkNotShuttingDown()
+        checkNotShuttingDown(tableName, operation)
         val start = System.currentTimeMillis()
         inFlightCount.incrementAndGet()
         try {
@@ -241,8 +280,13 @@ class BatchEngine(
             if (debugConfig.logSlowQueriesMs > 0 && elapsed > debugConfig.logSlowQueriesMs) {
                 logger.warn { "Slow query detected: ${elapsed}ms (threshold ${debugConfig.logSlowQueriesMs}ms)" }
             }
-            metricsRecorder?.record(tableName, operation, elapsed)
+            metricsRecorder?.record(tableName, operation, elapsed, 1)
             return rs
+        } catch (e: Throwable) {
+            // executeOnce has no retry loop, but an immediate failure here (e.g. a transient exception
+            // propagated as-is per its doc) previously recorded nothing at all. See ISS-074 / GH #82.
+            metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+            throw e
         } finally {
             inFlightCount.decrementAndGet()
         }
@@ -254,7 +298,7 @@ class BatchEngine(
         tableName: String = "unknown",
         operation: String = "query"
     ): AsyncResultSet {
-        checkNotShuttingDown()
+        checkNotShuttingDown(tableName, operation)
         val start = System.currentTimeMillis()
         inFlightCount.incrementAndGet()
         try {
@@ -263,8 +307,12 @@ class BatchEngine(
             if (debugConfig.logSlowQueriesMs > 0 && elapsed > debugConfig.logSlowQueriesMs) {
                 logger.warn { "Slow query detected: ${elapsed}ms (threshold ${debugConfig.logSlowQueriesMs}ms)" }
             }
-            metricsRecorder?.record(tableName, operation, elapsed)
+            metricsRecorder?.record(tableName, operation, elapsed, 1)
             return rs
+        } catch (e: Throwable) {
+            // See the blocking executeOnce's identical comment — ISS-074 / GH #82.
+            metricsRecorder?.recordFailure(tableName, operation, System.currentTimeMillis() - start, 1, e::class.qualifiedName ?: e::class.simpleName ?: "Throwable")
+            throw e
         } finally {
             inFlightCount.decrementAndGet()
         }
@@ -523,6 +571,42 @@ class BatchEngine(
             schema.lookupTables.forEach { lookup ->
                 val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach
                 add(statementBuilder.deleteLookup(lookup, indexValue))
+            }
+        }
+    }
+
+    /**
+     * Suspend counterpart of [collectSave] (ISS-059 / GH #60) — uses [StatementBuilder.insertPrimarySuspend]/
+     * [StatementBuilder.insertLookupSuspend] (async prepare) instead of their blocking equivalents, so
+     * collecting statements for [KandraRuntime.batch]'s suspend scope never blocks the calling coroutine's
+     * dispatcher thread on a prepared-statement cache miss. Used only by the suspend `saveInBatch` overload
+     * in [KandraBatchScope] — the blocking `batchBlocking { }` entry point keeps calling [collectSave].
+     */
+    internal suspend fun collectSaveSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): List<BatchableStatement<*>> {
+        if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot be saved in a batch scope.")
+        val stamped = injectTimestamps(schema, entity, isInsert = true)
+        return buildList {
+            add(statementBuilder.insertPrimarySuspend(schema, stamped, ttlSeconds))
+            schema.lookupTables.filter { it.consistency == LookupConsistency.BATCH }
+                .forEach { add(statementBuilder.insertLookupSuspend(schema, it, stamped)) }
+        }
+    }
+
+    /**
+     * Suspend counterpart of [collectDelete] (ISS-059 / GH #60) — uses [StatementBuilder.deleteByIdSuspend]/
+     * [StatementBuilder.deleteLookupSuspend] (async prepare) instead of their blocking equivalents. See
+     * [collectSaveSuspend]'s doc for why this exists and who calls it.
+     */
+    internal suspend fun collectDeleteSuspend(schema: TableSchema, entity: Any): List<BatchableStatement<*>> {
+        val props = schema.reflection.propertiesByName
+        val keyValues = (schema.partitionKeys + schema.clusteringKeys).map { key ->
+            props[key.propertyName]?.call(entity) ?: throw KandraQueryException("Key '${key.propertyName}' is null on delete")
+        }
+        return buildList {
+            add(statementBuilder.deleteByIdSuspend(schema, *keyValues.toTypedArray()))
+            schema.lookupTables.forEach { lookup ->
+                val indexValue = props[lookup.indexColumn.propertyName]?.call(entity) ?: return@forEach
+                add(statementBuilder.deleteLookupSuspend(lookup, indexValue))
             }
         }
     }

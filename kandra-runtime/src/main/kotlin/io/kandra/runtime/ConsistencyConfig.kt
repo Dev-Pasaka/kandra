@@ -14,14 +14,19 @@ import io.kandra.core.KandraConsistency
  * 2. `@ReadConsistency` / `@WriteConsistency` on the entity class
  * 3. These defaults
  *
- * **Read-your-writes above RF 3** (see ISS-069 / GH #70 item 3): read-your-writes requires
- * `R + W >= RF`. The defaults below (`LOCAL_ONE` + `LOCAL_QUORUM`) only satisfy that for `RF <= 3`
- * (`1 + 2 = 3`) — a keyspace with `RF = 5` (plausible for a larger multi-DC deployment) using these
- * defaults silently stops guaranteeing read-your-writes, with no warning from Strict Mode (which only
- * fires on `LOCAL_ONE`/`ONE` usage in a multi-DC topology, not on an RF/consistency mismatch). This is
- * exactly the kind of thing that passes every test against an `RF=1` Testcontainers setup and surfaces
- * as a mystery stale-read bug only under a real `RF=5` production topology — raise [defaultRead] (e.g.
- * to `LOCAL_QUORUM`) if your keyspace's replication factor exceeds 3.
+ * **Read-your-writes above RF 2** (see ISS-069 / GH #70 item 3, corrected by ISS-075 / GH #83):
+ * read-your-writes requires the *strict* inequality `R + W > RF` — with `R + W == RF`, an unlucky
+ * replica placement can still make the read set and write set fully disjoint (e.g. `RF=3`, a write
+ * quorum of 2 lands on replicas `{A, B}`, and a single-replica read happens to land on `{C}` — no
+ * overlap). Only `R + W > RF` guarantees overlap, by pigeonhole. The defaults below (`LOCAL_ONE` +
+ * `LOCAL_QUORUM`) sum to a fixed weight of `1 + quorum(RF)`, which only exceeds `RF` for `RF <= 2`
+ * (at `RF = 3`, `1 + 2 = 3` does **not** exceed `3`) — a keyspace with `RF = 3` or higher using these
+ * defaults silently stops guaranteeing read-your-writes. This is exactly the kind of thing that passes
+ * every test against an `RF=1` Testcontainers setup and surfaces as a mystery stale-read bug only under
+ * a real multi-replica production topology — raise [defaultRead] (e.g. to `LOCAL_QUORUM`) once your
+ * keyspace's replication factor exceeds 2. [strictMode] (below) checks this directly against the
+ * resolved table's *actual* replication factor (read live from driver metadata) instead of relying on
+ * this comment alone — see [StatementBuilder]'s `warnIfRfConsistencyMismatch`.
  */
 class ConsistencyConfig {
     var defaultRead: KandraConsistency = KandraConsistency.LOCAL_ONE
@@ -45,6 +50,13 @@ class ConsistencyConfig {
      *     loadBalancing { allowedRemoteDcs = listOf("eu-west") } // multi-DC topology signal
      * }
      * ```
+     *
+     * **Also enables the RF-vs-(R+W) check (ISS-075 / GH #83)**: independently of [multiDcTopology],
+     * when `strictMode` is `true`, [StatementBuilder] reads the resolved table's actual replication
+     * factor from live driver metadata and warns whenever the resolved read/write consistency pair
+     * doesn't satisfy `R + W > RF` (strictly) — the read-your-writes guarantee described above. Unlike
+     * the `LOCAL_ONE`/`ONE` check, this one applies on a single-DC cluster too (an RF > 2 keyspace is
+     * not exclusive to multi-DC deployments) — e.g. it fires for the defaults above once `RF >= 3`.
      */
     var strictMode: Boolean = false
 

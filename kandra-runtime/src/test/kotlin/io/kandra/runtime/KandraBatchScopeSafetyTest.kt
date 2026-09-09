@@ -171,4 +171,78 @@ class KandraBatchScopeSafetyTest {
 
         assertEquals(0, session.executeCallCount)
     }
+
+    // ── ISS-059 / GH #60: suspend batch { } collection must never block the dispatcher ───────
+
+    /**
+     * [KandraBatchScope.saveInBatch]/`deleteInBatch` on [io.kandra.runtime.repository.KandraSuspendRepository]
+     * used to collect statements via [BatchEngine.collectSave] (the blocking-prepare path) even when called
+     * from inside [KandraRuntime.batch]'s suspend block -- only the final commit was suspend-safe. This uses
+     * [PrepareCallTrackingSession], whose blocking `prepare()` throws an [AssertionError], to prove that on
+     * a cold cache (first call for this CQL string, guaranteed here since each test gets a fresh session and
+     * schema), the suspend `batch { }` path collects statements purely through `prepareAsync`
+     * ([StatementBuilder.insertPrimarySuspend] / [BatchEngine.collectSaveSuspend]) -- never falling back to
+     * the blocking `prepare()` that would otherwise starve the calling coroutine's dispatcher thread.
+     */
+    @Test
+    fun `suspend batch collects saveInBatch statements without ever calling blocking prepare`() = runBlocking {
+        SchemaRegistry.register(BsWidget::class)
+        val session = PrepareCallTrackingSession()
+        val engine = BatchEngine(session, StatementBuilder(session), unconfinedScope())
+        val runtime = KandraRuntime(session, engine, KandraCodec.default)
+        val repo = runtime.suspendRepository<BsWidget>()
+
+        // Does not throw -- if collection fell back to the blocking prepare(), PrepareCallTrackingSession
+        // would raise an AssertionError before this line completes.
+        runtime.batch {
+            repo.saveInBatch(BsWidget(UUID.randomUUID(), "a"))
+            repo.saveInBatch(BsWidget(UUID.randomUUID(), "b"))
+        }
+
+        assertEquals(0, session.blockingPrepareCount.get(), "suspend batch { } must never call the blocking CqlSession.prepare()")
+        assertTrue(session.asyncPrepareCount.get() > 0, "expected at least one prepareAsync call for the collected INSERTs")
+    }
+
+    /**
+     * Same proof for `deleteInBatch` on the suspend repository -- [BatchEngine.collectDeleteSuspend]
+     * must use [StatementBuilder.deleteByIdSuspend], never the blocking [StatementBuilder.deleteById].
+     */
+    @Test
+    fun `suspend batch collects deleteInBatch statements without ever calling blocking prepare`() = runBlocking {
+        SchemaRegistry.register(BsWidget::class)
+        val session = PrepareCallTrackingSession()
+        val engine = BatchEngine(session, StatementBuilder(session), unconfinedScope())
+        val runtime = KandraRuntime(session, engine, KandraCodec.default)
+        val repo = runtime.suspendRepository<BsWidget>()
+
+        runtime.batch {
+            repo.deleteInBatch(BsWidget(UUID.randomUUID(), "a"))
+        }
+
+        assertEquals(0, session.blockingPrepareCount.get(), "suspend batch { } must never call the blocking CqlSession.prepare()")
+        assertTrue(session.asyncPrepareCount.get() > 0, "expected at least one prepareAsync call for the collected DELETE")
+    }
+
+    /**
+     * Control case: `batchBlocking { }` is explicitly the blocking entry point (see class doc on
+     * [KandraBatchScope]) -- it's expected to keep using the blocking prepare path via
+     * [BatchEngine.collectSave], not [BatchEngine.collectSaveSuspend]. `PrepareCallTrackingSession`'s
+     * blocking `prepare()` always throws, so this only asserts the failure happens where expected
+     * (during collection, backed by a real [AssertionError] from the fake, not a driver call).
+     */
+    @Test
+    fun `batchBlocking still uses the blocking prepare path (control case)`() {
+        SchemaRegistry.register(BsWidget::class)
+        val session = PrepareCallTrackingSession()
+        val engine = BatchEngine(session, StatementBuilder(session), unconfinedScope())
+        val runtime = KandraRuntime(session, engine, KandraCodec.default)
+        val repo = runtime.repository<BsWidget>()
+
+        val ex = assertThrows(AssertionError::class.java) {
+            runtime.batchBlocking {
+                repo.saveInBatch(BsWidget(UUID.randomUUID(), "a"))
+            }
+        }
+        assertTrue(ex.message?.contains("Blocking CqlSession.prepare") == true, "unexpected message: ${ex.message}")
+    }
 }
