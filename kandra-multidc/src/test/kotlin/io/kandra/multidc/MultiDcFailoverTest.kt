@@ -40,11 +40,17 @@ data class MultiDcTestItem(
  * spread across real DCs requires real DCs to spread it across.
  *
  * "Local DC unavailable" is simulated by [KandraMultiDcTestcontainers.pause]ing the `dc1` container
- * via the Docker API (SIGSTOP-equivalent -- the process keeps its on-disk state but stops
- * responding on the wire entirely), per this issue's own suggested technique. Pool timeouts are
- * tightened in these tests specifically so the driver's own down-detection doesn't dominate test
- * runtime; production deployments should size these per their own latency/availability tradeoffs,
- * not copy these tightened values.
+ * via the Docker API, per this issue's own suggested technique. **This is a real caveat, not just an
+ * implementation detail:** `pause` (the cgroup freezer) freezes the container's userspace processes
+ * but leaves its network namespace and any already-established TCP connections alone -- it simulates
+ * an unresponsive/hung node, not a severed network link (no RST or ICMP unreachable is produced the
+ * way a real partition would typically produce). See [KandraMultiDcTestcontainers.pause]'s KDoc (GH
+ * #108 / ISS-095) for the full explanation. The tests below use bounded retry loops that tolerate
+ * either failure mode, so this hasn't been observed to change their outcome -- but a pass here is
+ * evidence against "the driver's failover logic works when dc1 hangs," not against "...when the link
+ * to dc1 is severed." Pool timeouts are tightened in these tests specifically so the driver's own
+ * down-detection doesn't dominate test runtime; production deployments should size these per their
+ * own latency/availability tradeoffs, not copy these tightened values.
  *
  * Tagged "manual" and excluded from `:kandra-multidc:test` (see `build.gradle.kts`) for the same
  * reason [KandraMultiDcTestcontainers]'s own doc comment gives: two real nodes gossiping into one
@@ -58,6 +64,9 @@ class MultiDcFailoverTest {
     fun cleanup() {
         // Always reset the shared topology, regardless of which DC (if any) a test paused --
         // a paused container left paused would silently break every later test in this JVM run.
+        // This only runs if the JVM survives to run it -- see KandraMultiDcTestcontainers.pause's
+        // KDoc (GH #108 / ISS-095) for the crash-between-pause-and-cleanup window and why
+        // Testcontainers' Ryuk reaper, not this method, is the actual backstop for that case.
         KandraMultiDcTestcontainers.unpauseAll()
         SchemaRegistry.clear()
     }

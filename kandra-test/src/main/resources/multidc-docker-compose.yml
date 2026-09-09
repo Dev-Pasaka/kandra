@@ -1,6 +1,7 @@
 # Two-datacenter, one-node-per-DC Cassandra topology backing `KandraMultiDcTestcontainers`
-# (GH #84 / ISS-076). See that class's KDoc for why this is scoped to 1 node per DC (2 containers
-# total) rather than 2+ nodes per DC.
+# (GH #84 / ISS-076; ports made dynamic under GH #108/ISS-095 -- see that section below). See that
+# class's KDoc for why this is scoped to 1 node per DC (2 containers total) rather than 2+ nodes per
+# DC.
 #
 # Both services boot from the stock `cassandra:4.1` image (matching the single-node convention in
 # `KandraTestcontainers`) -- everything needed for a genuine two-DC topology is expressible
@@ -17,7 +18,7 @@
 # healthcheck/startup timeouts are used throughout (see `KandraMultiDcTestcontainers` for the
 # matching Testcontainers-side wait strategy timeouts).
 #
-# ## Why fixed, distinct host ports (9042 / 9043) instead of Testcontainers' usual dynamic mapping
+# ## Why the host ports must still be 1:1 with each node's own native_transport_port
 #
 # A client connecting to *any* node in a Cassandra cluster discovers the rest of the ring via
 # `system.peers`/`system.peers_v2` and then opens its own direct connections to those peers --
@@ -29,12 +30,27 @@
 # `NoNodeAvailableException`/`NotYetConnectedException` failure mode hit while building this
 # fixture. `CASSANDRA_BROADCAST_RPC_ADDRESS=localhost` fixes the *address* half of that (each node
 # advertises the address the host-side driver can actually reach), but Cassandra's peer discovery
-# (`system.peers_v2`, protocol v5+) also advertises a per-node `native_port` -- each node's own
-# `native_transport_port` -- so the two nodes cannot share the same port once they're both
-# reachable at `localhost`. `cassandra-dc2` therefore runs on `native_transport_port: 9043` (see
-# `multidc-dc2-cassandra.yaml`, a full copy of the image's own default `cassandra.yaml` with only
-# that one line changed) instead of the default `9042`, and each port is published 1:1 (host port
-# == container port) so the advertised `native_port` is also the real, host-reachable port.
+# (`system.peers_v2`, protocol v5+) also advertises a per-node `native_port` taken directly from
+# that node's own `native_transport_port` setting -- there is no separate "advertise a different
+# port than I actually listen on" knob the way there is for the address. So each node's host-published
+# port and its own `native_transport_port` must be identical, and the two nodes can't share one
+# (both being reachable at `localhost`), for peer discovery to actually work from the host side.
+#
+# ## Why the port *numbers* are no longer hardcoded 9042/9043 (GH #108 / ISS-095)
+#
+# 9042 is the well-known default Cassandra/Scylla port -- a developer running this fixture is
+# disproportionately likely to already have a local Cassandra/Scylla instance (or a concurrent run
+# of this very fixture) bound to it, and a raw "port is already allocated" Docker error is not an
+# actionable failure message. `KandraMultiDcTestcontainers` now picks two free ephemeral ports at
+# fixture-startup time (one per DC, guaranteed distinct), passes them into `docker compose` as the
+# `KANDRA_DC1_PORT`/`KANDRA_DC2_PORT` environment variables substituted below, and renders each
+# node's own `native_transport_port` to match (see `multidc-cassandra-template.yaml`, mounted here
+# for *both* nodes now, not just dc2) -- preserving the 1:1 host-port/native_transport_port
+# requirement above while no longer colliding with anything already using 9042/9043. If the chosen
+# ports still can't be bound (an inherent, small race between the free-port check and Docker
+# actually claiming it) or Compose fails to start for any other reason,
+# `KandraMultiDcTestcontainers.compose` wraps the failure in a `KandraMultiDcFixtureException` with
+# an actionable message instead of surfacing a raw Testcontainers/Docker error.
 services:
   cassandra-dc1:
     image: cassandra:4.1
@@ -48,12 +64,15 @@ services:
       # compose network) actually reach this node once discovered as a peer, not just as the
       # initial contact point.
       CASSANDRA_BROADCAST_RPC_ADDRESS: localhost
+    volumes:
+      # Renders native_transport_port to KANDRA_DC1_PORT -- see the file-level comment above.
+      - ./multidc-dc1-cassandra.yaml:/etc/cassandra/cassandra.yaml
     ports:
-      # Fixed and 1:1 (host 9042 == container 9042) -- see file-level comment above for why this
-      # can't be a dynamic Testcontainers-assigned port here.
-      - "9042:9042"
+      # Fixed 1:1 (host port == container port) for the reason explained above; the *value* itself
+      # is a dynamically-chosen free port (KANDRA_DC1_PORT), not a hardcoded default.
+      - "${KANDRA_DC1_PORT}:${KANDRA_DC1_PORT}"
     healthcheck:
-      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'SELECT release_version FROM system.local' || exit 1"]
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 ${KANDRA_DC1_PORT} -e 'SELECT release_version FROM system.local' || exit 1"]
       interval: 5s
       timeout: 10s
       retries: 60
@@ -71,16 +90,15 @@ services:
       CASSANDRA_SEEDS: cassandra-dc1
       CASSANDRA_BROADCAST_RPC_ADDRESS: localhost
     volumes:
-      # Only `native_transport_port` differs from the image's default cassandra.yaml -- see the
-      # file-level comment above for why dc2 can't share dc1's port once both are host-reachable.
+      # Renders native_transport_port to KANDRA_DC2_PORT -- see the file-level comment above.
       - ./multidc-dc2-cassandra.yaml:/etc/cassandra/cassandra.yaml
     ports:
-      - "9043:9043"
+      - "${KANDRA_DC2_PORT}:${KANDRA_DC2_PORT}"
     depends_on:
       cassandra-dc1:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9043 -e 'SELECT release_version FROM system.local' || exit 1"]
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 ${KANDRA_DC2_PORT} -e 'SELECT release_version FROM system.local' || exit 1"]
       interval: 5s
       timeout: 10s
       retries: 60
