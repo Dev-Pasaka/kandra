@@ -6,8 +6,11 @@ import com.datastax.oss.driver.api.core.config.DefaultDriverOption
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader
 import com.datastax.oss.driver.api.core.loadbalancing.NodeDistance
 import com.datastax.oss.driver.api.core.loadbalancing.NodeDistanceEvaluator
+import com.datastax.oss.driver.api.core.metadata.EndPoint
 import com.datastax.oss.driver.api.core.metadata.Node
+import com.datastax.oss.driver.api.core.ssl.SslEngineFactory
 import com.datastax.oss.driver.internal.core.loadbalancing.DefaultLoadBalancingPolicy
+import com.datastax.oss.driver.internal.core.session.throttling.ConcurrencyLimitingRequestThrottler
 import io.kandra.core.CqlNaming
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.exception.KandraAuthException
@@ -18,6 +21,8 @@ import java.net.InetSocketAddress
 import java.time.Duration
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLEngine
+import javax.net.ssl.SSLParameters
 import javax.net.ssl.TrustManagerFactory
 import java.security.KeyStore
 
@@ -68,6 +73,82 @@ internal class AllowedDcNodeDistanceEvaluator(
     }
 }
 
+/**
+ * Kandra's own [SslEngineFactory] (GH #78 / ISS-070), replacing the driver's own
+ * `ProgrammaticSslEngineFactory` -- the class `CqlSession.builder().withSslContext(sslContext)`
+ * wraps things into internally, with no cipher-suite restriction and no hostname validation
+ * regardless of driver config. An [SSLContext] alone has no place to express a minimum protocol
+ * version either; that's a per-[SSLEngine] [SSLParameters] concern applied on every connection.
+ * This factory applies [SslConfig.minimumTlsVersion], [SslConfig.cipherSuites], and
+ * [SslConfig.hostnameVerification] to every [SSLEngine] the driver creates.
+ */
+internal class KandraSslEngineFactory(
+    private val sslContext: SSLContext,
+    private val minimumTlsVersion: String,
+    private val cipherSuites: List<String>?,
+    private val hostnameVerification: Boolean
+) : SslEngineFactory {
+
+    override fun newSslEngine(remoteEndpoint: EndPoint): SSLEngine {
+        val remoteAddress = remoteEndpoint.resolve()
+        val engine = if (remoteAddress is InetSocketAddress) {
+            sslContext.createSSLEngine(remoteAddress.hostName, remoteAddress.port)
+        } else {
+            sslContext.createSSLEngine()
+        }
+        engine.useClientMode = true
+
+        val supportedProtocols = engine.supportedProtocols.toSet()
+        val enabledProtocols = TLS_PROTOCOL_ORDER.filter {
+            it in supportedProtocols && protocolAtLeast(it, minimumTlsVersion)
+        }
+        // Only override enabledProtocols when the intersection is non-empty -- an empty result
+        // (e.g. a JVM/provider that doesn't support any protocol in TLS_PROTOCOL_ORDER at all,
+        // which should never happen in practice) leaves the engine's own default untouched rather
+        // than disabling every protocol and turning every connection attempt into a handshake
+        // failure with a confusing cause.
+        if (enabledProtocols.isNotEmpty()) {
+            engine.enabledProtocols = enabledProtocols.toTypedArray()
+        }
+
+        if (cipherSuites != null) {
+            engine.enabledCipherSuites = cipherSuites.toTypedArray()
+        }
+
+        if (hostnameVerification) {
+            val parameters: SSLParameters = engine.sslParameters
+            parameters.endpointIdentificationAlgorithm = "HTTPS"
+            engine.sslParameters = parameters
+        }
+
+        return engine
+    }
+
+    override fun close() {
+        // Nothing to release here -- the KeyStore/TrustManagerFactory handles used to build
+        // sslContext in buildSslContext() are already closed by the time this factory exists.
+    }
+
+    internal companion object {
+        /** Ascending TLS protocol order -- index position doubles as a comparable "floor" rank. */
+        internal val TLS_PROTOCOL_ORDER = listOf("TLSv1", "TLSv1.1", "TLSv1.2", "TLSv1.3")
+
+        /**
+         * True when [protocol] is at or above [minimum] in [TLS_PROTOCOL_ORDER]'s ascending order.
+         * [minimum] is validated against [TLS_PROTOCOL_ORDER] up front in [buildCqlSession], so by
+         * the time this runs it is always a recognized value; an unrecognized [protocol] (e.g.
+         * `"SSLv3"`, which intentionally isn't in [TLS_PROTOCOL_ORDER]) is never considered "at
+         * least" anything and is excluded.
+         */
+        internal fun protocolAtLeast(protocol: String, minimum: String): Boolean {
+            val protocolRank = TLS_PROTOCOL_ORDER.indexOf(protocol)
+            val minimumRank = TLS_PROTOCOL_ORDER.indexOf(minimum)
+            if (protocolRank == -1 || minimumRank == -1) return false
+            return protocolRank >= minimumRank
+        }
+    }
+}
+
 @OptIn(ExperimentalKandraApi::class)
 internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true): CqlSessionHandle {
     // Validate failover config
@@ -82,6 +163,21 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
     ) {
         throw KandraSchemaException(
             "failover.onLocalDcUnavailable = RETRY_REMOTE_DC but loadBalancing.allowedRemoteDcs is empty."
+        )
+    }
+
+    // GH #78 / ISS-070: requireEncryption is a hard gate, checked before any connection attempt --
+    // see SslConfig.requireEncryption's doc comment for why the default is `false` rather than `true`.
+    if (config.ssl.requireEncryption && !config.ssl.enabled) {
+        throw KandraSchemaException(
+            "ssl.requireEncryption = true but ssl.enabled = false. Enable SSL (ssl { enabled = true; " +
+            "trustStorePath = \"...\" }) or set ssl.requireEncryption = false."
+        )
+    }
+    if (config.ssl.enabled && config.ssl.minimumTlsVersion !in KandraSslEngineFactory.TLS_PROTOCOL_ORDER) {
+        throw KandraSchemaException(
+            "ssl.minimumTlsVersion = '${config.ssl.minimumTlsVersion}' is not one of " +
+            "${KandraSslEngineFactory.TLS_PROTOCOL_ORDER}."
         )
     }
 
@@ -137,10 +233,21 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
         throw KandraAuthException("Failed to retrieve credentials from auth provider: ${e.message}", e)
     }
 
-    // SSL/TLS
+    // SSL/TLS -- routed through KandraSslEngineFactory rather than the driver's own
+    // `withSslContext(sslContext)` convenience method, so minimumTlsVersion/cipherSuites/
+    // hostnameVerification are actually applied per connection (GH #78 / ISS-070; see
+    // KandraSslEngineFactory's doc comment for why `withSslContext` alone can't do this).
     if (config.ssl.enabled) {
         try {
-            builder.withSslContext(buildSslContext(config.ssl))
+            val sslContext = buildSslContext(config.ssl)
+            builder.withSslEngineFactory(
+                KandraSslEngineFactory(
+                    sslContext = sslContext,
+                    minimumTlsVersion = config.ssl.minimumTlsVersion,
+                    cipherSuites = config.ssl.cipherSuites,
+                    hostnameVerification = config.ssl.hostnameVerification
+                )
+            )
         } catch (e: KandraAuthException) {
             throw e
         } catch (e: Exception) {
@@ -168,20 +275,39 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
     return CqlSessionHandle(session, liveAuthProvider)
 }
 
-private fun buildDriverConfig(config: KandraConfig): DriverConfigLoader {
+internal fun buildDriverConfig(config: KandraConfig): DriverConfigLoader {
     val builder = DriverConfigLoader.programmaticBuilder()
         .withInt(DefaultDriverOption.CONNECTION_MAX_REQUESTS, config.pool.maxRequestsPerConnection)
         .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofMillis(config.pool.requestTimeoutMillis))
         .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, Duration.ofMillis(config.pool.connectionTimeoutMillis))
         .withDuration(DefaultDriverOption.HEARTBEAT_INTERVAL, Duration.ofSeconds(config.pool.heartbeatIntervalSeconds.toLong()))
+        // GH #80 / ISS-072: pool *size* (distinct from per-connection request limits above), still
+        // left at the driver's own default (1) unless overridden via pool { localPoolSize = ...;
+        // remotePoolSize = ... }.
+        .withInt(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE, config.pool.localPoolSize)
+        .withInt(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE, config.pool.remotePoolSize)
         // Explicit, rather than relying on this being the driver's own default -- makes the link
         // between loadBalancing/failover config below and actual driver routing behavior grep-able
         // (GH #58: previously nothing in this file ever called .withLoadBalancingPolicy(...) or set
         // LOAD_BALANCING_POLICY_CLASS at all).
         .withClass(DefaultDriverOption.LOAD_BALANCING_POLICY_CLASS, DefaultLoadBalancingPolicy::class.java)
 
-    if (config.ssl.enabled) {
-        builder.withBoolean(DefaultDriverOption.SSL_HOSTNAME_VALIDATION, config.ssl.hostnameVerification)
+    // Note: SSL_HOSTNAME_VALIDATION is deliberately NOT set here. That option is only ever read by
+    // the driver's own DefaultSslEngineFactory (activated via the `advanced.ssl-engine-factory`
+    // config section) -- it has zero effect on a session built via
+    // `CqlSessionBuilder.withSslEngineFactory(...)`/`withSslContext(...)`, which is what
+    // buildCqlSession uses below. ssl.hostnameVerification is applied directly inside
+    // KandraSslEngineFactory instead (GH #78 / ISS-070); setting this option here in addition would
+    // just be a second, misleading source of truth that the driver silently ignores.
+
+    // GH #81 / ISS-073: concurrency-limiting request throttler (backpressure/admission control).
+    // Off by default -- the driver's own default throttler (PassThroughRequestThrottler) never
+    // queues or rejects, so an unconfigured `throttle { }` block changes nothing.
+    if (config.throttle.enabled) {
+        builder
+            .withClass(DefaultDriverOption.REQUEST_THROTTLER_CLASS, ConcurrencyLimitingRequestThrottler::class.java)
+            .withInt(DefaultDriverOption.REQUEST_THROTTLER_MAX_CONCURRENT_REQUESTS, config.throttle.maxConcurrentRequests)
+            .withInt(DefaultDriverOption.REQUEST_THROTTLER_MAX_QUEUE_SIZE, config.throttle.maxQueueSize)
     }
 
     // Multi-DC failover (GH #58). The driver's DefaultLoadBalancingPolicy natively supports

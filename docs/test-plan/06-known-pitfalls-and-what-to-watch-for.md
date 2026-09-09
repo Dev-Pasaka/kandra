@@ -14,7 +14,6 @@ row as FAIL just because one of these had no observable impact (confirm the *abs
 matches this list first):
 
 - `PoolConfig.localRequestsPerConnection`
-- `SslConfig.requireEncryption`, `SslConfig.minimumTlsVersion`, `SslConfig.cipherSuites`
 - `LoadBalancingConfig.tokenAware`, `LoadBalancingConfig.maxRemoteNodesPerRemoteDc`
 - `FailoverConfig.remoteRetryDelayMs`
 - `ConsistencyConfig.defaultSerialConsistency` (declared, but `saveIfNotExists` takes

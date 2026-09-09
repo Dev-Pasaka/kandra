@@ -16,10 +16,6 @@ for the full write-up.
 
 | ID | GH | Severity | Title |
 |---|---|---|---|
-| [ISS-070](ISS-070-ssl-config-dead-fields.md) | [#78](https://github.com/Dev-Pasaka/kandra/issues/78) | High | `SslConfig.requireEncryption`/`minimumTlsVersion`/`cipherSuites` are declared but never applied |
-| [ISS-071](ISS-071-concurrent-ddl-bootstrap-race.md) | [#79](https://github.com/Dev-Pasaka/kandra/issues/79) | High | Schema DDL bootstrap has no coordination guard across concurrently-starting instances |
-| [ISS-072](ISS-072-connection-pool-size-unconfigurable.md) | [#80](https://github.com/Dev-Pasaka/kandra/issues/80) | Medium | Connection-pool size (local/remote) has no Kandra-level configuration |
-| [ISS-073](ISS-073-no-backpressure-admission-control.md) | [#81](https://github.com/Dev-Pasaka/kandra/issues/81) | Medium | No backpressure/admission-control knob for in-flight requests |
 | [ISS-076](ISS-076-ktor-migrate-test-coverage-gaps.md) | [#84](https://github.com/Dev-Pasaka/kandra/issues/84) | Low | `kandra-ktor` (SSL/pool/failover) and `kandra-migrate` have thin test coverage relative to their risk surface |
 
 ## Fixed — pending live-cluster verification
@@ -92,6 +88,10 @@ Docker before relying on them.
 | [ISS-067](ISS-067-decodeentity-rebuilds-column-map.md) | `QueryExecutor.decodeEntity` rebuilt the full column map on every row decoded instead of caching it |
 | [ISS-068](ISS-068-localrequestsperconnection-dead-config.md) | `PoolConfig.localRequestsPerConnection` was dead configuration — removed |
 | [ISS-069](ISS-069-assorted-low-severity-findings.md) | Assorted lower-severity findings — dead `@Sensitive` redaction (now wired in), no list-column warning (now added), retry backoff had no jitter (now added); RF>3 and injection-guard-default items documented; shard-awareness noted as an unaddressed architectural item |
+| [ISS-070](ISS-070-ssl-config-dead-fields.md) | `SslConfig.requireEncryption`/`minimumTlsVersion`/`cipherSuites` were declared but never applied |
+| [ISS-071](ISS-071-concurrent-ddl-bootstrap-race.md) | Schema DDL bootstrap (`SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE` and `KandraMigrationRunner`'s own bookkeeping-table bootstrap) had no coordination guard across concurrently-starting instances |
+| [ISS-072](ISS-072-connection-pool-size-unconfigurable.md) | Connection-pool size (local/remote) had no Kandra-level configuration |
+| [ISS-073](ISS-073-no-backpressure-admission-control.md) | No backpressure/admission-control knob for in-flight requests |
 | [ISS-074](ISS-074-metrics-success-path-only.md) | `KandraMetrics.record()` was only ever called on the success path — retry exhaustion, non-retryable failures, and shutdown-rejections recorded nothing |
 | [ISS-075](ISS-075-strict-mode-rf-consistency-math.md) | Strict Mode warned on `LOCAL_ONE`/`ONE` but never checked RF vs (R+W) directly |
 
