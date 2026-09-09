@@ -19,5 +19,6 @@ dependencies {
     testImplementation(project(":kandra-core"))
     testImplementation(libs.junit)
     testImplementation(libs.junit.params)
+    testImplementation(libs.caffeine)
     testRuntimeOnly(libs.junit.launcher)
 }

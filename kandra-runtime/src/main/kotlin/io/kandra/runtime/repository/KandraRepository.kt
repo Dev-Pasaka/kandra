@@ -103,6 +103,12 @@ class KandraRepository<T : Any>(
 
     fun findById(vararg idValues: Any, consistency: KandraConsistency? = null): T? {
         checkNotShuttingDown()
+        // A caller-supplied consistency override (e.g. LOCAL_QUORUM for read-your-writes) must
+        // reach Scylla — a cache hit would silently serve a value that never honored it. Bypass
+        // the cache entirely rather than caching this stronger/weaker-than-usual read (GH #95).
+        if (consistency != null) {
+            return executor.findById(entityClass, *idValues, consistency = consistency)
+        }
         val cacheKey: Any = if (idValues.size == 1) idValues[0] else idValues.toList()
         return cache.getIfPresent(cacheKey) ?: executor.findById(entityClass, *idValues, consistency = consistency)
             ?.also { cache.put(cacheKey, it) }
