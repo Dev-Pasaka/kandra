@@ -3,6 +3,7 @@ package io.kandra.runtime
 import com.datastax.oss.driver.api.core.DefaultConsistencyLevel
 import io.kandra.core.KandraConsistency
 import io.kandra.core.SchemaRegistry
+import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.annotations.SecondaryIndex
@@ -22,6 +23,12 @@ data class QercItem(@PartitionKey val id: UUID, val group: String)
 data class QercSoftDeleteItem(
     @PartitionKey val id: UUID,
     @SecondaryIndex val deleted: Boolean = false
+)
+
+@ScyllaTable("qerc_lookup_items")
+data class QercLookupItem(
+    @PartitionKey val id: UUID,
+    @LookupIndex(tableSuffix = "by_email") val email: String
 )
 
 /**
@@ -189,5 +196,49 @@ class QueryExecutorConsistencyAndRowCapTest {
         val results = executor.findActive(QercSoftDeleteItem::class)
 
         assertEquals(2, results.size)
+    }
+
+    // ── GH #96: lookup-index read hop consistency ─────────────────────────────
+
+    @Test
+    fun `findAll lookup-index branch resolves the configured default read consistency for the lookup hop`() {
+        val schema = SchemaRegistry.register(QercLookupItem::class)
+        // Lookup miss -- resolveRows returns before the primary-table hop, isolating the assertion
+        // to the lookup-table SELECT's own consistency level.
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Rows(emptyList())))
+        val config = ConsistencyConfig().apply { defaultRead = KandraConsistency.LOCAL_QUORUM }
+        val executor = QueryExecutor(session, schema, StatementBuilder(session, consistencyConfig = config))
+
+        val results = executor.findAll(QercLookupItem::class) { KandraColumnRef<String>("email") eq "a@b.com" }
+
+        assertEquals(emptyList<QercLookupItem>(), results)
+        assertEquals(DefaultConsistencyLevel.LOCAL_QUORUM, session.lastBoundConsistencyLevel)
+    }
+
+    @Test
+    fun `findAllSuspend lookup-index branch resolves the configured default read consistency for the lookup hop`() = runBlocking {
+        val schema = SchemaRegistry.register(QercLookupItem::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Rows(emptyList())))
+        val config = ConsistencyConfig().apply { defaultRead = KandraConsistency.LOCAL_QUORUM }
+        val executor = QueryExecutor(session, schema, StatementBuilder(session, consistencyConfig = config))
+
+        val results = executor.findAllSuspend(QercLookupItem::class) { KandraColumnRef<String>("email") eq "a@b.com" }
+
+        assertEquals(emptyList<QercLookupItem>(), results)
+        assertEquals(DefaultConsistencyLevel.LOCAL_QUORUM, session.lastBoundConsistencyLevel)
+    }
+
+    @Test
+    fun `findAll lookup-index branch honors a per-call consistency override for the lookup hop`() {
+        val schema = SchemaRegistry.register(QercLookupItem::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Rows(emptyList())))
+        val config = ConsistencyConfig().apply { defaultRead = KandraConsistency.LOCAL_QUORUM }
+        val executor = QueryExecutor(session, schema, StatementBuilder(session, consistencyConfig = config))
+
+        executor.findAll(QercLookupItem::class, consistency = KandraConsistency.ALL) {
+            KandraColumnRef<String>("email") eq "a@b.com"
+        }
+
+        assertEquals(DefaultConsistencyLevel.ALL, session.lastBoundConsistencyLevel)
     }
 }

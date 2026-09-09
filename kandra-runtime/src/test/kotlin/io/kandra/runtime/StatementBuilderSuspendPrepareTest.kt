@@ -180,7 +180,7 @@ class StatementBuilderSuspendPrepareTest {
         val session = PrepareCallTrackingSession()
         val builder = StatementBuilder(session)
 
-        assertThrowsBlockingPrepare { builder.selectByLookup(lookup, "a@b.com") }
+        assertThrowsBlockingPrepare { builder.selectByLookup(schema, lookup, "a@b.com") }
     }
 
     @Test
@@ -190,7 +190,7 @@ class StatementBuilderSuspendPrepareTest {
         val session = PrepareCallTrackingSession()
         val builder = StatementBuilder(session)
 
-        builder.selectByLookupSuspend(lookup, "a@b.com")
+        builder.selectByLookupSuspend(schema, lookup, "a@b.com")
 
         assertEquals(0, session.blockingPrepareCount.get())
         assertEquals(1, session.asyncPrepareCount.get())
