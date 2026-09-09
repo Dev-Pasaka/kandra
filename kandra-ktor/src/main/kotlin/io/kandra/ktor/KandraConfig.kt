@@ -170,6 +170,19 @@ class SslConfig {
  * This only throttles at the driver/session level (`session.execute`/`executeAsync` admission).
  * It is unrelated to and does not replace `BatchEngine.inFlightCount`, which is Kandra's own
  * separate in-flight tracker used purely for graceful-shutdown draining.
+ *
+ * A rejection surfaces to callers as `io.kandra.core.exception.KandraThrottledException` (GH #103 /
+ * ISS-090), not the raw driver `RequestThrottlingException` -- it participates in the same
+ * catch-Kandra's-documented-exceptions story as every other write/read failure. It is never
+ * retried by `RetryConfig`, regardless of `retryOn`: retrying a throttle rejection immediately just
+ * adds another request on top of an already-overloaded throttler.
+ *
+ * **Interacts with `speculativeExecution`**: enabling both means each speculative retry counts as
+ * an additional request toward [maxConcurrentRequests] — turning both on can cause self-inflicted
+ * throttling under tail latency, since a burst of slow requests each spawn extra in-flight
+ * speculative copies right when the throttle is most likely to already be near its limit. Worth
+ * tuning [maxConcurrentRequests]/[maxQueueSize] up, or being conservative with speculative
+ * execution's own concurrency, if both are enabled together.
  */
 class ThrottleConfig {
     var enabled: Boolean = false
