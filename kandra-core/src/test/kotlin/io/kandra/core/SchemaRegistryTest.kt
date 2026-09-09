@@ -74,6 +74,17 @@ data class Transaction(
 @ScyllaTable("no_pk_entities")
 data class NoPkEntity(val id: UUID, val value: String)
 
+// GH-104 part 2: @ScyllaTable on a non-data class must fail fast with a clear diagnostic instead
+// of surfacing much later as an opaque reflection crash on first save/update.
+@ScyllaTable("not_data_entities")
+class NotDataEntity(@PartitionKey val id: UUID)
+
+@ScyllaTable("object_entities")
+object ObjectEntity {
+    @PartitionKey
+    val id: UUID = UUID.randomUUID()
+}
+
 @ScyllaTable("duplicate_pk_index_entities")
 data class DuplicatePkIndexEntity(
     @PartitionKey(index = 0) val id: UUID,
@@ -254,6 +265,22 @@ class SchemaRegistryTest {
             SchemaRegistry.register(NoPkEntity::class)
         }
         assertTrue(ex.message!!.contains("no @PartitionKey"))
+    }
+
+    @Test
+    fun `throws KandraSchemaException on @ScyllaTable applied to a non-data class - GH-104`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(NotDataEntity::class)
+        }
+        assertTrue(ex.message!!.contains("not a data class"), "Expected a 'not a data class' diagnostic, got: ${ex.message}")
+    }
+
+    @Test
+    fun `throws KandraSchemaException on @ScyllaTable applied to an object - GH-104`() {
+        val ex = assertThrows<KandraSchemaException> {
+            SchemaRegistry.register(ObjectEntity::class)
+        }
+        assertTrue(ex.message!!.contains("not a data class"), "Expected a 'not a data class' diagnostic, got: ${ex.message}")
     }
 
     @Test

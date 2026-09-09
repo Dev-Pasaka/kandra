@@ -62,6 +62,22 @@ object SchemaRegistry {
     private fun <T : Any> buildSchema(klass: KClass<T>): TableSchema {
         val tableAnnotation = klass.findAnnotation<ScyllaTable>()
             ?: throw KandraSchemaException("Class '${klass.simpleName}' is missing @ScyllaTable annotation.")
+
+        // GH-104: @ScyllaTable is only meaningful on a data class — codegen's own shape filter is
+        // just "it is KSClassDeclaration" (no classKind check), so an object/interface/enum
+        // class/non-data abstract class carrying @ScyllaTable is accepted silently there and a
+        // *Table object is generated for it regardless. Left unchecked, the failure only surfaces
+        // much later and far more confusingly here in reflection-heavy code
+        // (klass.primaryConstructor, the copy() function lookup) the first time an entity is
+        // actually saved/updated — typically an opaque NPE or kotlin-reflect IllegalStateException
+        // that never names the real problem. Fail fast, here, with a clear diagnostic instead.
+        if (!klass.isData) {
+            throw KandraSchemaException(
+                "Class '${klass.simpleName}' is annotated @ScyllaTable but is not a data class. " +
+                    "Kandra entities must be Kotlin data classes (not an object, interface, enum class, " +
+                    "or non-data class)."
+            )
+        }
         val tableName = tableAnnotation.name
         if (!CqlNaming.isValidIdentifier(tableName)) {
             throw KandraSchemaException(
