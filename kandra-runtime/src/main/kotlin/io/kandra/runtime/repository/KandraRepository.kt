@@ -110,8 +110,13 @@ class KandraRepository<T : Any>(
             return executor.findById(entityClass, *idValues, consistency = consistency)
         }
         val cacheKey: Any = if (idValues.size == 1) idValues[0] else idValues.toList()
-        return cache.getIfPresent(cacheKey) ?: executor.findById(entityClass, *idValues, consistency = consistency)
-            ?.also { cache.put(cacheKey, it) }
+        cache.getIfPresent(cacheKey)?.let { return it }
+        // Captured right before the DB read starts -- see KandraCache.put's ISS-087 doc for why:
+        // a concurrent write's invalidate() after this point must prevent this read's result from
+        // being cached, since it may already be stale by the time the read completes.
+        val readStamp = cache.readStamp()
+        return executor.findById(entityClass, *idValues, consistency = consistency)
+            ?.also { cache.put(cacheKey, it, readStamp) }
     }
 
     fun find(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? {

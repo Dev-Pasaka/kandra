@@ -113,8 +113,13 @@ class KandraSuspendRepository<T : Any>(
             return executor.findByIdSuspend(entityClass, *idValues, consistency = consistency)
         }
         val cacheKey: Any = if (idValues.size == 1) idValues[0] else idValues.toList()
-        return cache.getIfPresent(cacheKey) ?: executor.findByIdSuspend(entityClass, *idValues, consistency = consistency)
-            ?.also { cache.put(cacheKey, it) }
+        cache.getIfPresent(cacheKey)?.let { return it }
+        // Captured right before the DB read starts -- see KandraCache.put's ISS-087 doc for why:
+        // a concurrent write's invalidate() after this point must prevent this read's result from
+        // being cached, since it may already be stale by the time the read completes.
+        val readStamp = cache.readStamp()
+        return executor.findByIdSuspend(entityClass, *idValues, consistency = consistency)
+            ?.also { cache.put(cacheKey, it, readStamp) }
     }
 
     suspend fun find(consistency: KandraConsistency? = null, block: QueryContext.() -> Unit): T? {

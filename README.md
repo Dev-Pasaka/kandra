@@ -1065,3 +1065,9 @@ productRepo.save(updated)  // save/update/delete invalidate the cached entry
 ```
 
 `caffeine` is a `compileOnly` dependency — caching is disabled gracefully if it's not on the classpath.
+
+**Per-process only:** the cache lives entirely in each application instance's JVM heap. A write on
+instance A never invalidates instance B/C's cached copy of the same row — in a horizontally-scaled
+or multi-DC deployment, other instances keep serving their own stale entries until their own TTL
+expires, independent of any consistency level configured for the write. Avoid `@CacheResult` (or
+pair it with a short `ttlSeconds`) on tables where cross-instance freshness matters.
