@@ -1,6 +1,36 @@
 # ISS-095: Multi-DC test fixture hardening (fixed compose ports, pause vs real partition realism, missing hostname-mismatch SSL test, cleanup reliance)
 
-**Status:** Open
+**Status:** Fixed, verified against the real Docker-based fixtures
+
+## Resolution
+
+Fixed via GH #108's PR (branch `fix/gh-108-multidc-fixture-hardening`):
+
+- **#1 (fixed ports):** `multidc-docker-compose.yml` now maps `${KANDRA_DC1_PORT}`/`${KANDRA_DC2_PORT}`
+  instead of hardcoded `9042`/`9043`. `KandraMultiDcTestcontainers.compose` picks two free ephemeral
+  ports per attempt (up to 3 attempts, each with a fresh port pair and best-effort teardown of the
+  failed attempt's containers so a retry doesn't collide with its own leftovers), renders each node's
+  `native_transport_port` to match via a new shared `multidc-cassandra-template.yaml` (previously only
+  dc2 had a custom yaml; dc1 now does too), and wraps any startup failure in a new
+  `KandraMultiDcFixtureException` with an actionable message instead of a raw Docker bind error.
+- **#2 (pause realism):** `KandraMultiDcTestcontainers.pause`'s KDoc and `MultiDcFailoverTest`'s class
+  doc now describe what Docker `pause` actually does (cgroup-freezer, established TCP connections stay
+  live, no RST/ICMP produced) versus a real network partition, instead of claiming it stops the node
+  "responding on the wire entirely." No additional real-partition-simulating test was added -- the
+  issue's own suggested fix was doc correction only.
+- **#3 (hostname-mismatch SSL test):** added
+  `SslRoundTripIntegrationTest."hostname mismatch is rejected end-to-end when hostnameVerification is enabled"`,
+  which issues a second self-signed cert for `CN=wrong-host.example.invalid`, connects with
+  `hostnameVerification = true`, and asserts the handshake fails with an `SSLException` -- walking both
+  the plain `.cause` chain and the DataStax driver's `AllNodesFailedException.getAllErrors()` map, since
+  the driver puts per-node connection failures there rather than in its own `.cause`.
+- **#4 (cleanup reliance):** `pause`'s KDoc and `MultiDcFailoverTest.cleanup()` now explicitly
+  acknowledge the crash-between-pause-and-cleanup window and that Testcontainers' Ryuk reaper, not
+  `@AfterEach`, is the actual backstop if the JVM dies mid-test.
+
+Verified by running `./gradlew :kandra-multidc:multiDcTest` and `./gradlew :kandra-ktor:sslIntegrationTest`
+against the real 2-DC Docker Compose / Testcontainers fixtures -- all tests pass, including the new
+hostname-mismatch test and all four `MultiDcFailoverTest` scenarios with dynamic ports.
 
 ## Problem
 

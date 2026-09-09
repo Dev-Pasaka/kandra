@@ -16,10 +16,20 @@ import org.testcontainers.containers.ComposeContainer
 import org.testcontainers.containers.wait.strategy.Wait
 import java.io.File
 import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.nio.file.Files
 import java.time.Duration
 import java.util.UUID
 import kotlin.reflect.KClass
+
+/**
+ * Thrown by [KandraMultiDcTestcontainers] when the multi-DC Docker Compose fixture itself fails to
+ * come up -- a dynamically-chosen port still collided (see [KandraMultiDcTestcontainers.compose]'s
+ * doc for the small, inherent check-then-bind race), Docker isn't running, or Compose otherwise
+ * failed to start. Wraps whatever Testcontainers/Docker raised with an actionable, Kandra-authored
+ * message instead of leaving a caller to decode a raw Docker bind error (GH #108 / ISS-095).
+ */
+class KandraMultiDcFixtureException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /**
  * A real two-datacenter, one-node-per-DC Cassandra topology for DC-aware load-balancing/failover
@@ -77,49 +87,136 @@ object KandraMultiDcTestcontainers {
     private const val DC1_SERVICE = "cassandra-dc1"
     private const val DC2_SERVICE = "cassandra-dc2"
 
-    // Distinct, fixed ports per node -- see multidc-docker-compose.yml's file-level comment for
-    // why this pair can't be Testcontainers' usual same-port dynamic mapping: a Cassandra client
-    // discovers peers via system.peers_v2 (which advertises each node's own native_transport_port)
-    // and connects to them directly, so once both nodes are made host-reachable
-    // (CASSANDRA_BROADCAST_RPC_ADDRESS=localhost), they need genuinely different ports.
-    private const val DC1_CQL_PORT = 9042
-    private const val DC2_CQL_PORT = 9043
+    /**
+     * The dynamically-chosen ports actually used by the running [compose] topology (GH #108 /
+     * ISS-095 -- previously hardcoded 9042/9043, which routinely collided with a developer's own
+     * local Cassandra/Scylla instance or a concurrent run of this same fixture). Only meaningful
+     * after [compose] has been successfully touched at least once -- every call site that reads
+     * these ([cqlPortFor], via [contactPoint]) forces [compose] first for exactly this reason.
+     * `-1` before that point, deliberately invalid so a same-JVM logic bug (reading these before
+     * [compose] starts) fails loudly on the resulting bogus `InetSocketAddress` instead of silently
+     * using port `0`.
+     */
+    private var dc1Port: Int = -1
+    private var dc2Port: Int = -1
 
     /**
      * The compose-managed topology -- started once per JVM, on first access, exactly like
      * [KandraTestcontainers.container]'s `by lazy { ... start() }` pattern. Startup timeouts are
      * generous (see class doc: two-node gossip convergence from cold is meaningfully slower than
      * the single-node case).
+     *
+     * ### Port selection and retry (GH #108 / ISS-095)
+     *
+     * [findFreePort] only checks that a port is free at the moment it's picked -- there's an
+     * inherent, small race between that check and Docker actually binding it (another process,
+     * including an entirely unrelated Testcontainers-managed container from a concurrent test run,
+     * could grab the same ephemeral port in between). A naive "pick ports once, retry the same pair
+     * forever" approach makes this *worse* on retry, not better: if `docker compose up` fails after
+     * partially creating containers (e.g. dc1 started and bound its port, then something else in the
+     * topology failed), those containers are never automatically torn down here -- [ComposeContainer]
+     * only runs its cleanup (`docker compose down`) from [ComposeContainer.stop], which is never
+     * called if [ComposeContainer.start] itself throws -- so a same-port retry would immediately
+     * collide with its own previous attempt's leftovers. To actually make retrying useful, each of
+     * up to 3 attempts here picks a **fresh** port pair and best-effort tears down its own compose
+     * project if it fails, before the next attempt tries again with different ports.
+     *
+     * If every attempt fails -- Docker isn't running, or something other than a port collision is
+     * wrong -- the last failure is wrapped in [KandraMultiDcFixtureException] with an actionable
+     * message instead of propagating a raw Testcontainers/Docker exception.
      */
     val compose: ComposeContainer by lazy {
-        ComposeContainer(extractComposeFile())
-            .withLocalCompose(true)
-            .withExposedService(
-                DC1_SERVICE,
-                DC1_CQL_PORT,
-                Wait.forListeningPort().withStartupTimeout(Duration.ofMinutes(5))
-            )
-            .withExposedService(
-                DC2_SERVICE,
-                DC2_CQL_PORT,
-                Wait.forListeningPort().withStartupTimeout(Duration.ofMinutes(5))
-            )
-            .also { it.start() }
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            val attemptDc1Port = findFreePort()
+            val attemptDc2Port = findFreePort(exclude = attemptDc1Port)
+            var started: ComposeContainer? = null
+            try {
+                val candidate = ComposeContainer(extractComposeFile(attemptDc1Port, attemptDc2Port))
+                    .withLocalCompose(true)
+                    .withEnv("KANDRA_DC1_PORT", attemptDc1Port.toString())
+                    .withEnv("KANDRA_DC2_PORT", attemptDc2Port.toString())
+                    .withExposedService(
+                        DC1_SERVICE,
+                        attemptDc1Port,
+                        Wait.forListeningPort().withStartupTimeout(Duration.ofMinutes(5))
+                    )
+                    .withExposedService(
+                        DC2_SERVICE,
+                        attemptDc2Port,
+                        Wait.forListeningPort().withStartupTimeout(Duration.ofMinutes(5))
+                    )
+                candidate.start()
+                started = candidate
+                dc1Port = attemptDc1Port
+                dc2Port = attemptDc2Port
+                return@lazy candidate
+            } catch (e: Exception) {
+                lastError = e
+                // Best-effort teardown of whatever this failed attempt managed to create, so a
+                // *different*-ported retry doesn't inherit a poisoned Docker state -- and so this
+                // attempt's own containers don't linger beyond Ryuk's eventual JVM-exit cleanup.
+                // `started` is only non-null if `candidate.start()` itself returned normally, which
+                // it didn't (we're in the catch block for that exact call) -- so this covers the
+                // "started but a later step in this same try block threw" case; a `start()` failure
+                // itself is handled by Testcontainers' own registerContainersForShutdown() call
+                // (made before createServices() runs) plus Ryuk.
+                runCatching { started?.stop() }
+            }
+        }
+        throw KandraMultiDcFixtureException(
+            "Failed to start the multi-DC Cassandra test fixture after 3 attempts with different " +
+                "dynamically-chosen ports each time. Common causes: Docker isn't running (check " +
+                "`docker info`), or the Docker daemon is under heavy concurrent load from other " +
+                "processes/test runs (GH #108 / ISS-095 -- dynamic port selection avoids fixed-port " +
+                "collisions, but can't fix a generally overloaded Docker daemon). Last error: " +
+                "${lastError?.let { "${it::class.simpleName}: ${it.message}" }}",
+            lastError
+        )
     }
 
     /** The real CQL contact point for [dc] (`DC1`/`DC2`) once [compose] has started. */
     fun contactPoint(dc: String): InetSocketAddress {
         val service = serviceNameFor(dc)
+        val startedCompose = compose // force startup first -- sets dc1Port/dc2Port, read by cqlPortFor below.
         val port = cqlPortFor(dc)
-        return InetSocketAddress(compose.getServiceHost(service, port), compose.getServicePort(service, port))
+        return InetSocketAddress(startedCompose.getServiceHost(service, port), startedCompose.getServicePort(service, port))
     }
 
     /**
-     * Pauses (SIGSTOP, via the Docker API -- the process keeps its state but stops responding
-     * entirely) the container backing [dc], simulating "this datacenter is unreachable" for
-     * failover tests without tearing down and losing the ability to bring it back. Always pair
-     * with [unpause] (or [unpauseAll]) in `@AfterEach` -- a paused container left paused breaks
-     * every later test sharing this JVM-wide topology.
+     * Pauses the container backing [dc] via the Docker API (`docker pause`), simulating "this
+     * datacenter is unreachable" for failover tests without tearing down and losing the ability to
+     * bring it back.
+     *
+     * ### What this actually simulates -- and what it doesn't (GH #108 / ISS-095)
+     *
+     * Docker `pause` freezes the container's userspace processes via the Linux cgroup freezer. It
+     * does **not** sever the container's network namespace or stop the host kernel's TCP stack for
+     * it -- any TCP connection already established to this node stays alive at the socket level,
+     * simply going quiet because nothing on the far end is scheduled to read or write it anymore.
+     * That's closer to "the Cassandra process hung" than "the network link went down": a real
+     * network partition (a severed link, a firewall rule, an unplugged cable) typically produces
+     * immediate TCP RSTs or ICMP host/port-unreachable on new connection attempts, and can also kill
+     * already-established connections outright -- neither of which `pause` produces. No RST, no
+     * ICMP unreachable, and existing sockets are never actively torn down by this call.
+     *
+     * The tests in [io.kandra.multidc.MultiDcFailoverTest] that use this are built around bounded
+     * retry loops tolerant of either failure mode (both eventually manifest as the driver giving up
+     * on the node), so this distinction hasn't been observed to change their outcome -- but don't
+     * read a passing failover test here as proof of behavior under a *severed link*, only under an
+     * unresponsive/hung node. Always pair with [unpause] (or [unpauseAll]) in `@AfterEach` -- a
+     * paused container left paused breaks every later test sharing this JVM-wide topology.
+     *
+     * ### If the JVM dies between [pause] and cleanup
+     *
+     * `@AfterEach`/`try-finally` cleanup only runs if the JVM is alive to run it. If the JVM itself
+     * dies mid-test (a crash, an OOM, `System.exit`, a killed build daemon) after [pause] but before
+     * [unpause]/[unpauseAll] runs, `dc1`/`dc2` is left frozen with nothing left in this process to
+     * unpause it. The actual backstop in that scenario is Testcontainers' own Ryuk resource-reaper
+     * sidecar, which force-removes every container/network this JVM started once it detects the JVM
+     * is gone -- a *removed* container rather than an indefinitely frozen one, but not an
+     * immediate/synchronous guarantee. This reliance is implicit rather than something the fixture
+     * enforces itself; there is no JVM-shutdown-hook-based unpause here.
      */
     fun pause(dc: String) {
         val container = containerStateFor(dc)
@@ -200,9 +297,28 @@ object KandraMultiDcTestcontainers {
     }
 
     private fun cqlPortFor(dc: String): Int = when (dc) {
-        DC1 -> DC1_CQL_PORT
-        DC2 -> DC2_CQL_PORT
+        DC1 -> dc1Port
+        DC2 -> dc2Port
         else -> error("Unknown datacenter '$dc' -- expected '$DC1' or '$DC2'.")
+    }
+
+    /**
+     * Binds an ephemeral socket to port 0 (OS-assigned free port), reads back the port it got, and
+     * immediately closes it -- the standard "ask the OS for a free port" trick. Retries against
+     * [exclude] (used to guarantee [dc1Port] and [dc2Port] are never accidentally the same port).
+     * There is an inherent, small race between this check and Docker actually binding the port
+     * (see [compose]'s doc) -- this is a best-effort preflight, not a reservation.
+     */
+    private fun findFreePort(exclude: Int? = null): Int {
+        repeat(10) {
+            ServerSocket(0).use { socket ->
+                val port = socket.localPort
+                if (port != exclude) return port
+            }
+        }
+        throw KandraMultiDcFixtureException(
+            "Could not find two distinct free ports for the multi-DC test fixture after 10 attempts."
+        )
     }
 
     private fun containerStateFor(dc: String) =
@@ -212,16 +328,22 @@ object KandraMultiDcTestcontainers {
 
     /**
      * [ComposeContainer] takes a [File], not a classpath resource. `multidc-docker-compose.yml`
-     * references a sibling file (`multidc-dc2-cassandra.yaml`) via a relative volume path, so both
-     * need to be extracted together into the same real temp directory -- not just the compose file
-     * alone -- for that relative reference to resolve once Testcontainers reads it.
+     * references two sibling files (`multidc-dc1-cassandra.yaml`, `multidc-dc2-cassandra.yaml`) via
+     * relative volume paths, so all three need to end up in the same real temp directory for those
+     * relative references to resolve once Testcontainers reads the compose file. The two per-node
+     * yaml files are rendered here (not extracted verbatim) from the one shared
+     * `multidc-cassandra-template.yaml` resource, substituting [dc1Port]/[dc2Port] (this attempt's
+     * dynamically-chosen ports -- see [compose]'s doc for why each retry gets its own fresh pair)
+     * into `native_transport_port` (GH #108 / ISS-095 -- see `multidc-docker-compose.yml`'s
+     * file-level comment for why that value has to match the node's own published host port).
      */
-    private fun extractComposeFile(): File {
+    private fun extractComposeFile(dc1Port: Int, dc2Port: Int): File {
         val tempDir = Files.createTempDirectory("kandra-multidc-compose")
         tempDir.toFile().deleteOnExit()
 
         val composeFile = extractResourceTo(tempDir, "multidc-docker-compose.yml")
-        extractResourceTo(tempDir, "multidc-dc2-cassandra.yaml")
+        renderCassandraYaml(tempDir, "multidc-dc1-cassandra.yaml", dc1Port)
+        renderCassandraYaml(tempDir, "multidc-dc2-cassandra.yaml", dc2Port)
         return composeFile
     }
 
@@ -234,5 +356,24 @@ object KandraMultiDcTestcontainers {
         target.deleteOnExit()
         resourceStream.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
         return target
+    }
+
+    /**
+     * Renders `multidc-cassandra-template.yaml` (a full copy of the `cassandra:4.1` image's own
+     * default `cassandra.yaml`, with `native_transport_port` replaced by a placeholder) to
+     * [targetFileName] in [dir], substituting [port] for that placeholder.
+     */
+    private fun renderCassandraYaml(dir: java.nio.file.Path, targetFileName: String, port: Int) {
+        val resourceStream = requireNotNull(
+            KandraMultiDcTestcontainers::class.java.classLoader.getResourceAsStream("multidc-cassandra-template.yaml")
+        ) { "multidc-cassandra-template.yaml not found on the classpath (expected in kandra-test's src/main/resources)." }
+
+        val rendered = resourceStream.use { it.readBytes() }
+            .toString(Charsets.UTF_8)
+            .replace("__KANDRA_NATIVE_TRANSPORT_PORT__", port.toString())
+
+        val target = dir.resolve(targetFileName).toFile()
+        target.deleteOnExit()
+        target.writeText(rendered)
     }
 }
