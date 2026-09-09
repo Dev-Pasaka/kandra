@@ -20,7 +20,6 @@ versus longer-standing gaps this audit was the first to catch.
 
 | ID | GH | Severity | Title |
 |---|---|---|---|
-| [ISS-077](ISS-077-ddl-bootstrap-claim-never-resets.md) | [#90](https://github.com/Dev-Pasaka/kandra/issues/90) | Critical | Schema DDL bootstrap claim never resets — AUTO_CREATE/AUTO_MIGRATE runs at most once ever per keyspace |
 | [ISS-078](ISS-078-ddl-claim-no-holder-fencing-clock-fallback.md) | [#91](https://github.com/Dev-Pasaka/kandra/issues/91) | Critical | DDL claim completion/release has no holder fencing; clock-skew check has a local-clock fallback bug |
 | [ISS-079](ISS-079-auto-migrate-key-column-add-corrupts-data.md) | [#92](https://github.com/Dev-Pasaka/kandra/issues/92) | Critical | AUTO_MIGRATE can silently ALTER TABLE ADD a missing key column as a plain column, causing row collisions |
 | [ISS-080](ISS-080-counter-column-null-decode-throws.md) | [#93](https://github.com/Dev-Pasaka/kandra/issues/93) | Critical | Counter columns throw on decode whenever any counter cell is untouched (NULL) |
@@ -123,6 +122,7 @@ Docker before relying on them.
 | [ISS-074](ISS-074-metrics-success-path-only.md) | `KandraMetrics.record()` was only ever called on the success path — retry exhaustion, non-retryable failures, and shutdown-rejections recorded nothing |
 | [ISS-075](ISS-075-strict-mode-rf-consistency-math.md) | Strict Mode warned on `LOCAL_ONE`/`ONE` but never checked RF vs (R+W) directly |
 | [ISS-076](ISS-076-ktor-migrate-test-coverage-gaps.md) | `kandra-ktor` (SSL/pool/failover) and `kandra-migrate` had thin test coverage relative to their risk surface |
+| [ISS-077](ISS-077-ddl-bootstrap-claim-never-resets.md) | Schema DDL bootstrap claim never reset — AUTO_CREATE/AUTO_MIGRATE ran at most once ever per keyspace |
 
 ## Closed — not a bug
 
