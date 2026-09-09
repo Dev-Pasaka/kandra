@@ -35,6 +35,32 @@ class JakartaKandraValidatorTest {
     }
 
     /**
+     * GH-109 item 2: KandraJakartaSupport.isAvailable used to probe availability by building and
+     * immediately closing its own throwaway ValidatorFactory via
+     * Validation.buildDefaultValidatorFactory().close(), separate from
+     * JakartaKandraValidator.sharedValidatorFactory — meaning classpath scanning + constraint
+     * metadata resolution happened twice on cold start. The probe now goes through
+     * sharedValidatorFactory directly instead of building its own factory, so a validator that
+     * shares the exact instance the probe touched can be constructed successfully right after
+     * (a throwaway factory the probe built and closed would instead have left a *closed* factory
+     * behind if it had been reused, and `Validator.validate` would fail against it).
+     */
+    @Test
+    fun `support probe reuses the shared ValidatorFactory instead of building a throwaway one`() {
+        assertTrue(KandraJakartaSupport.isAvailable)
+        val factoryAfterProbe = JakartaKandraValidator.sharedValidatorFactory
+
+        val validator = JakartaKandraValidator<Account>()
+        val errors = validator.validate(Account(email = "a@b.com", password = "longenough"))
+
+        assertTrue(errors.isEmpty())
+        assertTrue(
+            factoryAfterProbe === JakartaKandraValidator.sharedValidatorFactory,
+            "The probe must not have replaced or duplicated the shared factory"
+        )
+    }
+
+    /**
      * GH-36 item 1: default-constructed validators for different entity types must share one
      * `ValidatorFactory` instead of each building (and leaking) their own. Before the fix, the
      * default parameter called `Validation.buildDefaultValidatorFactory()` directly in the

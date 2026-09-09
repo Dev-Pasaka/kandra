@@ -191,6 +191,12 @@ class BatchEngine(
                     lastError = e
                     val backoff = jitteredBackoff(attempt)
                     logger.warn { "Retrying after ${e::class.simpleName} (attempt ${attempt + 1}/${retryConfig.maxAttempts}, backoff ${backoff}ms)" }
+                    // GH-109 item 4: Thread.sleep(backoff) sits inside this catch block. If the
+                    // thread is interrupted during this sleep (rather than during session.execute
+                    // above), the resulting InterruptedException propagates out of executeWithRetry
+                    // past every recordFailure call site above and below — an observability gap, not
+                    // a leak (inFlightCount is still decremented via the outer finally). Flagged as
+                    // plausible, not independently reproduced under live interruption.
                     Thread.sleep(backoff)
                 }
             }
@@ -240,6 +246,9 @@ class BatchEngine(
                     lastError = e
                     val backoff = jitteredBackoff(attempt)
                     logger.warn { "Retrying after ${e::class.simpleName} (attempt ${attempt + 1}/${retryConfig.maxAttempts}, backoff ${backoff}ms)" }
+                    // GH-109 item 4: see the blocking executeWithRetry's identical callout on
+                    // Thread.sleep — a CancellationException raised during this delay() propagates
+                    // past every recordFailure call site the same way.
                     delay(backoff)
                 }
             }

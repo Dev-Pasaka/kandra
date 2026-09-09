@@ -44,9 +44,18 @@ class JakartaKandraValidator<T : Any>(
 
 /** Detects whether a usable Jakarta Bean Validation provider is resolvable at runtime. */
 object KandraJakartaSupport {
+    /**
+     * GH-109 item 2: this used to probe availability by building and immediately closing its own
+     * throwaway `ValidatorFactory` via `Validation.buildDefaultValidatorFactory().close()`. Since
+     * [JakartaKandraValidator.sharedValidatorFactory] then builds a second, separate factory on
+     * first real use, classpath scanning + constraint metadata resolution happened twice on cold
+     * start. Probing through the shared factory instead means whichever of [isAvailable] or
+     * [JakartaKandraValidator.sharedValidatorFactory] is touched first does the one-time build, and
+     * the other reuses it.
+     */
     val isAvailable: Boolean by lazy {
         try {
-            Validation.buildDefaultValidatorFactory().close()
+            JakartaKandraValidator.sharedValidatorFactory
             true
         } catch (_: Throwable) {
             false

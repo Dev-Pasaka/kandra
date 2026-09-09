@@ -133,6 +133,12 @@ class StatementBuilder(
      * side isn't visible from here. This can under- or over-report relative to what a given caller
      * actually mixes at runtime, but it's the same "best information available at this call site"
      * trade-off [warnIfStrictModeViolation] already makes for its own check.
+     *
+     * GH-109 item 6 restates this same trade-off: a caller using strong per-call overrides on both
+     * the read and write paths for the same logical entity may still see (or fail to see) a warning
+     * based on the *other* operation's global default rather than its actual override. Informational
+     * — not a required fix, since resolving it would mean threading each call's sibling override
+     * through to the other side, which the current per-call API surface doesn't expose.
      */
     private fun warnIfRfConsistencyMismatch(schema: TableSchema, readLevel: KandraConsistency, writeLevel: KandraConsistency) {
         if (!consistencyConfig.strictMode) return
@@ -167,6 +173,15 @@ class StatementBuilder(
      * actually matters for a `LOCAL_*` consistency level, which is satisfied by *one* DC's replicas,
      * not the cluster-wide total. Good enough for catching the common single-DC/RF>3 case this issue
      * targets; a precise per-DC accounting is out of scope here.
+     *
+     * GH-109 item 5: this lookup is not cached — it re-reads and re-sums the keyspace's replication
+     * map on every call while [ConsistencyConfig.strictMode] is on, i.e. on every read/write for as
+     * long as Strict Mode stays enabled. No network I/O is involved (the driver keeps this metadata
+     * in memory), so the per-call cost is likely small, but it's still on the hot path — worth
+     * confirming under real load rather than assumed free, especially for teams planning to run
+     * Strict Mode continuously rather than as a one-time diagnostic. Caching would need to invalidate
+     * on a keyspace replication change (rare, but not impossible mid-process), so it's left uncached
+     * here rather than adding that invalidation complexity speculatively.
      */
     private fun replicationFactorOrNull(): Int? {
         val ksId = session.keyspace?.orElse(null) ?: return null
