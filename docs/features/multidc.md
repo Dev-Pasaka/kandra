@@ -46,9 +46,27 @@ one-node-per-DC Cassandra cluster via Testcontainers' `ComposeContainer` — `dc
 `cassandra:4.1`, `GossipingPropertyFileSnitch`, gossiped into one cluster — for tests that need
 genuine `NetworkTopologyStrategy` replication and real DC-aware failover, not a single-node stand-in.
 It follows `KandraTestcontainers`'s lazy-singleton convention (one topology per JVM) and adds
-`pause`/`unpause` helpers (via the Docker API) to simulate a DC going unreachable mid-test. See
+`pause`/`unpause` helpers (via the Docker API) to simulate a DC going unreachable mid-test — `pause`
+freezes the container's userspace via the cgroup freezer (established TCP connections stay live, no
+RST/ICMP produced), closer to "the node hung" than a real severed network link; see
+`KandraMultiDcTestcontainers.pause`'s KDoc (GH #108 / ISS-095) for the full explanation. Host ports
+are chosen dynamically per run (GH #108 / ISS-095) rather than hardcoded, so this doesn't collide with
+a local Cassandra/Scylla instance or a concurrent run of the same fixture. See
 `kandra-multidc/src/test/kotlin/io/kandra/multidc/MultiDcFailoverTest.kt` for real
 `dcAwareFailover`/`FailoverPolicy` and Strict Mode tests built on it, and
 `KandraMultiDcTestcontainers`'s own KDoc for why the topology is scoped to one node per DC. This
 suite is slower than a typical unit-test run (real two-node gossip convergence), so it's tagged out
 of the default `test` task — run it explicitly with `./gradlew :kandra-multidc:multiDcTest`.
+
+### CI coverage (GH #97 / ISS-084)
+
+This suite and `kandra-ktor`'s equivalent `sslIntegrationTest` (a real TLS round trip against a
+Testcontainers Cassandra instance) both need Docker and take several minutes, so neither runs as part
+of `ci.yml`'s fast `test` job on every push. Instead, `.github/workflows/multidc.yml` runs both
+(`./gradlew :kandra-multidc:multiDcTest :kandra-ktor:sslIntegrationTest`) nightly, on demand via
+`workflow_dispatch`, and on any push/PR that touches `kandra-multidc/**`, `kandra-ktor/**`,
+`kandra-test/**`, or the workflow file itself — so a change to this surface gets real-cluster coverage
+before merge, not just at the next nightly run. `ubuntu-latest` GitHub Actions runners ship Docker
+preinstalled, so no extra runner setup is needed. No manual pre-release step is required for this
+suite specifically; the workflow's `schedule`/`workflow_dispatch` triggers exist for cases (dependency
+bumps, base-image drift) that don't show up as a diff against these paths.

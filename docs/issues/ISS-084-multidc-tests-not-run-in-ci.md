@@ -1,6 +1,30 @@
 # ISS-084: kandra-multidc's entire test suite is tagged 'manual' with zero CI/scheduled execution
 
-**Status:** Open
+**Status:** Fixed, verified via a real CI run
+
+## Resolution
+
+Fixed via GH #97's PR. Added `.github/workflows/multidc.yml`, a separate workflow from `ci.yml`'s fast
+`test` job (these tests take several minutes against real Docker topologies, versus `ci.yml`'s normal
+sub-minute run), that runs `./gradlew :kandra-multidc:multiDcTest :kandra-ktor:sslIntegrationTest` on:
+
+- `schedule`: nightly at 03:00 UTC, so DataStax driver / `cassandra:4.1` image / failover-config drift
+  gets caught even with no code changes.
+- `workflow_dispatch`: on demand.
+- `push`/`pull_request` against `main`, path-filtered to `kandra-multidc/**`, `kandra-ktor/**`,
+  `kandra-test/**`, and the workflow file itself — so a PR touching this surface gets real-cluster
+  coverage before merge, not just at the next nightly run (per this issue's own suggested fix, running
+  on every push/PR regardless of path wasn't worth the multi-minute cost).
+
+`ubuntu-latest` runners ship Docker (and the `docker compose` v2 plugin) preinstalled, so no extra
+runner setup step was needed. Since this is fully automated (nightly + path-triggered + on-demand), no
+manual pre-release step needed documenting in README/CONTRIBUTING as a residual gap — the change is
+instead documented in [`docs/features/multidc.md`](../features/multidc.md#ci-coverage-gh-97--iss-084)
+and referenced from `README.md`.
+
+Verified by watching a real PR's CI run (`gh pr checks --watch`) with this workflow wired in, plus
+running `./gradlew :kandra-multidc:multiDcTest :kandra-ktor:sslIntegrationTest` locally against real
+Docker.
 
 ## Problem
 
