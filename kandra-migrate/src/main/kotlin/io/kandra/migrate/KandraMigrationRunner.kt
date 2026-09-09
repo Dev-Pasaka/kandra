@@ -157,15 +157,7 @@ class KandraMigrationRunner(
                     return
                 }
 
-                if (existing.checksum != migration.checksum()) {
-                    throw KandraMigrationException(
-                        "Migration v${migration.version} ('${migration.name}') checksum mismatch — " +
-                        "the migration was modified after being applied. " +
-                        "Expected: ${existing.checksum}, got: ${migration.checksum()}. " +
-                        "Never modify a migration after it has been applied."
-                    )
-                }
-                logger.debug { "Migration v${migration.version} ('${migration.name}') already applied — skipping." }
+                verifyAppliedChecksum(existing, migration)
                 continue
             }
 
@@ -173,7 +165,17 @@ class KandraMigrationRunner(
             // against the same keyspace can't both execute the same migration concurrently.
             val lostRace = claim(migration)
             if (lostRace != null) {
-                // Another instance claimed this version between our snapshot read and now.
+                // Another instance claimed this version between our snapshot read and now --
+                // but "lost the race" doesn't mean "still in progress": the LWT failure just
+                // returns whatever row is there now, which may already be APPLIED if the other
+                // instance finished (possibly very quickly) before we got here. Only a genuinely
+                // unresolved CLAIMED row is a claim to wait on or complain about; an APPLIED row
+                // is exactly the pre-existing-row case above, just discovered a moment later than
+                // the initial loadApplied() snapshot.
+                if (lostRace.status == MigrationRowStatus.APPLIED) {
+                    verifyAppliedChecksum(lostRace, migration)
+                    continue
+                }
                 handleUnresolvedClaim(lostRace, migration)
                 return
             }
@@ -195,6 +197,25 @@ class KandraMigrationRunner(
             markApplied(migration)
             logger.info { "Migration v${migration.version} applied successfully." }
         }
+    }
+
+    /**
+     * Shared by both places [run] discovers a row already [MigrationRowStatus.APPLIED] for
+     * [migration]'s version -- the initial `loadApplied()` snapshot, and a [claim] that lost the
+     * race because the other instance had *already finished*, not merely started (GH #101/
+     * ISS-088). Either way the meaning is identical: this version is done, so the only thing left
+     * to verify is that nobody silently edited the migration since it was applied.
+     */
+    private fun verifyAppliedChecksum(existing: MigrationHistory, migration: KandraMigration) {
+        if (existing.checksum != migration.checksum()) {
+            throw KandraMigrationException(
+                "Migration v${migration.version} ('${migration.name}') checksum mismatch — " +
+                "the migration was modified after being applied. " +
+                "Expected: ${existing.checksum}, got: ${migration.checksum()}. " +
+                "Never modify a migration after it has been applied."
+            )
+        }
+        logger.debug { "Migration v${migration.version} ('${migration.name}') already applied — skipping." }
     }
 
     /**
