@@ -731,9 +731,10 @@ gaps nobody had caught before. Most urgently:
   ([ISS-085](docs/issues/ISS-085-strict-mode-rf-math-wrong-multidc.md)).
 
 See the audit write-up and [`docs/issues/README.md`](docs/issues/README.md)'s Open table (ISS-077
-through ISS-096) for the full list, including AUTO_MIGRATE's key-column data-collision risk, an
-unbounded `findActive()` OOM risk, and the fact that `kandra-multidc`'s entire test suite currently
-runs nowhere in CI.
+through ISS-096) for the full list, including AUTO_MIGRATE's key-column data-collision risk and an
+unbounded `findActive()` OOM risk. (`kandra-multidc`'s test suite and `kandra-ktor`'s SSL round-trip
+suite now run in CI — see [Testing against a real multi-DC topology](docs/features/multidc.md#testing-against-a-real-multi-dc-topology)
+and `.github/workflows/multidc.yml` — GH #97 / ISS-084.)
 
 ---
 

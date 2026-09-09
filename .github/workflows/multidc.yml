@@ -1,0 +1,86 @@
+name: Multi-DC / SSL integration
+
+# GH #97 / ISS-084: MultiDcFailoverTest.kt (kandra-multidc) and SslRoundTripIntegrationTest.kt
+# (kandra-ktor) are both tagged "manual" and excluded from the default `test` task -- they stand up
+# real Docker-based topologies (a genuine 2-DC Cassandra cluster / a TLS-configured single-node
+# Cassandra) that are slower and more environment-sensitive than the rest of each module's suite (see
+# each test class's own doc comment for why). Before this workflow existed, that meant
+# `:kandra-multidc:test`/`:kandra-ktor:test` alone gave a green checkmark meaning "it compiled," not
+# "DC failover/SSL wiring actually works" -- the very coverage gap #84/ISS-076 was filed to close was
+# structurally unreachable from CI. `ubuntu-latest` GitHub Actions runners ship Docker (and the
+# `docker compose` v2 plugin) preinstalled, so no extra setup step is needed to run these here.
+#
+# Deliberately a separate workflow from ci.yml's fast `test` job, not an extra step in it: these
+# tests take several minutes (real 2-DC gossip convergence, real TLS handshakes, bounded failover
+# retry loops) versus ci.yml's whole `test` job normally finishing in well under a minute, and
+# per this issue's own suggested fix, running on every push/PR regardless of what changed is not
+# worth that cost. Instead this runs nightly (catches DataStax driver / cassandra:4.1 image /
+# failover-config drift even with no code changes), on demand via workflow_dispatch, and on any
+# PR/push that actually touches the multi-DC/SSL-relevant paths -- so a change to this surface still
+# gets real-cluster coverage before merge, not just at the next nightly run.
+on:
+  schedule:
+    # 03:00 UTC daily.
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+    paths:
+      - 'kandra-multidc/**'
+      - 'kandra-ktor/**'
+      - 'kandra-test/**'
+      - '.github/workflows/multidc.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'kandra-multidc/**'
+      - 'kandra-ktor/**'
+      - 'kandra-test/**'
+      - '.github/workflows/multidc.yml'
+
+jobs:
+  multidc-and-ssl:
+    runs-on: ubuntu-latest
+    # Real 2-DC gossip convergence plus multiple bounded failover-detection retry loops, plus a
+    # separate real single-node TLS handshake round trip -- generous relative to the observed local
+    # runtime (a few minutes total) to leave headroom for CI being slower than a warm local Docker
+    # cache.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', 'gradle.properties') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Verify Docker is available
+        run: docker info
+
+      - name: Run multi-DC failover suite
+        run: ./gradlew :kandra-multidc:multiDcTest --no-daemon
+
+      - name: Run SSL round-trip suite
+        # Runs even if the multi-DC suite above failed, so a failure in one doesn't hide a failure
+        # (or hide a pass) in the other -- they're independent Docker topologies with no shared state.
+        if: always()
+        run: ./gradlew :kandra-ktor:sslIntegrationTest --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multidc-ssl-test-reports
+          path: |
+            kandra-multidc/build/reports/tests/multiDcTest/
+            kandra-ktor/build/reports/tests/sslIntegrationTest/
