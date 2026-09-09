@@ -42,6 +42,7 @@ junit-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref 
 junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 testcontainers-cassandra = { module = "org.testcontainers:cassandra", version.ref = "testcontainers" }
 testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+testcontainers-core = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
 ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
 jakarta-validation-api = { module = "jakarta.validation:jakarta.validation-api", version.ref = "jakartaValidation" }
 hibernate-validator = { module = "org.hibernate.validator:hibernate-validator", version.ref = "hibernateValidator" }

@@ -8,15 +8,13 @@ policy; nothing was lost, they're just not represented here.
 
 ## Open
 
-Filed 2026-09-08 from a second, critical library-wide review (security, performance, consistency,
-scalability, developer experience) done specifically ahead of experimental testing against a real
-**multi-cluster DC** topology. These form the pre-multi-DC-testing checklist — see
+None currently. The pre-multi-DC-cluster-testing review batch (`ISS-070`–`ISS-076` / GH #78–#84,
+filed 2026-09-08 from a second, critical library-wide review — security, performance, consistency,
+scalability, developer experience — done specifically ahead of experimental testing against a real
+**multi-cluster DC** topology) is now fully closed out; every item is in the `Fixed` table below.
+See
 [docs/reviews/2026-09-08-pre-multidc-cluster-review.md](../reviews/2026-09-08-pre-multidc-cluster-review.md)
 for the full write-up.
-
-| ID | GH | Severity | Title |
-|---|---|---|---|
-| [ISS-076](ISS-076-ktor-migrate-test-coverage-gaps.md) | [#84](https://github.com/Dev-Pasaka/kandra/issues/84) | Low | `kandra-ktor` (SSL/pool/failover) and `kandra-migrate` have thin test coverage relative to their risk surface |
 
 ## Fixed — pending live-cluster verification
 
@@ -94,6 +92,7 @@ Docker before relying on them.
 | [ISS-073](ISS-073-no-backpressure-admission-control.md) | No backpressure/admission-control knob for in-flight requests |
 | [ISS-074](ISS-074-metrics-success-path-only.md) | `KandraMetrics.record()` was only ever called on the success path — retry exhaustion, non-retryable failures, and shutdown-rejections recorded nothing |
 | [ISS-075](ISS-075-strict-mode-rf-consistency-math.md) | Strict Mode warned on `LOCAL_ONE`/`ONE` but never checked RF vs (R+W) directly |
+| [ISS-076](ISS-076-ktor-migrate-test-coverage-gaps.md) | `kandra-ktor` (SSL/pool/failover) and `kandra-migrate` had thin test coverage relative to their risk surface |
 
 ## Closed — not a bug
 

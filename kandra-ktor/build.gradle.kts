@@ -25,3 +25,24 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testRuntimeOnly(libs.junit.launcher)
 }
+
+tasks.named<Test>("test") {
+    // SslRoundTripIntegrationTest (GH #84 / ISS-076) is tagged "manual" and excluded here -- see
+    // its class doc for why (slower, more Docker-environment-sensitive than the rest of this
+    // module's suite). Run it explicitly via `./gradlew :kandra-ktor:sslIntegrationTest`.
+    useJUnitPlatform {
+        excludeTags("manual")
+    }
+}
+
+tasks.register<Test>("sslIntegrationTest") {
+    description = "Runs the real self-signed-cert SSL round-trip test (GH #84 / ISS-076) against a " +
+        "live Testcontainers Cassandra instance configured for client-to-node encryption. Not part " +
+        "of the default `test`/`check`/`build` lifecycle -- run explicitly when validating SSL wiring."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags("manual")
+    }
+}
