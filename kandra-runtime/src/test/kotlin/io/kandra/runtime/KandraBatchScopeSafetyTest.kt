@@ -7,6 +7,8 @@ import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.exception.KandraQueryException
 import io.kandra.runtime.codec.KandraCodec
+import io.kandra.runtime.repository.KandraRepository
+import io.kandra.runtime.repository.KandraSuspendRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -225,7 +227,7 @@ class KandraBatchScopeSafetyTest {
 
     /**
      * Control case: `batchBlocking { }` is explicitly the blocking entry point (see class doc on
-     * [KandraBatchScope]) -- it's expected to keep using the blocking prepare path via
+     * [KandraBlockingBatchScope]) -- it's expected to keep using the blocking prepare path via
      * [BatchEngine.collectSave], not [BatchEngine.collectSaveSuspend]. `PrepareCallTrackingSession`'s
      * blocking `prepare()` always throws, so this only asserts the failure happens where expected
      * (during collection, backed by a real [AssertionError] from the fake, not a driver call).
@@ -244,5 +246,50 @@ class KandraBatchScopeSafetyTest {
             }
         }
         assertTrue(ex.message?.contains("Blocking CqlSession.prepare") == true, "unexpected message: ${ex.message}")
+    }
+
+    // ── GH #99 / ISS-086: scope types no longer share both overload sets ─────
+
+    /**
+     * The suspend/blocking `collectSave`/`collectDelete` split (#60/ISS-059) closed the common case
+     * but left an escape hatch: with a single `KandraBatchScope` exposing both a suspend
+     * `KandraSuspendRepository.saveInBatch` overload *and* a blocking `KandraRepository.saveInBatch`
+     * overload, `blockingRepo.saveInBatch(x)` compiled cleanly inside a suspend `batch { }` block and
+     * silently resolved to the blocking `collectSave`/`prepare()` path, reintroducing the
+     * dispatcher-blocking bug through the other repository type. The fix splits the single scope
+     * into [KandraBatchScope] (suspend-only) and [KandraBlockingBatchScope] (blocking-only) so the
+     * wrong-repository-type call is no longer resolvable at all -- a compile error, not a runtime
+     * foot-gun. This test asserts that split holds by inspecting each scope's actual extension
+     * receiver types via reflection, so a future accidental re-merge of the two overload sets fails
+     * this test instead of silently reintroducing the bug.
+     */
+    @Test
+    fun `KandraBatchScope only exposes saveInBatch-deleteInBatch on the suspend repository`() {
+        val receiverTypes = KandraBatchScope::class.java.declaredMethods
+            .filter { it.name == "saveInBatch" || it.name == "deleteInBatch" }
+            .map { it.parameterTypes.first() }
+            .toSet()
+
+        assertTrue(receiverTypes.isNotEmpty(), "expected to find saveInBatch/deleteInBatch methods")
+        assertTrue(
+            receiverTypes.all { KandraSuspendRepository::class.java.isAssignableFrom(it) },
+            "KandraBatchScope must only expose saveInBatch/deleteInBatch as KandraSuspendRepository " +
+                "extensions -- found receiver types: $receiverTypes"
+        )
+    }
+
+    @Test
+    fun `KandraBlockingBatchScope only exposes saveInBatch-deleteInBatch on the blocking repository`() {
+        val receiverTypes = KandraBlockingBatchScope::class.java.declaredMethods
+            .filter { it.name == "saveInBatch" || it.name == "deleteInBatch" }
+            .map { it.parameterTypes.first() }
+            .toSet()
+
+        assertTrue(receiverTypes.isNotEmpty(), "expected to find saveInBatch/deleteInBatch methods")
+        assertTrue(
+            receiverTypes.all { KandraRepository::class.java.isAssignableFrom(it) },
+            "KandraBlockingBatchScope must only expose saveInBatch/deleteInBatch as KandraRepository " +
+                "extensions -- found receiver types: $receiverTypes"
+        )
     }
 }
