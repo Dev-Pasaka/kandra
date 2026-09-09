@@ -42,3 +42,31 @@ runner.run(CreateUsersTable, AddPhoneColumn)
 See [ISS-017](../issues/ISS-017-migration-checksum-not-body-based.md) and
 [ISS-018](../issues/ISS-018-migration-no-locking.md) for the reasoning behind the checksum and
 locking design.
+
+## Concurrent-instance bootstrap coordination (GH #79 / ISS-071)
+
+The per-migration LWT claim above only guards *migrations themselves* — it assumes the
+`kandra_migrations` bookkeeping table already exists. `KandraMigrationRunner`'s constructor also
+creates that table (`CREATE TABLE IF NOT EXISTS` plus a couple of legacy-column `ALTER TABLE`s for
+upgrading a pre-GH-26 table), and if several application instances construct a runner concurrently
+against a keyspace that doesn't have the table yet — the normal shape of a rolling multi-replica
+deploy — that bootstrap step is now guarded by the same kind of LWT claim, one level earlier:
+
+- One instance wins an `INSERT ... IF NOT EXISTS` claim (in a small coordination table,
+  `kandra_ddl_locks`, shared in design — though not in code, since `kandra-migrate` and
+  `kandra-ktor` don't depend on each other — with `kandra-ktor`'s identical guard for
+  `SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE`, see [`docs/features/schema-modes.md`](schema-modes.md))
+  and runs the `kandra_migrations` bootstrap.
+- The other instances detect the claim and wait until the winner reports done, then skip the
+  bootstrap themselves.
+- If the claim-holder goes silent for more than 2 minutes (measured by the cluster's own clock, the
+  same clock-skew-proof approach used for the per-migration claim staleness check above), a waiting
+  instance presumes it crashed mid-bootstrap and reclaims the lock itself.
+
+This is deliberately a much shorter staleness threshold than the per-migration
+`staleClaimThreshold` constructor parameter (default 10 minutes, sized for arbitrary user `up()`
+bodies) — the bootstrap itself is a fixed, fast operation (one `CREATE TABLE` plus at most two
+`ALTER TABLE ADD`s), not user code. It is not currently exposed as a `KandraMigrationRunner`
+constructor parameter. See [ISS-071](../issues/ISS-071-concurrent-ddl-bootstrap-race.md) for the
+full design writeup, including the one residual race this can't remove (creating `kandra_ddl_locks`
+itself, the first time it doesn't exist yet).

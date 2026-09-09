@@ -5,8 +5,31 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.kandra.core.exception.KandraMigrationException
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
+
+/**
+ * Lock key guarding [KandraMigrationRunner]'s own `kandra_migrations` bookkeeping-table bootstrap
+ * (the `CREATE TABLE IF NOT EXISTS` + the legacy-column `ALTER TABLE`s run from `init`). See
+ * [claimAndRunDdlBootstrap]'s KDoc, further down this file (GH #79/ISS-071).
+ */
+private const val DDL_BOOTSTRAP_MIGRATIONS_TABLE_LOCK = "kandra-migrations-bootstrap"
+
+/**
+ * How long the `kandra_migrations` bootstrap claim (see [DDL_BOOTSTRAP_MIGRATIONS_TABLE_LOCK]) is
+ * given the benefit of the doubt before a waiting instance reclaims it. Distinct from
+ * [KandraMigrationRunner]'s own `staleClaimThreshold` constructor parameter, which governs
+ * per-*migration* claims (default 10 minutes, sized for arbitrary user `up()` bodies) -- this one
+ * guards a fixed, tiny bootstrap (one `CREATE TABLE IF NOT EXISTS` plus at most two `ALTER TABLE
+ * ADD`s), so a much shorter threshold is appropriate. Mirrors `kandra-ktor`'s identical constant
+ * for its own schema-DDL bootstrap guard (`Kandra.kt`'s `DDL_CLAIM_STALE_THRESHOLD`) -- kept as a
+ * separate copy here since `kandra-migrate` does not depend on `kandra-ktor` (and vice versa).
+ */
+private val DDL_BOOTSTRAP_STALE_THRESHOLD: Duration = Duration.ofMinutes(2)
+
+/** How long to sleep between polls while waiting for another instance's DDL claim to resolve. */
+private const val DDL_BOOTSTRAP_POLL_MS = 200L
 
 /**
  * Applies versioned [KandraMigration]s to a ScyllaDB keyspace.
@@ -65,6 +88,21 @@ private val logger = KotlinLogging.logger {}
  *   the doubt (treated as possibly still in progress elsewhere) before `run()` refuses to
  *   proceed and throws instead. Compared against an age measured entirely by the database
  *   cluster's own clock (see "Clock source for staleness" above). Defaults to 10 minutes.
+ *
+ * ### DDL bootstrap coordination (GH #79/ISS-071)
+ *
+ * The `CREATE TABLE IF NOT EXISTS kandra_migrations` + legacy-column `ALTER TABLE`s below used to
+ * run unconditionally, every time a [KandraMigrationRunner] was constructed -- if several
+ * application instances construct one concurrently against a keyspace that doesn't have the table
+ * yet (the normal shape of a rolling multi-replica deploy), they raced the same DDL against the
+ * cluster. This is now guarded by [claimAndRunDdlBootstrap] the same way `kandra-ktor`'s
+ * `SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE` DDL is guarded: one instance wins an `INSERT ... IF NOT
+ * EXISTS` LWT claim and runs the bootstrap, the rest poll until it reports done. If the claim
+ * holder goes silent for longer than two minutes (measured by the cluster's own clock, not any
+ * application instance's), a waiting instance presumes it crashed mid-bootstrap and reclaims it.
+ * See [claimAndRunDdlBootstrap]'s own KDoc, further down this file, for the full mechanism -- it's
+ * the same design as this class's own per-migration claim above, just applied one level earlier,
+ * to the bookkeeping table's own creation.
  */
 class KandraMigrationRunner(
     private val session: CqlSession,
@@ -72,18 +110,20 @@ class KandraMigrationRunner(
 ) {
 
     init {
-        session.execute("""
-            CREATE TABLE IF NOT EXISTS kandra_migrations (
-                version     INT,
-                name        TEXT,
-                status      TEXT,
-                claimed_at  TIMESTAMP,
-                applied_at  TIMESTAMP,
-                checksum    TEXT,
-                PRIMARY KEY (version)
-            )
-        """.trimIndent())
-        migrateLegacySchema()
+        claimAndRunDdlBootstrap(session, DDL_BOOTSTRAP_MIGRATIONS_TABLE_LOCK) {
+            session.execute("""
+                CREATE TABLE IF NOT EXISTS kandra_migrations (
+                    version     INT,
+                    name        TEXT,
+                    status      TEXT,
+                    claimed_at  TIMESTAMP,
+                    applied_at  TIMESTAMP,
+                    checksum    TEXT,
+                    PRIMARY KEY (version)
+                )
+            """.trimIndent())
+            migrateLegacySchema()
+        }
     }
 
     /**
@@ -290,4 +330,176 @@ class KandraMigrationRunner(
                 .bind(MigrationRowStatus.APPLIED.name, Instant.now(), migration.version)
         )
     }
+}
+
+/**
+ * Runs [action] under a cluster-wide LWT claim keyed by [lockName], so that when several
+ * application instances construct a [KandraMigrationRunner] concurrently against the same
+ * keyspace -- a rolling deploy of N replicas is the normal topology this guards against (GH
+ * #79/ISS-071) -- only one of them actually executes [action] (here, bootstrapping the
+ * `kandra_migrations` table itself), while the others detect the claim and wait for it to finish
+ * rather than racing the same `CREATE TABLE`/`ALTER TABLE` statements against the cluster
+ * concurrently -- a known schema-disagreement risk on Cassandra/Scylla.
+ *
+ * This is the exact same design as [KandraMigrationRunner.claim]/[KandraMigrationRunner.run]'s own
+ * per-migration claim mechanism (GH #26/#64), just applied one level earlier -- to bootstrapping
+ * the bookkeeping table those claims live in, via a small dedicated coordination table,
+ * `kandra_ddl_locks`, holding one row per [lockName]:
+ * - **Claim**: `INSERT ... IF NOT EXISTS` -- exactly one racing instance wins.
+ * - **Losers wait**: poll the row every [DDL_BOOTSTRAP_POLL_MS] until it reads `DONE` (the winner
+ *   finished -- skip running [action] here at all) or its claim goes stale.
+ * - **Staleness**: measured entirely by the cluster's own clock (`toTimestamp(now())`, never this
+ *   JVM's `Instant.now()`) against [DDL_BOOTSTRAP_STALE_THRESHOLD] -- the same clock-skew-proof
+ *   approach [KandraMigrationRunner] already uses for its own claim staleness (see its class KDoc,
+ *   "Clock source for staleness", GH #64). A claim older than the threshold is presumed abandoned
+ *   by a crashed claimant (OOM, `SIGKILL`, an uncaught `Error` mid-bootstrap); one waiter reclaims
+ *   it via a compare-and-set `UPDATE ... IF claimed_at = ?` (so only one of several simultaneous
+ *   waiters wins the reclaim) and runs [action] itself.
+ *
+ * Unlike [KandraMigrationRunner.run]'s migration claims -- which deliberately halt (or throw)
+ * rather than let a caller barrel ahead of an unresolved claim, because later migrations may
+ * depend on earlier DDL -- a waiting instance here always converges on running (constructing a
+ * runner should not hang indefinitely, and `CREATE TABLE IF NOT EXISTS`/`ALTER TABLE ADD` are
+ * idempotent, so there's no ordering hazard in retrying).
+ *
+ * The one race this cannot remove: creating `kandra_ddl_locks` itself, the first time it doesn't
+ * yet exist. That's a single `CREATE TABLE IF NOT EXISTS` for one small, schema-stable table (no
+ * column is ever added to it after creation) -- a far narrower and lower-impact race than the one
+ * this guards against, which is N instances concurrently running `CREATE TABLE`/`ALTER TABLE`
+ * against `kandra_migrations`. `kandra-ktor`'s `Kandra.kt` plugin uses an identical
+ * `kandra_ddl_locks` table (same schema, different lock keys) to guard its own
+ * `SchemaMode.AUTO_CREATE`/`AUTO_MIGRATE` DDL bootstrap -- the two modules don't depend on each
+ * other, so this is a deliberately duplicated, self-contained copy rather than a shared one, but
+ * the table shape is identical so both can coexist safely against the same keyspace if a
+ * deployment somehow uses both.
+ */
+internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, action: () -> Unit) {
+    ensureDdlLockTable(session)
+    val holder = UUID.randomUUID().toString()
+
+    if (tryClaimDdlLock(session, lockName, holder)) {
+        logger.info { "Kandra: claimed DDL bootstrap lock '$lockName' -- running schema DDL." }
+        runClaimedDdlAction(session, lockName, action)
+        return
+    }
+
+    logger.info {
+        "Kandra: another instance holds the DDL bootstrap lock '$lockName' -- waiting for it to " +
+        "finish rather than racing the same DDL concurrently."
+    }
+    while (true) {
+        val row = session.execute(
+            session.prepare("SELECT holder, status, claimed_at FROM kandra_ddl_locks WHERE lock_name = ?")
+                .bind(lockName)
+        ).one()
+
+        if (row == null) {
+            // The row vanished between our failed claim and this read (shouldn't normally happen
+            // outside of a manual operator intervention) -- treat it like nobody has claimed it.
+            if (tryClaimDdlLock(session, lockName, holder)) {
+                runClaimedDdlAction(session, lockName, action)
+                return
+            }
+            continue
+        }
+
+        if (row.getString("status") == "DONE") {
+            logger.info { "Kandra: DDL bootstrap lock '$lockName' was completed by another instance -- skipping DDL here." }
+            return
+        }
+
+        val claimedAt = row.getInstant("claimed_at") ?: Instant.EPOCH
+        val age = Duration.between(claimedAt, ddlLockServerNow(session, lockName))
+        if (age > DDL_BOOTSTRAP_STALE_THRESHOLD) {
+            logger.warn {
+                "Kandra: DDL bootstrap lock '$lockName' has been CLAIMED for ${age.seconds}s, " +
+                "exceeding the staleness threshold of ${DDL_BOOTSTRAP_STALE_THRESHOLD.seconds}s -- " +
+                "the previous claimant is presumed crashed. Reclaiming and running the DDL here."
+            }
+            if (reclaimStaleDdlLock(session, lockName, holder, claimedAt)) {
+                runClaimedDdlAction(session, lockName, action)
+                return
+            }
+            // Someone else reclaimed (or finished) it between our staleness check and the reclaim
+            // attempt -- loop and re-check rather than assume anything about the outcome.
+            continue
+        }
+
+        Thread.sleep(DDL_BOOTSTRAP_POLL_MS)
+    }
+}
+
+/** Runs [action] for the instance that just won (or reclaimed) [lockName], releasing the claim on failure so a later attempt can retry, or marking it DONE on success. */
+private fun runClaimedDdlAction(session: CqlSession, lockName: String, action: () -> Unit) {
+    try {
+        action()
+    } catch (e: Exception) {
+        releaseDdlLock(session, lockName)
+        throw e
+    }
+    markDdlLockDone(session, lockName)
+    logger.info { "Kandra: DDL bootstrap lock '$lockName' released (done)." }
+}
+
+/**
+ * Coordination table backing [claimAndRunDdlBootstrap]. Deliberately minimal and schema-stable
+ * (no column is ever added after creation) to keep its own bootstrap -- the one race this
+ * mechanism cannot itself guard, see [claimAndRunDdlBootstrap]'s KDoc -- as narrow as possible.
+ */
+private fun ensureDdlLockTable(session: CqlSession) {
+    session.execute(
+        """
+        CREATE TABLE IF NOT EXISTS kandra_ddl_locks (
+            lock_name   TEXT PRIMARY KEY,
+            holder      TEXT,
+            status      TEXT,
+            claimed_at  TIMESTAMP
+        )
+        """.trimIndent()
+    )
+}
+
+/** Returns `true` if this call won the claim on [lockName]. */
+private fun tryClaimDdlLock(session: CqlSession, lockName: String, holder: String): Boolean {
+    val prepared = session.prepare(
+        "INSERT INTO kandra_ddl_locks (lock_name, holder, status, claimed_at) " +
+        "VALUES (?, ?, 'CLAIMED', toTimestamp(now())) IF NOT EXISTS"
+    )
+    return session.execute(prepared.bind(lockName, holder)).wasApplied()
+}
+
+/**
+ * Reclaims a stale claim via compare-and-set on its previously-observed `claimed_at`, so that if
+ * several waiters independently decide the same claim is stale, only one of them wins.
+ */
+private fun reclaimStaleDdlLock(session: CqlSession, lockName: String, holder: String, previousClaimedAt: Instant): Boolean {
+    val prepared = session.prepare(
+        "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) " +
+        "WHERE lock_name = ? IF claimed_at = ?"
+    )
+    return session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
+}
+
+private fun markDdlLockDone(session: CqlSession, lockName: String) {
+    session.execute(
+        session.prepare("UPDATE kandra_ddl_locks SET status = 'DONE' WHERE lock_name = ?").bind(lockName)
+    )
+}
+
+/** Releases a claim (deletes its row) so a later attempt can retry cleanly after [action] fails. */
+private fun releaseDdlLock(session: CqlSession, lockName: String) {
+    session.execute(session.prepare("DELETE FROM kandra_ddl_locks WHERE lock_name = ?").bind(lockName))
+}
+
+/**
+ * The current time as seen by the ScyllaDB/Cassandra coordinator serving this query -- *not* this
+ * JVM's [Instant.now]. See [claimAndRunDdlBootstrap]'s KDoc (GH #64's approach reused here for the
+ * same reason: never compare timestamps across independently-clocked app instances).
+ */
+private fun ddlLockServerNow(session: CqlSession, lockName: String): Instant {
+    val row = session.execute(
+        session.prepare("SELECT toTimestamp(now()) AS server_now FROM kandra_ddl_locks WHERE lock_name = ?")
+            .bind(lockName)
+    ).one()
+    return row?.getInstant("server_now") ?: Instant.now()
 }
