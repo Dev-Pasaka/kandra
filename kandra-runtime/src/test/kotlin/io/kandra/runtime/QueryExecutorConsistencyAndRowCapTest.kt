@@ -12,6 +12,7 @@ import io.kandra.runtime.dsl.KandraColumnRef
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -240,5 +241,35 @@ class QueryExecutorConsistencyAndRowCapTest {
         }
 
         assertEquals(DefaultConsistencyLevel.ALL, session.lastBoundConsistencyLevel)
+    }
+
+    // ── GH #106 / ISS-093: find()/findSuspend() implicit LIMIT 1 ──────────────
+
+    @Test
+    fun `find direct-CQL branch appends LIMIT 1 instead of fetching everything`() {
+        val schema = SchemaRegistry.register(QercItem::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Rows(listOf(row(UUID.randomUUID())))))
+        val executor = QueryExecutor(session, schema, StatementBuilder(session))
+
+        executor.find(QercItem::class) { KandraColumnRef<String>("group") eq "g1" }
+
+        assertTrue(
+            session.lastPreparedCql?.contains("LIMIT 1") == true,
+            "expected find() to append LIMIT 1, got CQL: ${session.lastPreparedCql}"
+        )
+    }
+
+    @Test
+    fun `findSuspend direct-CQL branch appends LIMIT 1 instead of fetching everything`() = runBlocking {
+        val schema = SchemaRegistry.register(QercItem::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Rows(listOf(row(UUID.randomUUID())))))
+        val executor = QueryExecutor(session, schema, StatementBuilder(session))
+
+        executor.findSuspend(QercItem::class) { KandraColumnRef<String>("group") eq "g1" }
+
+        assertTrue(
+            session.lastPreparedCql?.contains("LIMIT 1") == true,
+            "expected findSuspend() to append LIMIT 1, got CQL: ${session.lastPreparedCql}"
+        )
     }
 }

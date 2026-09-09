@@ -179,4 +179,116 @@ class BatchEngineMetricsFailureTest {
         assertEquals(1, metrics.successes.size)
         assertEquals(3, metrics.successes.single().attempts, "expected the success to report all 3 attempts it took")
     }
+
+    // ── GH #106 / ISS-093: write paths that previously defaulted to "unknown"/"query" ─────
+
+    @Test
+    fun `recordFailure labels saveWithNulls correctly instead of defaulting to unknown-query`() {
+        SchemaRegistry.register(BsWidget::class)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
+        val engine = newEngine(session)
+        val metrics = RecordingMetrics()
+        engine.setMetrics(metrics)
+        val schema = SchemaRegistry.get(BsWidget::class)
+
+        assertThrows(com.datastax.oss.driver.api.core.NoNodeAvailableException::class.java) {
+            engine.saveWithNulls(schema, BsWidget(UUID.randomUUID(), "a"))
+        }
+
+        val failure = metrics.failures.single()
+        assertEquals(schema.tableName, failure.tableName)
+        assertEquals("saveWithNulls", failure.operation)
+    }
+
+    @Test
+    fun `recordFailure labels non-versioned update correctly instead of defaulting to unknown-query`() {
+        SchemaRegistry.register(BsWidget::class)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
+        val engine = newEngine(session)
+        val metrics = RecordingMetrics()
+        engine.setMetrics(metrics)
+        val schema = SchemaRegistry.get(BsWidget::class)
+        val old = BsWidget(UUID.randomUUID(), "a")
+
+        assertThrows(com.datastax.oss.driver.api.core.NoNodeAvailableException::class.java) {
+            engine.update(schema, old, old.copy(name = "b"))
+        }
+
+        val failure = metrics.failures.single()
+        assertEquals(schema.tableName, failure.tableName)
+        assertEquals("update", failure.operation)
+    }
+
+    @Test
+    fun `recordFailure labels updateForce correctly instead of defaulting to unknown-query`() {
+        SchemaRegistry.register(BsWidget::class)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
+        val engine = newEngine(session)
+        val metrics = RecordingMetrics()
+        engine.setMetrics(metrics)
+        val schema = SchemaRegistry.get(BsWidget::class)
+
+        assertThrows(com.datastax.oss.driver.api.core.NoNodeAvailableException::class.java) {
+            engine.updateForce(schema, BsWidget(UUID.randomUUID(), "a"))
+        }
+
+        val failure = metrics.failures.single()
+        assertEquals(schema.tableName, failure.tableName)
+        assertEquals("updateForce", failure.operation)
+    }
+
+    @Test
+    fun `recordFailure labels delete correctly instead of defaulting to unknown-query`() {
+        SchemaRegistry.register(BsWidget::class)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
+        val engine = newEngine(session)
+        val metrics = RecordingMetrics()
+        engine.setMetrics(metrics)
+        val schema = SchemaRegistry.get(BsWidget::class)
+
+        assertThrows(com.datastax.oss.driver.api.core.NoNodeAvailableException::class.java) {
+            engine.delete(schema, BsWidget(UUID.randomUUID(), "a"))
+        }
+
+        val failure = metrics.failures.single()
+        assertEquals(schema.tableName, failure.tableName)
+        assertEquals("delete", failure.operation)
+    }
+
+    @Test
+    fun `recordFailure labels saveAll correctly instead of defaulting to unknown-query`() {
+        SchemaRegistry.register(BsWidget::class)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
+        val engine = newEngine(session)
+        val metrics = RecordingMetrics()
+        engine.setMetrics(metrics)
+        val schema = SchemaRegistry.get(BsWidget::class)
+
+        assertThrows(com.datastax.oss.driver.api.core.NoNodeAvailableException::class.java) {
+            engine.saveAll(schema, listOf(BsWidget(UUID.randomUUID(), "a")))
+        }
+
+        val failure = metrics.failures.single()
+        assertEquals(schema.tableName, failure.tableName)
+        assertEquals("saveAll", failure.operation)
+    }
+
+    @Test
+    fun `recordFailure labels a caller-controlled batch scope commit correctly instead of defaulting to unknown-query`() {
+        SchemaRegistry.register(BsWidget::class)
+        val session = ControllableFakeSession(failuresBeforeSuccess = Int.MAX_VALUE)
+        val engine = newEngine(session)
+        val metrics = RecordingMetrics()
+        engine.setMetrics(metrics)
+        val schema = SchemaRegistry.get(BsWidget::class)
+        val statements = engine.collectSave(schema, BsWidget(UUID.randomUUID(), "a"))
+
+        assertThrows(com.datastax.oss.driver.api.core.NoNodeAvailableException::class.java) {
+            engine.executeBatchScope(schema, statements)
+        }
+
+        val failure = metrics.failures.single()
+        assertEquals(schema.tableName, failure.tableName)
+        assertEquals("batch", failure.operation)
+    }
 }

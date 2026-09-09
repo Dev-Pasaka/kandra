@@ -14,6 +14,17 @@ private val logger = KotlinLogging.logger {}
  * invalidates another instance's cached copy of the same row — in a horizontally-scaled or multi-DC
  * deployment, other instances keep serving their own stale entries until their own TTL expires,
  * independent of any consistency level configured for the write. See GH #100 / ISS-087.
+ *
+ * **No cache-stampede protection (known limitation, GH #106 / ISS-093):** this wraps a plain
+ * Caffeine `Cache` (manual `getIfPresent`/`put`), not a `LoadingCache`/`AsyncLoadingCache`. A burst
+ * of concurrent `findById()` calls for the same key right after eviction/TTL expiry all miss and all
+ * hit Scylla simultaneously — there's no request coalescing to collapse them into a single DB read
+ * with the other callers awaiting its result. Acceptable for now: `findById` is a single-row
+ * primary-key read (cheap relative to a scan), and a `LoadingCache`'s single load-lock-per-key would
+ * add complexity (particularly around the read consistency override in [io.kandra.runtime.repository.KandraRepository.findById]/
+ * [io.kandra.runtime.repository.KandraSuspendRepository.findById], which must bypass the cache
+ * entirely rather than share a load) for a benefit that scales with how hot a single key's traffic
+ * is. Worth revisiting if a specific deployment's access pattern makes stampedes a real problem.
  */
 internal class KandraCache<K : Any, V : Any>(config: CacheResultConfig?) {
     private val inner: Any? = buildCache(config)

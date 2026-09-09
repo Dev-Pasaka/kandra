@@ -45,8 +45,13 @@ object SchemaRegistry {
     private val logger = KotlinLogging.logger {}
     private val registry = ConcurrentHashMap<KClass<*>, TableSchema>()
 
+    // computeIfAbsent, not the Kotlin stdlib's getOrPut -- getOrPut on a ConcurrentHashMap is still
+    // a plain check-then-act (get, then put if absent), not atomic, so two threads racing to
+    // register the same not-yet-registered class could both run buildSchema (wasted, but harmless
+    // since it's idempotent -- the second result is simply discarded when its put loses the race).
+    // computeIfAbsent guarantees buildSchema runs at most once per class. See GH #106 / ISS-093.
     fun <T : Any> register(klass: KClass<T>): TableSchema =
-        registry.getOrPut(klass) { buildSchema(klass) }
+        registry.computeIfAbsent(klass) { buildSchema(klass) }
 
     fun get(klass: KClass<*>): TableSchema =
         registry[klass] ?: throw KandraSchemaException(
