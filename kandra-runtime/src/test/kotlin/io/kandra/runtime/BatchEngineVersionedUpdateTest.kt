@@ -4,6 +4,7 @@ import com.datastax.oss.driver.api.core.DefaultConsistencyLevel
 import com.datastax.oss.driver.api.core.servererrors.WriteTimeoutException
 import com.datastax.oss.driver.api.core.servererrors.WriteType
 import io.kandra.core.InternalKandraApi
+import io.kandra.core.KandraConsistency
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -172,5 +174,107 @@ class BatchEngineVersionedUpdateTest {
             runBlocking { engine.updateSuspend(schema, old, new) }
         }
         assertFalse(session.executeCount.get() > 0, "shutdown must reject before the driver is ever called")
+    }
+
+    // ── serialConsistency override (GH #134) ─────────────────────────────────
+    //
+    // Before this fix, buildVersionedUpdateStatement[Suspend] hardcoded
+    // .setSerialConsistencyLevel(DefaultConsistencyLevel.LOCAL_SERIAL) with no way for a caller to
+    // request SERIAL (cross-DC Paxos) instead -- unlike saveIfNotExists, the other LWT-based method
+    // in this codebase, which already exposed a serialConsistency parameter. These tests assert on
+    // ScriptedCqlSession.lastBoundSerialConsistencyLevel -- the actual value BatchEngine set on the
+    // real BoundStatement it built -- which is real proof the parameter reaches the driver call, not
+    // just that the code compiles or that update() still returns normally.
+    //
+    // A genuine multi-DC behavioral difference (SERIAL failing/timing out when a remote DC is
+    // unreachable while LOCAL_SERIAL keeps succeeding) is covered separately against a real two-DC
+    // cluster in kandra-multidc's MultiDcFailoverTest.
+
+    @Test
+    fun `blocking update defaults to LOCAL_SERIAL when serialConsistency is not passed`() {
+        val schema = SchemaRegistry.register(Balance::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Applied(true)))
+        val engine = newEngine(session)
+
+        val old = Balance(UUID.randomUUID(), 100L, version = 1L)
+        val new = old.copy(amountCents = 200L)
+
+        engine.update(schema, old, new)
+
+        assertEquals(DefaultConsistencyLevel.LOCAL_SERIAL, session.lastBoundSerialConsistencyLevel)
+    }
+
+    @Test
+    fun `blocking update with serialConsistency = SERIAL issues the LWT at SERIAL, not LOCAL_SERIAL`() {
+        val schema = SchemaRegistry.register(Balance::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Applied(true)))
+        val engine = newEngine(session)
+
+        val old = Balance(UUID.randomUUID(), 100L, version = 1L)
+        val new = old.copy(amountCents = 200L)
+
+        engine.update(schema, old, new, serialConsistency = KandraConsistency.SERIAL)
+
+        assertEquals(DefaultConsistencyLevel.SERIAL, session.lastBoundSerialConsistencyLevel)
+    }
+
+    @Test
+    fun `blocking update rejects a non-serial serialConsistency override before touching the driver`() {
+        val schema = SchemaRegistry.register(Balance::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Applied(true)))
+        val engine = newEngine(session)
+
+        val old = Balance(UUID.randomUUID(), 100L, version = 1L)
+        val new = old.copy(amountCents = 200L)
+
+        val ex = assertThrows(KandraQueryException::class.java) {
+            engine.update(schema, old, new, serialConsistency = KandraConsistency.LOCAL_QUORUM)
+        }
+        assertTrue(ex.message!!.contains("serialConsistency"), "unexpected message: ${ex.message}")
+        assertEquals(0, session.executeCount.get(), "must validate before the driver is ever called")
+    }
+
+    @Test
+    fun `suspend update defaults to LOCAL_SERIAL when serialConsistency is not passed`() = runBlocking {
+        val schema = SchemaRegistry.register(Balance::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Applied(true)))
+        val engine = newEngine(session)
+
+        val old = Balance(UUID.randomUUID(), 100L, version = 1L)
+        val new = old.copy(amountCents = 200L)
+
+        engine.updateSuspend(schema, old, new)
+
+        assertEquals(DefaultConsistencyLevel.LOCAL_SERIAL, session.lastBoundSerialConsistencyLevel)
+    }
+
+    @Test
+    fun `suspend update with serialConsistency = SERIAL issues the LWT at SERIAL, not LOCAL_SERIAL`() = runBlocking {
+        val schema = SchemaRegistry.register(Balance::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Applied(true)))
+        val engine = newEngine(session)
+
+        val old = Balance(UUID.randomUUID(), 100L, version = 1L)
+        val new = old.copy(amountCents = 200L)
+
+        engine.updateSuspend(schema, old, new, serialConsistency = KandraConsistency.SERIAL)
+
+        assertEquals(DefaultConsistencyLevel.SERIAL, session.lastBoundSerialConsistencyLevel)
+    }
+
+    @Test
+    fun `suspend update rejects a non-serial serialConsistency override before touching the driver`() = runBlocking {
+        val schema = SchemaRegistry.register(Balance::class)
+        val session = ScriptedCqlSession(listOf(ExecuteOutcome.Applied(true)))
+        val engine = newEngine(session)
+
+        val old = Balance(UUID.randomUUID(), 100L, version = 1L)
+        val new = old.copy(amountCents = 200L)
+
+        val ex = assertThrows(KandraQueryException::class.java) {
+            runBlocking { engine.updateSuspend(schema, old, new, serialConsistency = KandraConsistency.ONE) }
+        }
+        assertTrue(ex.message!!.contains("serialConsistency"), "unexpected message: ${ex.message}")
+        assertEquals(0, session.executeCount.get(), "must validate before the driver is ever called")
     }
 }

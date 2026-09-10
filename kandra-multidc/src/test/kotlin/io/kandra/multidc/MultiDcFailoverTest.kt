@@ -2,9 +2,11 @@ package io.kandra.multidc
 
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.KandraAuth
+import io.kandra.core.KandraConsistency
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
+import io.kandra.core.annotations.Version
 import io.kandra.ktor.FailoverPolicy
 import io.kandra.ktor.Kandra
 import io.kandra.ktor.ReplicationStrategy
@@ -25,6 +27,13 @@ import java.util.UUID
 data class MultiDcTestItem(
     @PartitionKey val id: UUID,
     val label: String
+)
+
+@ScyllaTable("multidc_versioned_items")
+data class MultiDcVersionedItem(
+    @PartitionKey val id: UUID,
+    val label: String,
+    @Version val version: Long = 1L
 )
 
 /**
@@ -69,6 +78,27 @@ class MultiDcFailoverTest {
         // Testcontainers' Ryuk reaper, not this method, is the actual backstop for that case.
         KandraMultiDcTestcontainers.unpauseAll()
         SchemaRegistry.clear()
+    }
+
+    /**
+     * `findById` with a short bounded retry -- used only for reads immediately following a request
+     * that just failed against a paused DC (see the GH #134 test below). A driver connection that
+     * just carried a timed-out cross-DC Paxos round can transiently report "no connection available"
+     * on the very next request while it recovers, even though the DC actually being read from was
+     * never paused. This tolerates exactly that brief window, the same way the pause-based tests
+     * elsewhere in this file already tolerate the driver's own down-detection timing.
+     */
+    private fun <T : Any> retryFindById(repo: io.kandra.runtime.repository.KandraRepository<T>, id: java.util.UUID): T {
+        var lastError: Exception? = null
+        repeat(5) {
+            try {
+                return repo.findById(id)!!
+            } catch (e: Exception) {
+                lastError = e
+                Thread.sleep(300)
+            }
+        }
+        throw lastError ?: IllegalStateException("retryFindById: unreachable")
     }
 
     /**
@@ -261,6 +291,116 @@ class MultiDcFailoverTest {
                 // The real assertion: strictMode=true never changes behavior (WARN-only), so a
                 // LOCAL_ONE read against a genuine multi-DC keyspace must still succeed normally.
                 assertEquals(item, repo.findById(item.id))
+            }
+        }
+    }
+
+    /**
+     * Real two-DC proof for GH #134: `update()`'s new `serialConsistency` parameter genuinely
+     * changes the versioned-LWT's cross-DC Paxos behavior, not just the `BoundStatement` it builds
+     * (see `BatchEngineVersionedUpdateTest` in `kandra-runtime` for that fast unit-level proof, driven
+     * by a fake driver session). With `dc2` paused and RF=1/DC (so each DC's local Paxos quorum is a
+     * single node, and the cluster-wide quorum for `SERIAL` is 2-of-2 replicas):
+     *
+     * - the default `LOCAL_SERIAL` update keeps succeeding purely against the reachable `dc1` replica
+     *   — exactly the behavior that let two DCs independently "win" concurrent `@Version`-locked
+     *   updates to the same row during the real partition this issue was filed from, since neither
+     *   side's local Paxos round ever needed the other DC's participation;
+     * - a `SERIAL`-requested update genuinely fails while `dc2` is unreachable, proving the parameter
+     *   reaches real cross-DC Paxos consensus, not just a driver-facing statement flag that happens to
+     *   be set and ignored;
+     * - the identical `SERIAL` update succeeds once `dc2` recovers, proving the earlier failure was
+     *   specifically about `dc2`'s unavailability, not some general `SERIAL` misconfiguration.
+     */
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `versioned update serialConsistency=SERIAL genuinely requires the paused remote DC replica, LOCAL_SERIAL does not`() {
+        val keyspace = "kandra_multidc_${UUID.randomUUID().toString().replace("-", "")}"
+        val dc1 = KandraMultiDcTestcontainers.contactPoint(KandraMultiDcTestcontainers.DC1)
+
+        testApplication {
+            application {
+                install(Kandra) {
+                    contactPoints = "${dc1.hostString}:${dc1.port}"
+                    localDatacenter = KandraMultiDcTestcontainers.DC1
+                    this.keyspace = keyspace
+                    autoCreateKeyspace = true
+                    replicationStrategy = ReplicationStrategy.NetworkTopologyStrategy(
+                        mapOf(KandraMultiDcTestcontainers.DC1 to 1, KandraMultiDcTestcontainers.DC2 to 1)
+                    )
+                    schemaMode = SchemaMode.AUTO_CREATE
+                    register(MultiDcVersionedItem::class)
+                    auth { provider = KandraAuth.static("", "") }
+                    // Same tightened pool as the pause-based tests above -- avoids the driver's
+                    // (much longer) default connection/request timeouts turning a genuine "this must
+                    // fail" assertion into a multi-minute hang.
+                    pool {
+                        requestTimeoutMillis = 3000
+                        connectionTimeoutMillis = 3000
+                        heartbeatIntervalSeconds = 1
+                    }
+                }
+
+                val repo = kandra.repository<MultiDcVersionedItem>()
+                val id = UUID.randomUUID()
+                repo.save(MultiDcVersionedItem(id, "before-partition"))
+                val saved = repo.findById(id)!!
+                assertEquals(1L, saved.version, "save() must set the initial @Version to 1")
+
+                KandraMultiDcTestcontainers.pause(KandraMultiDcTestcontainers.DC2)
+                try {
+                    // LOCAL_SERIAL (default): dc1's own local Paxos quorum (RF=1 in dc1) never needs dc2.
+                    repo.update(saved, saved.copy(label = "local-serial-during-partition"))
+                    val afterLocal = repo.findById(id)!!
+                    assertEquals("local-serial-during-partition", afterLocal.label)
+                    assertEquals(2L, afterLocal.version)
+
+                    // SERIAL: cluster-wide Paxos quorum needs a majority of ALL replicas (2 total,
+                    // RF=1 per DC) -- i.e. both dc1 AND the now-unreachable dc2. This must fail, not
+                    // silently succeed the way it would if serialConsistency were being ignored.
+                    var threw = false
+                    try {
+                        repo.update(afterLocal, afterLocal.copy(label = "serial-during-partition"), serialConsistency = KandraConsistency.SERIAL)
+                    } catch (e: Exception) {
+                        threw = true
+                    }
+                    assertTrue(threw, "a SERIAL-consistency versioned update must fail while its remote DC replica is unreachable, never silently succeed")
+
+                    // The failed SERIAL attempt must not have applied -- the row is still exactly
+                    // what the LOCAL_SERIAL update above left it as. A read immediately following a
+                    // failed cross-DC Paxos round can transiently see "no connection available" on
+                    // the driver's single pooled connection to dc1 (the just-timed-out SERIAL request
+                    // briefly leaves it in a reconnecting state) -- bounded retry, same tolerance the
+                    // pause-based tests above already apply to detection-timing races.
+                    val afterFailedSerial = retryFindById(repo, id)
+                    assertEquals("local-serial-during-partition", afterFailedSerial.label)
+                    assertEquals(2L, afterFailedSerial.version)
+                } finally {
+                    KandraMultiDcTestcontainers.unpause(KandraMultiDcTestcontainers.DC2)
+                }
+
+                // Once dc2 recovers, the identical SERIAL update succeeds -- proves the earlier
+                // failure was specifically about dc2's unavailability, not a general SERIAL
+                // misconfiguration. Bounded retry tolerates the driver needing a moment to notice
+                // dc2 is back, same as the failover tests above.
+                var recovered = false
+                var lastError: Exception? = null
+                for (attempt in 1..10) {
+                    try {
+                        val current = repo.findById(id)!!
+                        repo.update(current, current.copy(label = "serial-after-recovery"), serialConsistency = KandraConsistency.SERIAL)
+                        recovered = true
+                        break
+                    } catch (e: Exception) {
+                        lastError = e
+                        Thread.sleep(500)
+                    }
+                }
+                assertTrue(recovered, "a SERIAL-consistency versioned update should eventually succeed once dc2 recovers, but every attempt failed: $lastError")
+
+                val finalState = repo.findById(id)!!
+                assertEquals("serial-after-recovery", finalState.label)
+                assertEquals(3L, finalState.version)
             }
         }
     }

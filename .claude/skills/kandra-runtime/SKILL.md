@@ -120,20 +120,28 @@ userRepo.saveAll(users, useBatch = true)                   // chunks at 100 by d
 ### Update family
 
 ```kotlin
-fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null)
+fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL)
 fun updateForce(entity: T, consistency: KandraConsistency? = null)
 ```
 
-- **`update(old, new, consistency, ttlSeconds)`** — validates `new`. **If `schema.versionColumn` is
-  present** (`@Version` field): reads `old`'s current version value via reflection (throws
-  `KandraQueryException` if it's `null`), computes the next version (`+1` for `Long`, `Instant.now()`
-  for `Instant` — anything else throws `KandraQueryException("@Version field must be Long or Instant")`),
-  and issues `UPDATE <table>[ USING TTL x] SET col=?, ... WHERE pk=? [AND pk2=?...] IF <versionCol> = ?`.
+- **`update(old, new, consistency, ttlSeconds, serialConsistency)`** — validates `new`. **If
+  `schema.versionColumn` is present** (`@Version` field): reads `old`'s current version value via
+  reflection (throws `KandraQueryException` if it's `null`), computes the next version (`+1` for `Long`,
+  `Instant.now()` for `Instant` — anything else throws
+  `KandraQueryException("@Version field must be Long or Instant")`), and issues `UPDATE <table>[ USING
+  TTL x] SET col=?, ... WHERE pk=? [AND pk2=?...] IF <versionCol> = ?`.
   `consistency` (resolved via `resolveWriteConsistency` — per-call → `@WriteConsistency` → configured
   default, same as every other write) sets the statement's **regular** consistency level
-  (`setConsistencyLevel`); the **serial** consistency for the `IF` check itself is
-  `setSerialConsistencyLevel(LOCAL_SERIAL)`, hardcoded and **not** affected by `consistency` — there is
-  no way to request `SERIAL` (cross-DC Paxos) for a versioned `update()` through this parameter.
+  (`setConsistencyLevel`); the **serial** consistency for the `IF` check itself is set from
+  `serialConsistency` (default `LOCAL_SERIAL`, validated via `KandraConsistency.isSerial` —
+  `KandraQueryException` if it isn't `LOCAL_SERIAL`/`SERIAL`), matching `saveIfNotExists`'s parameter
+  exactly (GH #134 — previously hardcoded to `LOCAL_SERIAL` with no override, unlike `saveIfNotExists`).
+  `LOCAL_SERIAL` only guarantees the `IF` check is linearizable within the DC the write went through —
+  under a real network partition, two concurrent `update()`s to the same row issued against different DCs
+  can **both** report success, with last-write-wins silently discarding one once the partition heals.
+  Pass `serialConsistency = KandraConsistency.SERIAL` for cross-DC Paxos when that must not happen.
+  `serialConsistency` has no effect when the entity has no `@Version` column, since no LWT is issued in
+  that case at all (see below).
   `ttlSeconds` (falling back to `schema.defaultTtl`/`@Ttl` if not passed) is applied via `USING TTL` —
   without it, an `UPDATE` with no `USING TTL` writes its touched cells with no expiry, silently
   clearing a `@Ttl`-annotated row's TTL on the first `update()` after `save()` (see

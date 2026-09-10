@@ -64,8 +64,28 @@ class KandraSuspendRepository<T : Any>(
         entities.forEach { cache.invalidate(cacheKeyOf(it)) }
     }
 
-    suspend fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null) {
-        batchEngine.updateSuspend(schema, old, new, consistency = consistency, ttlSeconds = ttlSeconds)
+    /**
+     * Optimistic-locked update: `UPDATE ... IF <version> = ?` when the entity has an `@Version`
+     * column (otherwise a blind full-row overwrite — see the `kandra-runtime` skill doc).
+     *
+     * [serialConsistency] controls the LWT's Paxos scope for the `@Version` check — it does
+     * **nothing** when the entity has no `@Version` column. Defaults to `LOCAL_SERIAL` (Paxos
+     * consensus within the local DC only), matching every existing caller's current behavior.
+     * **`LOCAL_SERIAL` does not protect against a concurrent update landing on a different DC**
+     * during a network partition: each DC can independently "win" its own local Paxos round, and
+     * when the partition heals, ordinary last-write-wins silently discards one of the two
+     * "successful" updates with no error to either caller (GH #134). Pass `SERIAL` here — cross-DC
+     * Paxos consensus — when the entity's optimistic lock must hold across every DC, not just the
+     * one the caller happened to write through.
+     */
+    suspend fun update(
+        old: T,
+        new: T,
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    ) {
+        batchEngine.updateSuspend(schema, old, new, consistency = consistency, ttlSeconds = ttlSeconds, serialConsistency = serialConsistency)
         cache.invalidate(cacheKeyOf(new))
     }
 
