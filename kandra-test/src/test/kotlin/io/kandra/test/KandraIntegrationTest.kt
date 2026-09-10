@@ -111,6 +111,22 @@ data class IntegrationSaveAndGet(
     @UpdatedAt val updatedAt: Instant = Instant.EPOCH
 )
 
+/**
+ * Regression coverage for GH #138 — `saveIfNotExists()`'s `Boolean` return discarded the entity
+ * `BatchEngine.injectTimestamps` builds internally with generated `@CreatedAt`/`@UpdatedAt` values
+ * for the actual `INSERT ... IF NOT EXISTS` write, exactly the same shape of bug as GH #132 (`save()`)
+ * before `saveAndGet()`. Uses a caller-supplied (not `@GeneratedUuid`) partition key, unlike
+ * `IntegrationSaveAndGet`, so a test can deliberately force a same-key collision and observe the
+ * `false`/`null` "already exists" branch as well as the success branch.
+ */
+@ScyllaTable("integration_save_if_not_exists")
+data class IntegrationSaveIfNotExists(
+    @PartitionKey val id: UUID,
+    val name: String,
+    @CreatedAt val createdAt: Instant = Instant.EPOCH,
+    @UpdatedAt val updatedAt: Instant = Instant.EPOCH
+)
+
 /** Regression coverage for Finding #8 — non-nullable empty Set/Map columns threw on read. */
 @ScyllaTable("integration_collections")
 data class IntegrationCollections(
@@ -210,7 +226,8 @@ class KandraIntegrationTest {
         IntegrationSoftDeletedLookup::class,
         IntegrationGeneratedUuidEvent::class,
         IntegrationTransient::class,
-        IntegrationSaveAndGet::class
+        IntegrationSaveAndGet::class,
+        IntegrationSaveIfNotExists::class
     )
 
     @AfterAll
@@ -530,6 +547,65 @@ class KandraIntegrationTest {
         val found = repo.findById(saved!!.id)
         assertNotNull(found)
         assertEquals("batched", found!!.name)
+    }
+
+    // ── GH #138 regression: saveIfNotExists() discarded the actually-persisted, stamped entity ──
+
+    @Test
+    fun `blocking saveIfNotExistsAndGet returns the persisted entity with real timestamps on success, and null when the key already exists`() {
+        val repo = db.repository<IntegrationSaveIfNotExists>()
+        val id = UUID.randomUUID()
+        val first = IntegrationSaveIfNotExists(id, name = "first")
+
+        val saved = repo.saveIfNotExistsAndGet(first)
+
+        assertNotNull(saved)
+        assertNotEquals(Instant.EPOCH, saved!!.createdAt)
+        assertNotEquals(Instant.EPOCH, saved.updatedAt)
+        assertEquals("first", saved.name)
+        // The caller's original object is untouched -- exactly the bug: code still holding
+        // `first` (not `saved`) has the placeholder EPOCH timestamps.
+        assertEquals(Instant.EPOCH, first.createdAt)
+
+        // A subsequent operation using the returned entity succeeds -- it's the real, persisted row.
+        // (Cassandra's TIMESTAMP column is millisecond-precision, so compare truncated to millis --
+        // same round-trip precision loss every other timestamp column in this suite has.)
+        val found = repo.findById(saved.id)
+        assertNotNull(found)
+        assertEquals(saved.createdAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS), found!!.createdAt)
+        assertEquals("first", found.name)
+
+        // Same key again: the LWT does not apply -- returns null, and does NOT overwrite the row.
+        val second = repo.saveIfNotExistsAndGet(IntegrationSaveIfNotExists(id, name = "second"))
+        assertNull(second)
+        assertEquals("first", repo.findById(id)!!.name)
+
+        // The plain Boolean-returning method agrees with the AndGet variant on both outcomes.
+        val thirdId = UUID.randomUUID()
+        assertTrue(repo.saveIfNotExists(IntegrationSaveIfNotExists(thirdId, name = "third")))
+        assertFalse(repo.saveIfNotExists(IntegrationSaveIfNotExists(thirdId, name = "fourth")))
+        assertEquals("third", repo.findById(thirdId)!!.name)
+    }
+
+    @Test
+    fun `suspend saveIfNotExistsAndGet returns the persisted entity with real timestamps on success, and null when the key already exists`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationSaveIfNotExists>()
+        val id = UUID.randomUUID()
+        val first = IntegrationSaveIfNotExists(id, name = "first")
+
+        val saved = repo.saveIfNotExistsAndGet(first)
+
+        assertNotNull(saved)
+        assertNotEquals(Instant.EPOCH, saved!!.createdAt)
+        assertNotEquals(Instant.EPOCH, saved.updatedAt)
+
+        val found = repo.findById(saved.id)
+        assertNotNull(found)
+        assertEquals(saved.createdAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS), found!!.createdAt)
+
+        val second = repo.saveIfNotExistsAndGet(IntegrationSaveIfNotExists(id, name = "second"))
+        assertNull(second)
+        assertEquals("first", repo.findById(id)!!.name)
     }
 
     // ── Finding #8 regression: non-nullable empty Set/Map columns threw on read ──────────────

@@ -380,7 +380,19 @@ class BatchEngine(
         return stampedWithVersion
     }
 
-    fun saveIfNotExists(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean {
+    fun saveIfNotExists(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean =
+        saveIfNotExistsAndGet(schema, entity, serialConsistency) != null
+
+    /**
+     * Same LWT write path as [saveIfNotExists], but returns the entity actually persisted — with
+     * any `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt` values [injectTimestamps] computed before the
+     * write — instead of discarding that copy behind a bare `Boolean` the way [saveIfNotExists]
+     * does. Returns `null` when the `IF NOT EXISTS` check did not apply (a row already existed under
+     * this key) — the same "nothing was written" signal [saveIfNotExists] reports as `false`. See
+     * GH #138: same root-cause shape as GH #132 (`save()`, fixed by `saveAndGet()`) and GH #136
+     * (`update()`, fixed by `updateAndGet()`) — a third instance of the same gap in this file.
+     */
+    fun saveIfNotExistsAndGet(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Any? {
         if (!serialConsistency.isSerial) throw KandraQueryException("saveIfNotExists serialConsistency must be LOCAL_SERIAL or SERIAL, got: $serialConsistency")
         if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot use saveIfNotExists().")
         val stamped = injectTimestamps(schema, entity, isInsert = true)
@@ -390,14 +402,14 @@ class BatchEngine(
         // success as a false "already exists" negative. See executeOnce's doc.
         val rs = executeOnce(primaryStmt, schema.tableName, "saveIfNotExists")
         val applied = rs.one()?.getBoolean("[applied]") ?: false
-        if (!applied) return false
+        if (!applied) return null
         val (batchLookups, eventualLookups) = schema.lookupTables.partition { it.consistency == LookupConsistency.BATCH }
         if (batchLookups.isNotEmpty()) {
             val lookupBatch = batchLookups.fold(newLoggedBatch(schema)) { acc, l -> acc.add(statementBuilder.insertLookup(schema, l, stamped)) }
             executeWithRetry(lookupBatch, schema.tableName, "saveIfNotExists")
         }
         fireEventual(schema, eventualLookups, stamped)
-        return true
+        return stamped
     }
 
     fun saveWithNulls(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, consistency: KandraConsistency? = null) {
@@ -750,7 +762,11 @@ class BatchEngine(
         return stampedWithVersion
     }
 
-    suspend fun saveIfNotExistsSuspend(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean {
+    suspend fun saveIfNotExistsSuspend(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean =
+        saveIfNotExistsAndGetSuspend(schema, entity, serialConsistency) != null
+
+    /** Suspend counterpart of [saveIfNotExistsAndGet] — see its doc for why this exists (GH #138). */
+    suspend fun saveIfNotExistsAndGetSuspend(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Any? {
         if (!serialConsistency.isSerial) throw KandraQueryException("saveIfNotExists serialConsistency must be LOCAL_SERIAL or SERIAL, got: $serialConsistency")
         if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot use saveIfNotExists().")
         val stamped = injectTimestamps(schema, entity, isInsert = true)
@@ -760,14 +776,14 @@ class BatchEngine(
         // attempt's success as a false "already exists" negative. See executeOnce's doc.
         val rs = executeOnceSuspend(primaryStmt, schema.tableName, "saveIfNotExists")
         val applied = rs.currentPage().firstOrNull()?.getBoolean("[applied]") ?: false
-        if (!applied) return false
+        if (!applied) return null
         val (batchLookups, eventualLookups) = schema.lookupTables.partition { it.consistency == LookupConsistency.BATCH }
         if (batchLookups.isNotEmpty()) {
             val lookupBatch = batchLookups.fold(newLoggedBatch(schema)) { acc, l -> acc.add(statementBuilder.insertLookupSuspend(schema, l, stamped)) }
             executeWithRetrySuspend(lookupBatch, schema.tableName, "saveIfNotExists")
         }
         fireEventualSuspend(schema, eventualLookups, stamped)
-        return true
+        return stamped
     }
 
     suspend fun saveWithNullsSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, consistency: KandraConsistency? = null) {

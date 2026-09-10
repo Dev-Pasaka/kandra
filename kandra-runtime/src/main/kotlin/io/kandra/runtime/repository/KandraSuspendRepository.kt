@@ -72,6 +72,20 @@ class KandraSuspendRepository<T : Any>(
     suspend fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean =
         batchEngine.saveIfNotExistsSuspend(schema, entity, serialConsistency).also { if (it) cache.invalidate(cacheKeyOf(entity)) }
 
+    /**
+     * Same LWT write as [saveIfNotExists], but returns the entity actually persisted — including
+     * any `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt` values generated for the write, which
+     * [saveIfNotExists] computes internally and then discards behind a bare `Boolean`. Returns
+     * `null` when the row already existed (the same case [saveIfNotExists] reports as `false`). See
+     * [KandraRepository.saveIfNotExistsAndGet]'s doc (the blocking counterpart) — GH #138.
+     */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun saveIfNotExistsAndGet(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T? {
+        val saved = batchEngine.saveIfNotExistsAndGetSuspend(schema, entity, serialConsistency) as T?
+        saved?.let { cache.invalidate(cacheKeyOf(it)) }
+        return saved
+    }
+
     suspend fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null) {
         batchEngine.saveAllSuspend(schema, entities, useBatch = useBatch, consistency = consistency)
         entities.forEach { cache.invalidate(cacheKeyOf(it)) }
