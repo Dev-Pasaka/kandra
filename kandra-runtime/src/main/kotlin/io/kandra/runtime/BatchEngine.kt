@@ -422,6 +422,26 @@ class BatchEngine(
         ttlSeconds: Int? = null,
         serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
     ) {
+        updateAndGet(schema, old, new, consistency, ttlSeconds, serialConsistency)
+    }
+
+    /**
+     * Same write path as [update], but returns the entity actually persisted — with the
+     * post-update `@Version` (and `@UpdatedAt`) [injectVersion]/[injectTimestamps] computed for
+     * the write, instead of discarding that copy the way [update] does. See GH #136: a caller who
+     * relied on `update()`'s `Unit` return and then reused the pre-update version it already had
+     * for a subsequent optimistic-locked update got a spurious [KandraOptimisticLockException]
+     * against a write that had actually succeeded — it never learned its own prior write's
+     * resulting version.
+     */
+    fun updateAndGet(
+        schema: TableSchema,
+        old: Any,
+        new: Any,
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    ): Any {
         validateEntity(new)
         val versionCol = schema.versionColumn
         val stamped = injectTimestamps(schema, new, isInsert = false)
@@ -440,7 +460,7 @@ class BatchEngine(
             val applied = rs.one()?.getBoolean("[applied]") ?: false
             if (!applied) throwOptimisticLockException(schema, old, oldVersion)
             updateLookups(schema, old, stampedWithVersion, consistency)
-            return
+            return stampedWithVersion
         }
 
         val (batchStmts, eventualStmts) = buildUpdateStatements(schema, old, stamped)
@@ -449,6 +469,7 @@ class BatchEngine(
         ) { acc, stmt -> acc.add(stmt) }
         executeWithRetry(batch, schema.tableName, "update")
         fireEventualStatements(eventualStmts, new, "(update)", schema.tableName)
+        return stamped
     }
 
     fun updateForce(schema: TableSchema, entity: Any, consistency: KandraConsistency? = null) {
@@ -769,6 +790,18 @@ class BatchEngine(
         ttlSeconds: Int? = null,
         serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
     ) {
+        updateAndGetSuspend(schema, old, new, consistency, ttlSeconds, serialConsistency)
+    }
+
+    /** Suspend counterpart of [updateAndGet] — see its doc for why this exists (GH #136). */
+    suspend fun updateAndGetSuspend(
+        schema: TableSchema,
+        old: Any,
+        new: Any,
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    ): Any {
         validateEntity(new)
         val versionCol = schema.versionColumn
         val stamped = injectTimestamps(schema, new, isInsert = false)
@@ -788,7 +821,7 @@ class BatchEngine(
             val applied = rs.currentPage().firstOrNull()?.getBoolean("[applied]") ?: false
             if (!applied) throwOptimisticLockException(schema, old, oldVersion)
             updateLookupsSuspend(schema, old, stampedWithVersion, consistency)
-            return
+            return stampedWithVersion
         }
 
         val (batchStmts, eventualStmts) = buildUpdateStatementsSuspend(schema, old, stamped)
@@ -798,6 +831,7 @@ class BatchEngine(
         ) { acc, stmt -> acc.add(stmt) }
         executeWithRetrySuspend(batch, schema.tableName, "update")
         fireEventualStatementsSuspend(eventualStmts, new, "(update)", schema.tableName)
+        return stamped
     }
 
     suspend fun updateForceSuspend(schema: TableSchema, entity: Any, consistency: KandraConsistency? = null) {
