@@ -57,9 +57,25 @@ class KandraBatchScope internal constructor(
      * coroutine's dispatcher thread.
      */
     suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null) {
-        @OptIn(InternalKandraApi::class)
-        statements.addAll(batchEngine.collectSaveSuspend(schema, entity, ttlSeconds))
+        saveInBatchAndGet(entity, ttlSeconds)
+    }
+
+    /**
+     * Same as [saveInBatch], but returns the entity that will be persisted when this batch
+     * commits — with any `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt` values already resolved (they
+     * are computed at collection time by [BatchEngine.injectTimestamps], not deferred to commit
+     * time), instead of discarding that copy the way [saveInBatch] does. See
+     * [KandraRepository.saveAndGet]/[KandraSuspendRepository.saveAndGet]'s doc for the underlying
+     * gap this closes for standalone `save()`. Note this does **not** inject an initial `@Version`
+     * value the way the standalone `save()`/`saveAndGet()` path does.
+     */
+    @Suppress("UNCHECKED_CAST")
+    @OptIn(InternalKandraApi::class)
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatchAndGet(entity: T, ttlSeconds: Int? = null): T {
+        val (stmts, stamped) = batchEngine.collectSaveAndGetSuspend(schema, entity, ttlSeconds)
+        statements.addAll(stmts)
         this@KandraBatchScope.schema = schema
+        return stamped as T
     }
 
     /** Adds the entity delete (primary + all lookup tables) to this batch. See [saveInBatch]'s doc. */
@@ -112,9 +128,22 @@ class KandraBlockingBatchScope internal constructor(
 
     /** Adds the entity save (primary + BATCH lookups) to this batch. Blocking — for [KandraRuntime.batchBlocking] only. */
     fun <T : Any> KandraRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null) {
-        @OptIn(InternalKandraApi::class)
-        statements.addAll(batchEngine.collectSave(schema, entity, ttlSeconds))
+        saveInBatchAndGet(entity, ttlSeconds)
+    }
+
+    /**
+     * Same as [saveInBatch], but returns the entity that will be persisted when this batch
+     * commits — with any `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt` values already resolved. See
+     * [KandraBatchScope.saveInBatchAndGet]'s doc (the suspend counterpart) for the underlying gap
+     * this closes.
+     */
+    @Suppress("UNCHECKED_CAST")
+    @OptIn(InternalKandraApi::class)
+    fun <T : Any> KandraRepository<T>.saveInBatchAndGet(entity: T, ttlSeconds: Int? = null): T {
+        val (stmts, stamped) = batchEngine.collectSaveAndGet(schema, entity, ttlSeconds)
+        statements.addAll(stmts)
         this@KandraBlockingBatchScope.schema = schema
+        return stamped as T
     }
 
     /** Adds the entity delete (primary + all lookup tables) to this batch. Blocking — for [KandraRuntime.batchBlocking] only. */

@@ -4,6 +4,7 @@ import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.annotations.CacheResult
 import io.kandra.core.annotations.ClusteringKey
 import io.kandra.core.annotations.ClusteringOrder
+import io.kandra.core.annotations.CreatedAt
 import io.kandra.core.annotations.GeneratedUuid
 import io.kandra.core.annotations.LookupIndex
 import io.kandra.core.annotations.PartitionKey
@@ -11,6 +12,7 @@ import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.annotations.SecondaryIndex
 import io.kandra.core.annotations.SoftDelete
 import io.kandra.core.annotations.Transient
+import io.kandra.core.annotations.UpdatedAt
 import io.kandra.core.annotations.Version
 import io.kandra.core.exception.KandraOptimisticLockException
 import io.kandra.core.exception.KandraQueryException
@@ -91,6 +93,22 @@ data class IntegrationGeneratedUuidEvent(
     @PartitionKey val streamId: UUID,
     @GeneratedUuid @ClusteringKey val eventId: UUID = UUID(0, 0),
     val payload: String
+)
+
+/**
+ * Regression coverage for GH #132 — `save()`'s `Unit` return type discarded the entity
+ * `BatchEngine.injectTimestamps`/`injectInitialVersion` build internally with generated
+ * `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt` values for the actual write. A caller that kept using
+ * the object it constructed (not what was actually written) saw only placeholder values — this
+ * broke a real deployment (100% failure rate on a subsequent update keyed by the placeholder id).
+ * `saveAndGet()`/`saveInBatchAndGet()` return the actually-persisted entity instead.
+ */
+@ScyllaTable("integration_save_and_get")
+data class IntegrationSaveAndGet(
+    @GeneratedUuid @PartitionKey val id: UUID = UUID(0, 0),
+    val name: String,
+    @CreatedAt val createdAt: Instant = Instant.EPOCH,
+    @UpdatedAt val updatedAt: Instant = Instant.EPOCH
 )
 
 /** Regression coverage for Finding #8 — non-nullable empty Set/Map columns threw on read. */
@@ -191,7 +209,8 @@ class KandraIntegrationTest {
         IntegrationLookupClustered::class,
         IntegrationSoftDeletedLookup::class,
         IntegrationGeneratedUuidEvent::class,
-        IntegrationTransient::class
+        IntegrationTransient::class,
+        IntegrationSaveAndGet::class
     )
 
     @AfterAll
@@ -405,6 +424,63 @@ class KandraIntegrationTest {
         assertEquals(2, rows.size)
         assertEquals(listOf("first", "second"), rows.map { it.payload })
         assertTrue(rows[0].eventId < rows[1].eventId)
+    }
+
+    // ── GH #132 regression: save() discarded the actually-persisted, generated-value entity ──
+
+    @Test
+    fun `blocking saveAndGet returns the persisted entity with generated id and timestamps, not the caller's placeholder`() {
+        val repo = db.repository<IntegrationSaveAndGet>()
+        val placeholder = IntegrationSaveAndGet(name = "widget")
+
+        val saved = repo.saveAndGet(placeholder)
+
+        assertNotEquals(UUID(0, 0), saved.id)
+        assertNotEquals(Instant.EPOCH, saved.createdAt)
+        assertNotEquals(Instant.EPOCH, saved.updatedAt)
+        assertEquals("widget", saved.name)
+        // The caller's original object is untouched -- data classes are immutable -- which is
+        // exactly the bug: any code still holding `placeholder` (not `saved`) has the wrong id.
+        assertEquals(UUID(0, 0), placeholder.id)
+
+        val found = repo.findById(saved.id)
+        assertNotNull(found)
+        assertEquals(saved.id, found!!.id)
+        assertEquals("widget", found.name)
+    }
+
+    @Test
+    fun `suspend saveAndGet returns the persisted entity with generated id and timestamps, not the caller's placeholder`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationSaveAndGet>()
+        val placeholder = IntegrationSaveAndGet(name = "gadget")
+
+        val saved = repo.saveAndGet(placeholder)
+
+        assertNotEquals(UUID(0, 0), saved.id)
+        assertNotEquals(Instant.EPOCH, saved.createdAt)
+        assertNotEquals(Instant.EPOCH, saved.updatedAt)
+
+        val found = repo.findById(saved.id)
+        assertNotNull(found)
+        assertEquals(saved.id, found!!.id)
+        assertEquals("gadget", found.name)
+    }
+
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `saveInBatchAndGet returns the persisted entity's generated id, resolvable after the batch commits`() {
+        val repo = db.repository<IntegrationSaveAndGet>()
+        var saved: IntegrationSaveAndGet? = null
+
+        db.runtime.batchBlocking {
+            saved = repo.saveInBatchAndGet(IntegrationSaveAndGet(name = "batched"))
+        }
+
+        assertNotNull(saved)
+        assertNotEquals(UUID(0, 0), saved!!.id)
+        val found = repo.findById(saved!!.id)
+        assertNotNull(found)
+        assertEquals("batched", found!!.name)
     }
 
     // ── Finding #8 regression: non-nullable empty Set/Map columns threw on read ──────────────
