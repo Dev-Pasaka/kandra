@@ -87,4 +87,47 @@ class StatementBuilderExistsQueryInjectionGuardTest {
         // Must not throw -- proving the guard doesn't false-positive on a legitimate parameterized query.
         builder(strictMode = true).existsQuery(schema, "email = ?", listOf("admin@example.com"))
     }
+
+    // ── GH #142 (follow-up to #107): semicolon/comment payloads that never open a quote ───────
+    //
+    // The original guard (this very test class's original three tests above) only matched a
+    // quote-breaking splice. A payload against an unquoted whereCql fragment -- e.g. a numeric/UUID
+    // predicate -- never opens or closes a quote at all, so it reached existsQuery's generated CQL
+    // completely undetected. These prove the broadened SUSPICIOUS_LITERAL_PATTERN now catches it too.
+
+    @Test
+    fun `existsQuery warns on a semicolon-terminated whereCql with no quotes at all`() {
+        val schema = SchemaRegistry.register(ExistsGuardEntity::class)
+        val output = captureStderr {
+            builder().existsQuery(schema, "id = 5; DROP TABLE sb_exists_guard", emptyList())
+        }
+        assertTrue(output.contains("injection risk"), "Expected an injection-risk WARN, got: $output")
+    }
+
+    @Test
+    fun `existsQuery warns on a line-comment whereCql with no quotes at all`() {
+        val schema = SchemaRegistry.register(ExistsGuardEntity::class)
+        val output = captureStderr {
+            builder().existsQuery(schema, "id = 5 -- AND secret = 'x'", emptyList())
+        }
+        assertTrue(output.contains("injection risk"), "Expected an injection-risk WARN, got: $output")
+    }
+
+    @Test
+    fun `existsQuery warns on a block-comment whereCql with no quotes at all`() {
+        val schema = SchemaRegistry.register(ExistsGuardEntity::class)
+        val output = captureStderr {
+            builder().existsQuery(schema, "id = 5 /* AND secret = 'x' */", emptyList())
+        }
+        assertTrue(output.contains("injection risk"), "Expected an injection-risk WARN, got: $output")
+    }
+
+    @Test
+    fun `existsQuery throws on a semicolon whereCql when rawQueryStrictMode is enabled, before preparing`() {
+        val schema = SchemaRegistry.register(ExistsGuardEntity::class)
+        val ex = assertThrows(KandraQueryException::class.java) {
+            builder(strictMode = true).existsQuery(schema, "id = 5; DROP TABLE sb_exists_guard", emptyList())
+        }
+        assertTrue(ex.message!!.contains("injection risk"), "Expected exception message to mention injection risk, got: ${ex.message}")
+    }
 }

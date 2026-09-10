@@ -149,6 +149,59 @@ class QueryExecutorRawInjectionGuardTest {
         assertTrue(output.contains("injection risk"), "Expected an injection-risk WARN, got: $output")
     }
 
+    // ── GH #142 (follow-up to #107): semicolon/comment payloads that never open a quote ───────
+    //
+    // The original guard only matched a quote-breaking splice. A payload against an unquoted
+    // (e.g. numeric/UUID) column never opens or closes a quote at all, so it reached the driver
+    // completely undetected -- these prove the broadened SUSPICIOUS_LITERAL_PATTERN now catches it.
+
+    @Test
+    fun `raw() warns on a semicolon-terminated payload with no quotes at all`() {
+        val (executor, _) = executor()
+        val output = captureStderr {
+            executor.raw("SELECT * FROM t WHERE id = 5; DROP TABLE t")
+        }
+        assertTrue(output.contains("injection risk"), "Expected an injection-risk WARN, got: $output")
+    }
+
+    @Test
+    fun `raw() warns on a line-comment payload with no quotes at all`() {
+        val (executor, _) = executor()
+        val output = captureStderr {
+            executor.raw("SELECT * FROM t WHERE id = 5 -- AND secret = 'x'")
+        }
+        assertTrue(output.contains("injection risk"), "Expected an injection-risk WARN, got: $output")
+    }
+
+    @Test
+    fun `raw() warns on a block-comment payload with no quotes at all`() {
+        val (executor, _) = executor()
+        val output = captureStderr {
+            executor.raw("SELECT * FROM t WHERE id = 5 /* AND secret = 'x' */")
+        }
+        assertTrue(output.contains("injection risk"), "Expected an injection-risk WARN, got: $output")
+    }
+
+    @Test
+    fun `rawQuery() warns on a semicolon payload even with a fully-bound KandraRawQuery`() {
+        val (executor, _) = executor()
+        val query = KandraRawQuery.cql("SELECT * FROM t WHERE id = ?; DROP TABLE t").bind(5).build()
+        val output = captureStderr {
+            executor.rawQuery(query)
+        }
+        assertTrue(output.contains("injection risk"), "Expected an injection-risk WARN, got: $output")
+    }
+
+    @Test
+    fun `raw() throws on a semicolon payload when rawQueryStrictMode is enabled, before touching the driver`() {
+        val (executor, session) = executor(strictMode = true)
+        val ex = assertThrows(KandraQueryException::class.java) {
+            executor.raw("SELECT * FROM t WHERE id = 5; DROP TABLE t")
+        }
+        assertTrue(ex.message!!.contains("injection risk"), "Expected exception message to mention injection risk, got: ${ex.message}")
+        assertEquals(0, session.executeCount.get(), "Strict mode must prevent execution, not just log")
+    }
+
     // ── (b) strict mode throws instead of warning, and never reaches the driver ─────────────
 
     @Test

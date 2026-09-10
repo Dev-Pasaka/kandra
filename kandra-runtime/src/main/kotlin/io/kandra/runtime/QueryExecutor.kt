@@ -27,13 +27,24 @@ import kotlin.reflect.KFunction
 private val logger = KotlinLogging.logger {}
 
 /**
- * Matches a single-quoted string literal (`'...'`) or a double-quoted identifier immediately
- * followed by `=` (`"col"=`) anywhere in a CQL string. See [QueryExecutor.checkRawInjectionRisk].
+ * Matches any of the following anywhere in a CQL string:
+ *  - a single-quoted string literal (`'...'`) — a value spliced in rather than bound;
+ *  - a double-quoted identifier immediately followed by `=` (`"col"=`) — the `"col"='value'`-style
+ *    splicing shape;
+ *  - a statement terminator (`;`) — a legitimate single prepared statement never needs one, so its
+ *    presence means either a second statement was appended or the original statement was altered;
+ *  - a CQL comment marker (`--` line comment, or `/*`/`*/` block comment) — used to truncate or
+ *    rewrite the rest of a query without needing to close a quote at all.
+ *
+ * The last two were added under GH #142 (a follow-up audit of GH #107 finding 2): the original
+ * guard caught only quote-breaking splices, so a payload against a column with no quoting
+ * requirement at all (e.g. `"id = 5; DROP TABLE users; --"` against a numeric/UUID column) reached
+ * the driver undetected — no quote was ever opened or closed. See [QueryExecutor.checkRawInjectionRisk].
  *
  * `internal` (not file-private) so [StatementBuilder.existsQuery] can apply the same heuristic to
  * its own raw `whereCql` fragment (GH #107) without maintaining a second copy of this regex.
  */
-internal val SUSPICIOUS_LITERAL_PATTERN = Regex("""'[^']*'|"[^"]*"\s*=""")
+internal val SUSPICIOUS_LITERAL_PATTERN = Regex("""'[^']*'|"[^"]*"\s*=|;|--|/\*|\*/""")
 
 /**
  * Translates [QueryContext] predicates into CQL SELECT statements and decodes results.
@@ -321,27 +332,36 @@ class QueryExecutor(
     /**
      * Heuristic CQL-injection guard shared by [raw]/[rawSuspend]/[rawQuery]/[rawQuerySuspend].
      *
-     * Fires whenever [cql] appears to have a value spliced directly into the string — a single-quoted
-     * string literal (`'...'`), or a double-quoted identifier immediately followed by `=` (a common
-     * shape for `"col"='value'`-style splicing) — **regardless of whether any parameters are bound**.
-     * Unlike the pre-fix version, one legitimately bound `?` elsewhere in the same CQL string no
-     * longer suppresses this check: an embedded literal is a risk independent of how many other
-     * placeholders happen to be present (GH #32 / ISS-050).
+     * Fires whenever [cql] appears to have a value or extra CQL syntax spliced directly into the
+     * string — a single-quoted string literal (`'...'`), a double-quoted identifier immediately
+     * followed by `=` (a common shape for `"col"='value'`-style splicing), a statement terminator
+     * (`;`), or a CQL comment marker (`--`, `/*`, `*/`) — **regardless of whether any parameters are
+     * bound**. Unlike the pre-fix version, one legitimately bound `?` elsewhere in the same CQL
+     * string no longer suppresses this check: an embedded literal is a risk independent of how many
+     * other placeholders happen to be present (GH #32 / ISS-050).
      *
-     * This remains a heuristic, not a CQL parser: it will not catch quote-less injection shapes (e.g.
-     * a numeric-context tautology or bare keyword injection), and it can false-positive on CQL that
-     * legitimately embeds a fixed, non-user-supplied literal. Absence of the warning is therefore not
-     * proof a query is safe, and presence of it is not proof a query is unsafe — it is a prompt to
-     * double check.
+     * The `;`/comment-marker coverage closes a gap the original quote-only guard had (GH #142, a
+     * follow-up audit of GH #107): a payload targeting a column with no quoting requirement at all —
+     * e.g. `"id = 5; DROP TABLE users; --"` against a numeric/UUID column — never opens or closes a
+     * quote, so it reached the driver undetected before this addition.
+     *
+     * This remains a heuristic, not a CQL parser: it will not catch a bare quote-less, punctuation-
+     * free tautology (e.g. a numeric-context `OR 1=1` with no comment/terminator following it — CQL
+     * doesn't support multi-statement execution or an `OR` clause in a prepared `WHERE` today, so this
+     * is a defense-in-depth gap rather than an exploitable one against current Kandra query shapes),
+     * and it can false-positive on CQL that legitimately embeds a fixed, non-user-supplied literal.
+     * Absence of the warning is therefore not proof a query is safe, and presence of it is not proof a
+     * query is unsafe — it is a prompt to double check.
      *
      * By default this only logs a WARN. If [DebugConfig.rawQueryStrictMode] is enabled, it throws
      * [KandraQueryException] instead, so callers who want `raw()`/`rawQuery()` to fail closed can opt in.
      */
     private fun checkRawInjectionRisk(cql: String, callerName: String) {
         if (!SUSPICIOUS_LITERAL_PATTERN.containsMatchIn(cql)) return
-        val message = "$callerName() CQL appears to contain a string literal spliced directly into the " +
-            "query (independent of any other bound parameters). If any of it came from user input this " +
-            "is a CQL injection risk. Use parameterised queries: raw(\"SELECT * FROM t WHERE col = ?\", value)"
+        val message = "$callerName() CQL appears to contain a literal, statement terminator (;), or " +
+            "comment marker (--, /* */) spliced directly into the query (independent of any other " +
+            "bound parameters). If any of it came from user input this is a CQL injection risk. Use " +
+            "parameterised queries: raw(\"SELECT * FROM t WHERE col = ?\", value)"
         if (debugConfig.rawQueryStrictMode) {
             throw KandraQueryException(message)
         } else {
