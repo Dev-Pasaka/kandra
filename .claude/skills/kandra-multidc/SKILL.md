@@ -398,3 +398,10 @@ against R+W directly. If your keyspace's RF exceeds 3, raise `defaultRead` accor
 - `LOCAL_SERIAL` vs `SERIAL` is the recurring footgun: `saveIfNotExists` defaults to `LOCAL_SERIAL`, which
   only guarantees uniqueness **within the local DC** — a second DC can independently accept a conflicting
   "unique" row unless you explicitly pass `serialConsistency = KandraConsistency.SERIAL`.
+- The same footgun applies to an `@Version`-locked `update()` (GH #134, fixed): it also takes a
+  `serialConsistency` parameter (default `LOCAL_SERIAL`) for its `IF <version> = ?` LWT. Under a real
+  network partition with RF=1/DC, two concurrent `update()` calls to the same row — one per DC — can
+  **both** report success under `LOCAL_SERIAL`, since each DC's local Paxos round never needed the other
+  DC's participation; last-write-wins then silently drops one of them once the partition heals. Pass
+  `serialConsistency = KandraConsistency.SERIAL` when the optimistic lock must actually hold across every
+  DC, not just the one the caller happened to write through.

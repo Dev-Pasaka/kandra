@@ -414,18 +414,26 @@ class BatchEngine(
 
     // ── Update ───────────────────────────────────────────────────────────────
 
-    fun update(schema: TableSchema, old: Any, new: Any, consistency: KandraConsistency? = null, ttlSeconds: Int? = null) {
+    fun update(
+        schema: TableSchema,
+        old: Any,
+        new: Any,
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    ) {
         validateEntity(new)
         val versionCol = schema.versionColumn
         val stamped = injectTimestamps(schema, new, isInsert = false)
 
         if (versionCol != null) {
+            if (!serialConsistency.isSerial) throw KandraQueryException("update serialConsistency must be LOCAL_SERIAL or SERIAL, got: $serialConsistency")
             val oldProps = schema.reflection.propertiesByName
             val oldVersion = oldProps[versionCol.propertyName]?.call(old)
                 ?: throw KandraQueryException("@Version field '${versionCol.propertyName}' is null")
             val newVersion = incrementVersion(versionCol, oldVersion)
             val stampedWithVersion = injectVersion(schema, stamped, versionCol.propertyName, newVersion)
-            val stmt = buildVersionedUpdateStatement(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds)
+            val stmt = buildVersionedUpdateStatement(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds, serialConsistency)
             // Not executeWithRetry: a blind retry of this LWT would risk observing our own prior
             // attempt's success as a false optimistic-lock conflict. See executeOnce's doc.
             val rs = executeOnce(stmt, schema.tableName, "update")
@@ -753,19 +761,27 @@ class BatchEngine(
         fireEventualSuspend(schema, eventualLookups, stamped)
     }
 
-    suspend fun updateSuspend(schema: TableSchema, old: Any, new: Any, consistency: KandraConsistency? = null, ttlSeconds: Int? = null) {
+    suspend fun updateSuspend(
+        schema: TableSchema,
+        old: Any,
+        new: Any,
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    ) {
         validateEntity(new)
         val versionCol = schema.versionColumn
         val stamped = injectTimestamps(schema, new, isInsert = false)
 
         if (versionCol != null) {
+            if (!serialConsistency.isSerial) throw KandraQueryException("update serialConsistency must be LOCAL_SERIAL or SERIAL, got: $serialConsistency")
             val oldProps = schema.reflection.propertiesByName
             val oldVersion = oldProps[versionCol.propertyName]?.call(old)
                 ?: throw KandraQueryException("@Version field '${versionCol.propertyName}' is null")
             val newVersion = incrementVersion(versionCol, oldVersion)
             val stampedWithVersion = injectVersion(schema, stamped, versionCol.propertyName, newVersion)
             // Async prepare avoids blocking the dispatcher on the first call for this CQL string
-            val stmt = buildVersionedUpdateStatementSuspend(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds)
+            val stmt = buildVersionedUpdateStatementSuspend(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds, serialConsistency)
             // Not executeWithRetrySuspend: a blind retry of this LWT would risk observing our own
             // prior attempt's success as a false optimistic-lock conflict. See executeOnceSuspend's doc.
             val rs = executeOnceSuspend(stmt, schema.tableName, "update")
@@ -948,7 +964,8 @@ class BatchEngine(
         stampedWithVersion: Any,
         oldVersion: Any,
         consistency: KandraConsistency? = null,
-        ttlSeconds: Int? = null
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
     ): BoundStatement {
         val nonKeyCols = buildList {
             addAll(schema.columns)
@@ -980,7 +997,7 @@ class BatchEngine(
         val resolved = statementBuilder.resolveWriteConsistency(schema, consistency)
         return prepared.bind(*values.toTypedArray())
             .setConsistencyLevel(DefaultConsistencyLevel.valueOf(resolved.name))
-            .setSerialConsistencyLevel(DefaultConsistencyLevel.LOCAL_SERIAL)
+            .setSerialConsistencyLevel(DefaultConsistencyLevel.valueOf(serialConsistency.name))
     }
 
     /**
@@ -994,7 +1011,8 @@ class BatchEngine(
         stampedWithVersion: Any,
         oldVersion: Any,
         consistency: KandraConsistency? = null,
-        ttlSeconds: Int? = null
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
     ): BoundStatement {
         val nonKeyCols = buildList {
             addAll(schema.columns)
@@ -1026,7 +1044,7 @@ class BatchEngine(
         val resolved = statementBuilder.resolveWriteConsistency(schema, consistency)
         return prepared.bind(*values.toTypedArray())
             .setConsistencyLevel(DefaultConsistencyLevel.valueOf(resolved.name))
-            .setSerialConsistencyLevel(DefaultConsistencyLevel.LOCAL_SERIAL)
+            .setSerialConsistencyLevel(DefaultConsistencyLevel.valueOf(serialConsistency.name))
     }
 
     private fun incrementVersion(versionCol: ColumnSchema, oldVersion: Any): Any =

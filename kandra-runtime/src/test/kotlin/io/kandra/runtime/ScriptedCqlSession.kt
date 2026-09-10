@@ -70,6 +70,15 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
      */
     var lastBoundConsistencyLevel: ConsistencyLevel? = null
 
+    /**
+     * Same idea as [lastBoundConsistencyLevel], but for `.setSerialConsistencyLevel(...)` — the only
+     * way to observe, without a real cluster, whether a versioned `update()`'s `serialConsistency`
+     * parameter (GH #134) actually reached the LWT's serial consistency level instead of the
+     * previously-hardcoded `LOCAL_SERIAL`. `null` until a bound statement calls
+     * `.setSerialConsistencyLevel(...)`.
+     */
+    var lastBoundSerialConsistencyLevel: ConsistencyLevel? = null
+
     /** The CQL text of the most recent `prepare`/`prepareAsync` call. */
     var lastPreparedCql: String? = null
         private set
@@ -112,7 +121,7 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
 
     override fun prepare(query: String): PreparedStatement {
         lastPreparedCql = query
-        return FakeBindablePreparedStatement(query) { lastBoundConsistencyLevel = it }
+        return FakeBindablePreparedStatement(query, { lastBoundConsistencyLevel = it }, { lastBoundSerialConsistencyLevel = it })
     }
 
     override fun prepare(statement: SimpleStatement): PreparedStatement = prepare(statement.query)
@@ -122,7 +131,9 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
     // so io.kandra.runtime.driver.prepareSuspend (used by the versioned-update suspend path) works.
     override fun prepareAsync(query: String): CompletionStage<PreparedStatement> {
         lastPreparedCql = query
-        return CompletableFuture.completedFuture(FakeBindablePreparedStatement(query) { lastBoundConsistencyLevel = it })
+        return CompletableFuture.completedFuture(
+            FakeBindablePreparedStatement(query, { lastBoundConsistencyLevel = it }, { lastBoundSerialConsistencyLevel = it })
+        )
     }
 
     override fun prepareAsync(statement: SimpleStatement): CompletionStage<PreparedStatement> = prepareAsync(statement.query)
@@ -159,9 +170,10 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
 /** [PreparedStatement] whose [bind] returns a dynamic-proxy [BoundStatement] (see [fakeBoundStatement]). */
 private class FakeBindablePreparedStatement(
     private val query: String,
-    private val onSetConsistencyLevel: (ConsistencyLevel) -> Unit = {}
+    private val onSetConsistencyLevel: (ConsistencyLevel) -> Unit = {},
+    private val onSetSerialConsistencyLevel: (ConsistencyLevel) -> Unit = {}
 ) : PreparedStatement {
-    override fun bind(vararg values: Any?): BoundStatement = fakeBoundStatement(onSetConsistencyLevel)
+    override fun bind(vararg values: Any?): BoundStatement = fakeBoundStatement(onSetConsistencyLevel, onSetSerialConsistencyLevel)
     override fun getId(): ByteBuffer = ByteBuffer.wrap(query.toByteArray())
     override fun getResultMetadataId(): ByteBuffer? = null
     override fun getQuery(): String = query
@@ -181,7 +193,10 @@ private class FakeBindablePreparedStatement(
  * off the bound statement it built — it only builds and passes it to `session.execute(...)`, which our
  * [ScriptedCqlSession] ignores in favor of the scripted [ExecuteOutcome] queue.
  */
-private fun fakeBoundStatement(onSetConsistencyLevel: (ConsistencyLevel) -> Unit = {}): BoundStatement {
+private fun fakeBoundStatement(
+    onSetConsistencyLevel: (ConsistencyLevel) -> Unit = {},
+    onSetSerialConsistencyLevel: (ConsistencyLevel) -> Unit = {}
+): BoundStatement {
     // Fluent setters (setSerialConsistencyLevel, setIdempotent, setTracing, ...) are declared to return
     // a generic `SelfT extends Statement<SelfT>` — erased to plain Object at runtime, so `method.returnType`
     // can't be compared against BoundStatement::class directly. Matched by name instead (every setter-style
@@ -194,6 +209,10 @@ private fun fakeBoundStatement(onSetConsistencyLevel: (ConsistencyLevel) -> Unit
             method.name == "equals" -> false
             method.name == "setConsistencyLevel" -> {
                 (args?.getOrNull(0) as? ConsistencyLevel)?.let(onSetConsistencyLevel)
+                proxy
+            }
+            method.name == "setSerialConsistencyLevel" -> {
+                (args?.getOrNull(0) as? ConsistencyLevel)?.let(onSetSerialConsistencyLevel)
                 proxy
             }
             method.name.startsWith("set") || method.name in selfReturningNames -> proxy

@@ -9,9 +9,12 @@ package io.kandra.core
  * ## Read consistency
  * Default: [LOCAL_ONE] — single replica in the local DC, fastest possible read.
  *
- * ## LWT serial consistency (for [saveIfNotExists])
+ * ## LWT serial consistency (for `saveIfNotExists` and a `@Version`-locked `update`)
  * Use [LOCAL_SERIAL] (default) for Paxos within the local DC only.
- * Use [SERIAL] for globally unique constraints (e.g. a username unique across ALL DCs).
+ * Use [SERIAL] for globally unique constraints (e.g. a username unique across ALL DCs) or when an
+ * optimistic-locked `update` must not let a concurrent write land undetected on a different DC
+ * during a network partition (GH #134) — `LOCAL_SERIAL` only guarantees the check is linearizable
+ * within the DC the write went through.
  *
  * ## Consistency resolution order (highest priority first)
  * 1. Per-operation parameter on the repository method
