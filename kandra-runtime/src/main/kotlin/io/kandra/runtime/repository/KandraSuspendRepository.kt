@@ -98,8 +98,28 @@ class KandraSuspendRepository<T : Any>(
         ttlSeconds: Int? = null,
         serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
     ) {
-        batchEngine.updateSuspend(schema, old, new, consistency = consistency, ttlSeconds = ttlSeconds, serialConsistency = serialConsistency)
-        cache.invalidate(cacheKeyOf(new))
+        updateAndGet(old, new, consistency, ttlSeconds, serialConsistency)
+    }
+
+    /**
+     * Same write as [update], but returns the entity actually persisted — including the
+     * post-update `@Version` (and `@UpdatedAt`) values [update] computes internally and then
+     * discards. Use this whenever the caller needs those generated values, e.g. to make a
+     * subsequent optimistic-locked `update()`/`updateAndGet()` call against the same row without
+     * risking a spurious [io.kandra.core.exception.KandraOptimisticLockException] from reusing the
+     * stale pre-update version it already had — see GH #136.
+     */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun updateAndGet(
+        old: T,
+        new: T,
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    ): T {
+        val updated = batchEngine.updateAndGetSuspend(schema, old, new, consistency = consistency, ttlSeconds = ttlSeconds, serialConsistency = serialConsistency) as T
+        cache.invalidate(cacheKeyOf(updated))
+        return updated
     }
 
     suspend fun updateForce(entity: T, consistency: KandraConsistency? = null) {

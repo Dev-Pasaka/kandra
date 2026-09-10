@@ -262,6 +262,55 @@ class KandraIntegrationTest {
         }
     }
 
+    // ── GH #136 regression: update() discarded the actually-persisted, post-update version ─────
+
+    @Test
+    fun `blocking updateAndGet returns the incremented version, enabling a subsequent optimistic-locked update`() {
+        val repo = db.repository<IntegrationUser>()
+        val user = IntegrationUser(UUID.randomUUID(), "dave@example.com")
+        repo.save(user)
+
+        val loaded = repo.findById(user.id)!!
+        val updated = repo.updateAndGet(loaded, loaded.copy(email = "dave+updated@example.com"))
+
+        // The returned entity carries the real post-update version, not the stale pre-update one.
+        assertNotEquals(loaded.version, updated.version)
+        assertEquals(loaded.version + 1, updated.version)
+
+        // A second optimistic-locked update using the version the caller actually has (the one
+        // updateAndGet() returned) succeeds -- nothing else touched the row.
+        repo.update(updated, updated.copy(email = "dave+again@example.com"))
+
+        // Whereas reusing the stale pre-update version -- all a caller of plain update() would
+        // ever have been able to see -- throws a spurious KandraOptimisticLockException, since the
+        // row's real version has already moved past it.
+        assertThrows(KandraOptimisticLockException::class.java) {
+            repo.update(loaded, loaded.copy(email = "dave+stale@example.com"))
+        }
+    }
+
+    @Test
+    fun `suspend updateAndGet returns the incremented version, enabling a subsequent optimistic-locked update`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationUser>()
+        val user = IntegrationUser(UUID.randomUUID(), "erin@example.com")
+        repo.save(user)
+
+        val loaded = repo.findById(user.id)!!
+        val updated = repo.updateAndGet(loaded, loaded.copy(email = "erin+updated@example.com"))
+
+        assertNotEquals(loaded.version, updated.version)
+        assertEquals(loaded.version + 1, updated.version)
+
+        // Using the returned version for a follow-up optimistic-locked update succeeds.
+        repo.update(updated, updated.copy(email = "erin+again@example.com"))
+
+        // Using the stale pre-update version -- all plain update()'s Unit return would have left
+        // visible -- throws, even though the row was never actually in conflict.
+        assertThrows(KandraOptimisticLockException::class.java) {
+            runBlocking { repo.update(loaded, loaded.copy(email = "erin+stale@example.com")) }
+        }
+    }
+
     @Test
     fun `soft delete keeps the row queryable until TTL expires, marker survives`() = runBlocking {
         val repo = db.suspendRepository<IntegrationWidget>()
