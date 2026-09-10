@@ -95,6 +95,18 @@ class StatementBuilder(
         val resolved = override
             ?: schema.entityClass.findAnnotation<WriteConsistency>()?.level
             ?: consistencyConfig.defaultWrite
+        // GH #140 (audit companion to #107's existsQuery finding): validated *before* any of the
+        // warn-only checks below, and before this value ever reaches the driver -- SERIAL/LOCAL_SERIAL
+        // are rejected by Cassandra/Scylla as a write's regular consistency ("You must use conditional
+        // updates for serializable writes"), regardless of which of the three resolution sources
+        // (per-call override, @WriteConsistency, or consistency { defaultWrite = ... }) produced it.
+        if (!resolved.isValidForWrite) throw KandraQueryException(
+            "Write consistency $resolved is not valid for a write operation on '${schema.tableName}' -- " +
+            "SERIAL/LOCAL_SERIAL are only valid as the serialConsistency parameter of a conditional " +
+            "write (saveIfNotExists()/update()'s IF check), never as a table's regular write " +
+            "consistency; Cassandra/Scylla reject it server-side. Check the per-call consistency " +
+            "override, @WriteConsistency on the entity class, and consistency { defaultWrite = ... }."
+        )
         warnIfStrictModeViolation(schema, resolved)
         // The write side of the pair is what we just resolved; pair it with the currently configured
         // read default, since a per-call read override (if any) isn't visible from here. See ISS-075.
@@ -107,6 +119,17 @@ class StatementBuilder(
         val resolved = override
             ?: schema.entityClass.findAnnotation<ReadConsistency>()?.level
             ?: consistencyConfig.defaultRead
+        // GH #140: same validate-before-warn-or-drive placement as resolveWriteConsistency above --
+        // EACH_QUORUM is write-only; Cassandra/Scylla reject it for reads server-side ("EACH_QUORUM
+        // ConsistencyLevel is only supported for writes"). Without this, defaultRead = EACH_QUORUM (or
+        // an equivalent per-call/@ReadConsistency override) silently breaks every read against a real
+        // cluster with an opaque driver-level exception instead of a clear Kandra one.
+        if (!resolved.isValidForRead) throw KandraQueryException(
+            "Read consistency $resolved is not valid for a read operation on '${schema.tableName}' -- " +
+            "EACH_QUORUM is a write-only consistency level; Cassandra/Scylla reject it for reads " +
+            "server-side. Check the per-call consistency override, @ReadConsistency on the entity " +
+            "class, and consistency { defaultRead = ... }."
+        )
         warnIfStrictModeViolation(schema, resolved)
         warnIfRfConsistencyMismatch(schema, readLevel = resolved, writeLevel = consistencyConfig.defaultWrite)
         return resolved
