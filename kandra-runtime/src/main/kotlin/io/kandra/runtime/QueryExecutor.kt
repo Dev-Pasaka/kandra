@@ -639,10 +639,15 @@ class QueryExecutor(
         val ctorParams = schema.reflection.constructorParameters
         val columnsByProperty = schema.reflection.columnsByProperty
 
-        val args = ctorParams.associateWith { param ->
-            val col = columnsByProperty[param.name]
-            if (col == null) null else codec.decode(row, col)
-        }
+        // columnsByProperty excludes @Transient properties (GH #130) — they have no backing row
+        // column. Such a param is omitted from the map entirely (not set to an explicit null), so
+        // ctor.callBy falls back to the property's Kotlin default value, exactly like every other
+        // consumer of @Transient (DDL generation, BatchEngine's column lists) already assumes a
+        // @Transient property must have.
+        val args = ctorParams.mapNotNull { param ->
+            val col = columnsByProperty[param.name] ?: return@mapNotNull null
+            param to codec.decode(row, col)
+        }.toMap()
 
         return ctor.callBy(args)
     }
