@@ -49,8 +49,21 @@ class KandraRepository<T : Any>(
     }
 
     fun save(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null) {
-        batchEngine.save(schema, entity, ttlSeconds, timestampMicros, consistency)
-        cache.invalidate(cacheKeyOf(entity))
+        saveAndGet(entity, ttlSeconds, timestampMicros, consistency)
+    }
+
+    /**
+     * Same write as [save], but returns the entity actually persisted — including any
+     * `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt`/`@Version` values generated for the write, which
+     * [save] computes internally and then discards. Use this whenever the caller needs those
+     * generated values (e.g. to build an HTTP response) instead of the placeholder ones on the
+     * object it constructed — see GH #132 / ISS-096.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun saveAndGet(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null): T {
+        val saved = batchEngine.saveAndGet(schema, entity, ttlSeconds, timestampMicros, consistency) as T
+        cache.invalidate(cacheKeyOf(saved))
+        return saved
     }
 
     fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean =

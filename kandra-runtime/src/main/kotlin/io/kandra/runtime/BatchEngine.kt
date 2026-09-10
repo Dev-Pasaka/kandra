@@ -352,6 +352,19 @@ class BatchEngine(
     // ── Save ─────────────────────────────────────────────────────────────────
 
     fun save(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null) {
+        saveAndGet(schema, entity, ttlSeconds, timestampMicros, consistency)
+    }
+
+    /**
+     * Same write path as [save], but returns the entity actually persisted — with any
+     * `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt`/`@Version` values [injectTimestamps]/
+     * [injectInitialVersion] generated before the write, instead of discarding that copy the way
+     * [save] does. See GH #132 / ISS-096: callers who relied on `save()`'s `Unit` return and then
+     * reused their original entity (e.g. to build an HTTP response) were silently working with
+     * placeholder values — `UUID(0, 0)`, `Instant.EPOCH` — while the row that actually landed in
+     * Scylla carried the real generated ones.
+     */
+    fun saveAndGet(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null): Any {
         if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot use save(). Use increment()/decrement() instead.")
         validateEntity(entity)
         val stamped = injectTimestamps(schema, entity, isInsert = true)
@@ -364,6 +377,7 @@ class BatchEngine(
         if (debugConfig.logBatches) logger.debug { "Executing LOGGED BATCH with ${batchLookups.size + 1} statements for ${schema.tableName}" }
         executeWithRetry(batch, schema.tableName, "save")
         fireEventual(schema, eventualLookups, stampedWithVersion)
+        return stampedWithVersion
     }
 
     fun saveIfNotExists(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean {
@@ -582,14 +596,25 @@ class BatchEngine(
 
     // ── Statement collection (for KandraBatchScope) ──────────────────────────
 
-    internal fun collectSave(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): List<BatchableStatement<*>> {
+    internal fun collectSave(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): List<BatchableStatement<*>> =
+        collectSaveAndGet(schema, entity, ttlSeconds).first
+
+    /**
+     * Same collection as [collectSave], but also returns the stamped entity (with generated
+     * `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt` values already resolved at collection time, even
+     * though the statements themselves don't execute until the enclosing batch scope commits) —
+     * backs [KandraBatchScope.saveInBatchAndGet]/[KandraBlockingBatchScope.saveInBatchAndGet].
+     * See [saveAndGet]'s doc for the underlying gap this closes.
+     */
+    internal fun collectSaveAndGet(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): Pair<List<BatchableStatement<*>>, Any> {
         if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot be saved in a batch scope.")
         val stamped = injectTimestamps(schema, entity, isInsert = true)
-        return buildList {
+        val statements = buildList {
             add(statementBuilder.insertPrimary(schema, stamped, ttlSeconds))
             schema.lookupTables.filter { it.consistency == LookupConsistency.BATCH }
                 .forEach { add(statementBuilder.insertLookup(schema, it, stamped)) }
         }
+        return statements to stamped
     }
 
     internal fun collectDelete(schema: TableSchema, entity: Any): List<BatchableStatement<*>> {
@@ -613,14 +638,19 @@ class BatchEngine(
      * dispatcher thread on a prepared-statement cache miss. Used only by the suspend `saveInBatch` overload
      * in [KandraBatchScope] — the blocking `batchBlocking { }` entry point keeps calling [collectSave].
      */
-    internal suspend fun collectSaveSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): List<BatchableStatement<*>> {
+    internal suspend fun collectSaveSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): List<BatchableStatement<*>> =
+        collectSaveAndGetSuspend(schema, entity, ttlSeconds).first
+
+    /** Suspend counterpart of [collectSaveAndGet] — see its doc. */
+    internal suspend fun collectSaveAndGetSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): Pair<List<BatchableStatement<*>>, Any> {
         if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot be saved in a batch scope.")
         val stamped = injectTimestamps(schema, entity, isInsert = true)
-        return buildList {
+        val statements = buildList {
             add(statementBuilder.insertPrimarySuspend(schema, stamped, ttlSeconds))
             schema.lookupTables.filter { it.consistency == LookupConsistency.BATCH }
                 .forEach { add(statementBuilder.insertLookupSuspend(schema, it, stamped)) }
         }
+        return statements to stamped
     }
 
     /**
@@ -670,6 +700,11 @@ class BatchEngine(
     // ── Suspend variants ─────────────────────────────────────────────────────
 
     suspend fun saveSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null) {
+        saveAndGetSuspend(schema, entity, ttlSeconds, timestampMicros, consistency)
+    }
+
+    /** Suspend counterpart of [saveAndGet] — see its doc for why this exists (GH #132 / ISS-096). */
+    suspend fun saveAndGetSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null): Any {
         if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot use save(). Use increment()/decrement() instead.")
         validateEntity(entity)
         val stamped = injectTimestamps(schema, entity, isInsert = true)
@@ -683,6 +718,7 @@ class BatchEngine(
         if (debugConfig.logBatches) logger.debug { "Executing LOGGED BATCH with ${batchLookups.size + 1} statements for ${schema.tableName}" }
         executeWithRetrySuspend(batch, schema.tableName, "save")
         fireEventualSuspend(schema, eventualLookups, stampedWithVersion)
+        return stampedWithVersion
     }
 
     suspend fun saveIfNotExistsSuspend(schema: TableSchema, entity: Any, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean {
