@@ -69,6 +69,22 @@ class KandraRepository<T : Any>(
     fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean =
         batchEngine.saveIfNotExists(schema, entity, serialConsistency).also { if (it) cache.invalidate(cacheKeyOf(entity)) }
 
+    /**
+     * Same LWT write as [saveIfNotExists], but returns the entity actually persisted — including
+     * any `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt` values generated for the write, which
+     * [saveIfNotExists] computes internally and then discards behind a bare `Boolean`. Returns
+     * `null` when the row already existed (the same case [saveIfNotExists] reports as `false`) —
+     * use this whenever the caller needs the real generated values on the success path, e.g. to
+     * build an HTTP response, instead of the placeholder ones on the object it constructed. See
+     * GH #138 (same root-cause shape as GH #132 / `saveAndGet()`).
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun saveIfNotExistsAndGet(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T? {
+        val saved = batchEngine.saveIfNotExistsAndGet(schema, entity, serialConsistency) as T?
+        saved?.let { cache.invalidate(cacheKeyOf(it)) }
+        return saved
+    }
+
     fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null) {
         batchEngine.saveAll(schema, entities, useBatch = useBatch, consistency = consistency)
         entities.forEach { cache.invalidate(cacheKeyOf(it)) }
