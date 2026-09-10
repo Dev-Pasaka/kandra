@@ -6,6 +6,7 @@ import com.datastax.oss.driver.api.core.config.DefaultDriverOption
 import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.KandraAuth
 import io.kandra.core.KandraAuthProvider
+import io.kandra.core.KandraConsistency
 import io.kandra.core.KandraCredentials
 import io.kandra.core.KandraEventListener
 import io.kandra.core.SchemaRegistry
@@ -380,6 +381,90 @@ class KandraPluginTest {
             }
         }
         assertTrue(ex.message!!.contains("not a valid CQL identifier"))
+    }
+
+    /**
+     * GH #140 — `defaultRead = EACH_QUORUM` (a write-only CQL consistency level) was previously
+     * accepted with no validation, so every read would go on to fail against the real driver with an
+     * opaque, non-Kandra exception the first time a query actually ran. Install must now fail fast,
+     * before any connection is attempted (`contactPoints` below is never actually reachable/used) --
+     * mirrors the keyspace-identifier tests above.
+     */
+    @Test
+    fun `install throws when consistency defaultRead is EACH_QUORUM`() {
+        val ex = assertThrows(KandraSchemaException::class.java) {
+            testApplication {
+                application {
+                    install(Kandra) {
+                        contactPoints = "localhost:19999"
+                        localDatacenter = "dc1"
+                        keyspace = "coinx"
+                        consistency { defaultRead = KandraConsistency.EACH_QUORUM }
+                    }
+                }
+            }
+        }
+        assertTrue(ex.message!!.contains("EACH_QUORUM"), "Expected message to mention EACH_QUORUM, got: ${ex.message}")
+    }
+
+    /**
+     * GH #140 companion — `defaultWrite = SERIAL`/`LOCAL_SERIAL` is the mirror-image gap: those two
+     * levels are only valid as a conditional write's *serial* consistency, never as a table's regular
+     * write consistency. Must also fail fast at install time.
+     */
+    @Test
+    fun `install throws when consistency defaultWrite is SERIAL or LOCAL_SERIAL`() {
+        for (level in listOf(KandraConsistency.SERIAL, KandraConsistency.LOCAL_SERIAL)) {
+            val ex = assertThrows(KandraSchemaException::class.java) {
+                testApplication {
+                    application {
+                        install(Kandra) {
+                            contactPoints = "localhost:19999"
+                            localDatacenter = "dc1"
+                            keyspace = "coinx"
+                            consistency { defaultWrite = level }
+                        }
+                    }
+                }
+            }
+            assertTrue(ex.message!!.contains("$level"), "Expected message to mention $level, got: ${ex.message}")
+        }
+    }
+
+    /**
+     * GH #140 — a valid, non-default consistency configuration must still install and run queries
+     * normally, proving the new validation doesn't reject legitimate configuration. `SERIAL` as
+     * `defaultRead` (a linearizable read) is valid but unusual — exactly the kind of deliberate
+     * choice this fix must not stand in the way of. (`EACH_QUORUM` as `defaultWrite` is exercised
+     * against a fake session in `ConsistencyLevelValidationTest` instead of here — it requires
+     * `NetworkTopologyStrategy` against a real cluster, which is unrelated to what this test is
+     * proving and would only add topology-setup flakiness.)
+     */
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `install succeeds and queries work with a valid non-default read consistency`() {
+        val cp = KandraTestcontainers.container.contactPoint
+        testApplication {
+            application {
+                install(Kandra) {
+                    contactPoints = "${cp.hostString}:${cp.port}"
+                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    keyspace = freshKeyspaceName()
+                    autoCreateKeyspace = true
+                    schemaMode = SchemaMode.AUTO_CREATE
+                    register(TestItem::class)
+                    auth { provider = KandraAuth.static("", "") }
+                    consistency { defaultRead = KandraConsistency.SERIAL }
+                }
+
+                val repo = kandra.suspendRepository<TestItem>()
+                val item = TestItem(UUID.randomUUID(), "serial-read-item")
+                runBlocking {
+                    repo.save(item)
+                    assertNotNull(repo.findById(item.id))
+                }
+            }
+        }
     }
 
     /**

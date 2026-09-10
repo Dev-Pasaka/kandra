@@ -108,6 +108,27 @@ val Kandra: ApplicationPlugin<KandraConfig> =
                 )
             }
         }
+        // GH #140: EACH_QUORUM is write-only (Cassandra/Scylla reject it server-side for reads) and
+        // SERIAL/LOCAL_SERIAL are only valid as a conditional write's *serial* consistency, never as
+        // a table's regular write consistency -- catch either misconfiguration here, before any
+        // connection is attempted, rather than letting it surface as an opaque driver-level failure
+        // the first time a query actually runs. `resolveReadConsistency`/`resolveWriteConsistency` in
+        // kandra-runtime's StatementBuilder re-validate the fully-resolved value (per-call override /
+        // @ReadConsistency|@WriteConsistency / this default) at query time too, so a bad
+        // per-call override or class annotation is still caught even though it isn't visible here.
+        if (!config.consistency.defaultRead.isValidForRead) throw KandraSchemaException(
+            "Kandra: consistency.defaultRead = ${config.consistency.defaultRead} is not valid for a " +
+            "read operation -- EACH_QUORUM is a write-only consistency level; Cassandra/Scylla reject " +
+            "it for reads server-side. Use one of: ONE, TWO, THREE, QUORUM, ALL, LOCAL_ONE, " +
+            "LOCAL_QUORUM, SERIAL, LOCAL_SERIAL."
+        )
+        if (!config.consistency.defaultWrite.isValidForWrite) throw KandraSchemaException(
+            "Kandra: consistency.defaultWrite = ${config.consistency.defaultWrite} is not valid for a " +
+            "write operation -- SERIAL/LOCAL_SERIAL are only valid as the serialConsistency parameter " +
+            "of a conditional write (saveIfNotExists()/update()'s IF check), never as a table's " +
+            "regular write consistency; Cassandra/Scylla reject it server-side. Use one of: ONE, TWO, " +
+            "THREE, QUORUM, ALL, LOCAL_ONE, LOCAL_QUORUM, EACH_QUORUM."
+        )
 
         val sessionHandle = if (config.autoCreateKeyspace) {
             val bootstrapHandle = buildCqlSession(config, withKeyspace = false)

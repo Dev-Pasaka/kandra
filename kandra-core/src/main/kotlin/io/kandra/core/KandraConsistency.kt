@@ -37,4 +37,33 @@ enum class KandraConsistency {
     SERIAL;
 
     val isSerial: Boolean get() = this == LOCAL_SERIAL || this == SERIAL
+
+    /**
+     * Whether this level is valid as the *regular* (non-serial) consistency of a **read** operation.
+     *
+     * [EACH_QUORUM] is the only level here Cassandra/Scylla reject for reads — it's a write-only,
+     * multi-DC level; the coordinator errors out server-side ("EACH_QUORUM ConsistencyLevel is only
+     * supported for writes") rather than executing the read. Every other level, including
+     * [SERIAL]/[LOCAL_SERIAL] (which perform a linearizable read), is valid here.
+     *
+     * See `resolveReadConsistency` in `kandra-runtime`'s `StatementBuilder` (validated at the point a
+     * read consistency is resolved from a per-call override / `@ReadConsistency` / `defaultRead`) and
+     * `kandra-ktor`'s `Kandra` plugin (validated eagerly for `consistency { defaultRead = ... }` at
+     * install time, before any query runs).
+     */
+    val isValidForRead: Boolean get() = this != EACH_QUORUM
+
+    /**
+     * Whether this level is valid as the *regular* (non-serial) consistency of a **write** operation.
+     *
+     * [SERIAL]/[LOCAL_SERIAL] are the only levels here Cassandra/Scylla reject as a write's regular
+     * consistency — the coordinator errors out server-side ("You must use conditional updates for
+     * serializable writes"). Those two levels are only meaningful as the separate *serial*
+     * consistency parameter of a conditional (`IF`) statement — see the `serialConsistency` parameter
+     * on `saveIfNotExists()`/`update()` — not as a table's regular write consistency.
+     *
+     * See `resolveWriteConsistency` in `kandra-runtime`'s `StatementBuilder` and `kandra-ktor`'s
+     * `Kandra` plugin, mirroring [isValidForRead]'s two enforcement points.
+     */
+    val isValidForWrite: Boolean get() = !isSerial
 }
