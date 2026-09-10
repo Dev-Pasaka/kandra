@@ -843,12 +843,19 @@ class StatementBuilder(
      * from `kandra-kodein`), so `existsQuery` isn't purely internal plumbing even though nothing in
      * this codebase currently calls it -- guarded the same way every other raw-CQL entry point is,
      * rather than relying on it staying unreachable.
+     *
+     * GH #142 (GH #107 follow-up audit): the original version of this guard only matched quote-
+     * breaking splices, so a payload against an unquoted (e.g. numeric/UUID) column -- `"id = 5;
+     * DROP TABLE users; --"` -- never opened or closed a quote and reached the driver undetected.
+     * [SUSPICIOUS_LITERAL_PATTERN] now also matches a statement terminator (`;`) and CQL comment
+     * markers (`--`, `/* */`), closing that gap; see its doc for the exact set matched.
      */
     private fun checkRawInjectionRisk(cql: String, callerName: String) {
         if (!SUSPICIOUS_LITERAL_PATTERN.containsMatchIn(cql)) return
-        val message = "$callerName() CQL appears to contain a string literal spliced directly into the " +
-            "query (independent of any other bound parameters). If any of it came from user input this " +
-            "is a CQL injection risk. Build the WHERE clause from parameterized predicates instead."
+        val message = "$callerName() CQL appears to contain a literal, statement terminator (;), or " +
+            "comment marker (--, /* */) spliced directly into the query (independent of any other " +
+            "bound parameters). If any of it came from user input this is a CQL injection risk. Build " +
+            "the WHERE clause from parameterized predicates instead."
         if (debugConfig.rawQueryStrictMode) {
             throw KandraQueryException(message)
         } else {
