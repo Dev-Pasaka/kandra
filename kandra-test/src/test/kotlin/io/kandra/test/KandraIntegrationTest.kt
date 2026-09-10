@@ -10,6 +10,7 @@ import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.annotations.SecondaryIndex
 import io.kandra.core.annotations.SoftDelete
+import io.kandra.core.annotations.Transient
 import io.kandra.core.annotations.Version
 import io.kandra.core.exception.KandraOptimisticLockException
 import io.kandra.core.exception.KandraQueryException
@@ -143,6 +144,20 @@ data class IntegrationLookupClustered(
 )
 
 /**
+ * Regression coverage for GH #130 — `columnsByProperty` (the map driving full-row decode in
+ * `QueryExecutor.decodeEntity`) included `@Transient` columns, so decode called `codec.decode`
+ * against a row column that DDL/SELECT never created, throwing `IllegalArgumentException` on
+ * every read. `sessionToken` has no backing column at all — it must survive a save/find
+ * round-trip by falling back to its Kotlin default value, not by being read from the row.
+ */
+@ScyllaTable("integration_transient")
+data class IntegrationTransient(
+    @PartitionKey val id: UUID,
+    val name: String,
+    @Transient val sessionToken: String? = "unset"
+)
+
+/**
  * Real ScyllaDB/Cassandra integration tests via Testcontainers — no fakes involved.
  *
  * Exercises paths `FakeKandraSession` structurally can't verify: real CQL parameter binding,
@@ -175,7 +190,8 @@ class KandraIntegrationTest {
         IntegrationCachedClustered::class,
         IntegrationLookupClustered::class,
         IntegrationSoftDeletedLookup::class,
-        IntegrationGeneratedUuidEvent::class
+        IntegrationGeneratedUuidEvent::class,
+        IntegrationTransient::class
     )
 
     @AfterAll
@@ -556,5 +572,32 @@ class KandraIntegrationTest {
         val foundViaLookup = repo.find { IntegrationSoftDeletedLookupTable.slug eq "keep-findable" }
         assertNotNull(foundViaLookup)
         assertTrue(foundViaLookup!!.isDeleted)
+    }
+
+    // ── GH #130 regression: @Transient columns broke every full-row decode ─────────────────────
+
+    @Test
+    fun `an entity with a Transient field round-trips via find without throwing, Transient field at its default`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationTransient>()
+        val entity = IntegrationTransient(UUID.randomUUID(), "widget-with-transient-field")
+        repo.save(entity)
+
+        // Used to throw IllegalArgumentException("session_token is not a column in this row") --
+        // decodeEntity tried to decode a column that DDL/SELECT never created for a @Transient property.
+        val found = repo.find { IntegrationTransientTable.id eq entity.id }
+        assertNotNull(found)
+        assertEquals("widget-with-transient-field", found!!.name)
+        assertEquals("unset", found.sessionToken)
+    }
+
+    @Test
+    fun `an entity with a Transient field round-trips via findById without throwing`() = runBlocking {
+        val repo = db.suspendRepository<IntegrationTransient>()
+        val entity = IntegrationTransient(UUID.randomUUID(), "widget-with-transient-field-2")
+        repo.save(entity)
+
+        val found = repo.findById(entity.id)
+        assertNotNull(found)
+        assertEquals("unset", found!!.sessionToken)
     }
 }

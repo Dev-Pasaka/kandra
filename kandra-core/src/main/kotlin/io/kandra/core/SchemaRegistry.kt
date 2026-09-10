@@ -361,7 +361,13 @@ object SchemaRegistry {
             propertiesByName = klass.memberProperties.associateBy { it.name },
             primaryConstructor = primaryConstructor,
             constructorParameters = primaryConstructor?.parameters ?: emptyList(),
-            columnsByProperty = columnSchemas.associateBy { it.propertyName }
+            // See GH #130: full-row decode (QueryExecutor.decodeEntity) walks constructor
+            // parameters via this map, calling KandraCodec.decode(row, col) for every entry it
+            // finds. A @Transient column has no backing row column (correctly excluded from
+            // SELECT/DDL — see the !it.isTransient filters elsewhere in this file), so it must
+            // not appear here either, or decode blows up with "<column> is not a column in this
+            // row" on every read of an entity with a @Transient property.
+            columnsByProperty = columnSchemas.filter { !it.isTransient }.associateBy { it.propertyName }
         )
     }
 
