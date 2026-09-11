@@ -83,6 +83,10 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
     var lastPreparedCql: String? = null
         private set
 
+    /** The values passed to the most recent `PreparedStatement.bind(...)` call (GH #144 coverage). */
+    var lastBoundValues: List<Any?>? = null
+        private set
+
     private fun nextOutcome(): ExecuteOutcome {
         executeCount.incrementAndGet()
         return if (queue.isNotEmpty()) queue.removeFirst() else ExecuteOutcome.Applied(true)
@@ -121,7 +125,7 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
 
     override fun prepare(query: String): PreparedStatement {
         lastPreparedCql = query
-        return FakeBindablePreparedStatement(query, { lastBoundConsistencyLevel = it }, { lastBoundSerialConsistencyLevel = it })
+        return FakeBindablePreparedStatement(query, { lastBoundConsistencyLevel = it }, { lastBoundSerialConsistencyLevel = it }, { lastBoundValues = it })
     }
 
     override fun prepare(statement: SimpleStatement): PreparedStatement = prepare(statement.query)
@@ -132,7 +136,7 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
     override fun prepareAsync(query: String): CompletionStage<PreparedStatement> {
         lastPreparedCql = query
         return CompletableFuture.completedFuture(
-            FakeBindablePreparedStatement(query, { lastBoundConsistencyLevel = it }, { lastBoundSerialConsistencyLevel = it })
+            FakeBindablePreparedStatement(query, { lastBoundConsistencyLevel = it }, { lastBoundSerialConsistencyLevel = it }, { lastBoundValues = it })
         )
     }
 
@@ -171,9 +175,13 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
 private class FakeBindablePreparedStatement(
     private val query: String,
     private val onSetConsistencyLevel: (ConsistencyLevel) -> Unit = {},
-    private val onSetSerialConsistencyLevel: (ConsistencyLevel) -> Unit = {}
+    private val onSetSerialConsistencyLevel: (ConsistencyLevel) -> Unit = {},
+    private val onBind: (List<Any?>) -> Unit = {}
 ) : PreparedStatement {
-    override fun bind(vararg values: Any?): BoundStatement = fakeBoundStatement(onSetConsistencyLevel, onSetSerialConsistencyLevel)
+    override fun bind(vararg values: Any?): BoundStatement {
+        onBind(values.toList())
+        return fakeBoundStatement(onSetConsistencyLevel, onSetSerialConsistencyLevel)
+    }
     override fun getId(): ByteBuffer = ByteBuffer.wrap(query.toByteArray())
     override fun getResultMetadataId(): ByteBuffer? = null
     override fun getQuery(): String = query
