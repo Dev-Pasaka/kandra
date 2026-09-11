@@ -23,6 +23,7 @@ import io.kandra.runtime.dsl.QueryContext
 import java.util.Base64
 import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
+import kotlin.reflect.KType
 
 private val logger = KotlinLogging.logger {}
 
@@ -452,16 +453,26 @@ class QueryExecutor(
 
             if (inPredicate.values.isEmpty()) return emptyList()
 
-            logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
-
-            val encodedIds = inPredicate.values.filterNotNull()
-            val rs = session.execute(statementBuilder.selectByPartitionKeyIn(schema, encodedIds, consistency))
-            return boundedAll(rs)
+            // GH #146: this branch used to run unconditionally for ANY `In` predicate that passed
+            // the check above, including one on a @SecondaryIndex column -- but
+            // selectByPartitionKeyIn() hardcodes schema.partitionKeys.first() for both the CQL
+            // column name and the encoding type, ignoring which column the predicate was actually
+            // on. An `IN` on a secondary-index column silently queried the WRONG column (the
+            // partition key) with the secondary index's values encoded against the partition key's
+            // type. Only take this shortcut when the predicate is genuinely on the partition key;
+            // a secondary-index IN falls through to the direct-CQL path below, which builds
+            // `<actual column> IN (?, ?, ...)` against the right column, correctly encoded (GH #144).
+            if (isOnPk) {
+                logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
+                val encodedIds = inPredicate.values.filterNotNull()
+                val rs = session.execute(statementBuilder.selectByPartitionKeyIn(schema, encodedIds, consistency))
+                return boundedAll(rs)
+            }
         }
 
         // ── Lookup table predicate ────────────────────────────────────────────
         val lookupPredicate = ctx.predicates.firstOrNull { pred ->
-            schema.lookupTables.any { it.indexColumn.cqlName == predicateColumn(pred) }
+            pred !is KandraPredicate.In && schema.lookupTables.any { it.indexColumn.cqlName == predicateColumn(pred) }
         }
 
         if (lookupPredicate != null) {
@@ -554,15 +565,19 @@ class QueryExecutor(
 
             if (inPredicate.values.isEmpty()) return emptyList()
 
-            logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
-
-            val encodedIds = inPredicate.values.filterNotNull()
-            return boundedSuspendAll(statementBuilder.selectByPartitionKeyInSuspend(schema, encodedIds, consistency))
+            // GH #146 -- see the blocking resolveRows() for the full explanation: only the
+            // genuine-partition-key case takes this shortcut; a secondary-index IN falls through
+            // to the direct-CQL path below (correct column, correct per-value encoding via GH #144).
+            if (isOnPk) {
+                logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
+                val encodedIds = inPredicate.values.filterNotNull()
+                return boundedSuspendAll(statementBuilder.selectByPartitionKeyInSuspend(schema, encodedIds, consistency))
+            }
         }
 
         // ── Lookup table predicate ────────────────────────────────────────────
         val lookupPredicate = ctx.predicates.firstOrNull { pred ->
-            schema.lookupTables.any { it.indexColumn.cqlName == predicateColumn(pred) }
+            pred !is KandraPredicate.In && schema.lookupTables.any { it.indexColumn.cqlName == predicateColumn(pred) }
         }
 
         if (lookupPredicate != null) {
@@ -628,21 +643,50 @@ class QueryExecutor(
         return rows
     }
 
+    /**
+     * Resolves a predicate's column against the schema (partition/clustering/regular columns, plus
+     * lookup-table index columns) so its value can be run through [codec] the same way key columns
+     * already are. Returns `null` if no matching column is found (e.g. a hand-built [KandraPredicate]
+     * against a column name the schema doesn't recognize) -- callers fall back to the raw value
+     * rather than failing the whole query over a resolution miss.
+     */
+    private fun resolveColumnType(cqlName: String): KType? =
+        (schema.partitionKeys + schema.clusteringKeys + schema.columns + schema.lookupTables.map { it.indexColumn })
+            .find { it.cqlName == cqlName }
+            ?.type
+
+    /**
+     * Encodes a single predicate value via [codec] if the column's type is resolvable (GH #144):
+     * without this, any predicate on a column type the driver has no built-in codec for (an enum,
+     * or any type registered through [KandraCodec.registerEncoder]) throws `CodecNotFoundException`
+     * at bind time, since [KandraCodec.encode] -- already used for key-column binding elsewhere in
+     * this class and in `StatementBuilder` -- was never applied to predicate values here.
+     */
+    private fun encodePredicateValue(cqlName: String, value: Any?): Any? {
+        // Null is passed through as-is rather than via codec.encode(): that method's null contract
+        // returns the KandraUnset sentinel for a nullable column (the right behavior for an
+        // INSERT/UPDATE, where "unset" means "leave the column alone"), which has no sensible
+        // meaning bound into a WHERE clause -- a predicate value is either a real value or null,
+        // never "unset".
+        if (value == null) return null
+        return resolveColumnType(cqlName)?.let { type -> codec.encode(value, type) } ?: value
+    }
+
     private fun buildWhere(predicates: List<KandraPredicate>): Pair<String, List<Any?>> {
         val parts = mutableListOf<String>()
         val values = mutableListOf<Any?>()
 
         predicates.forEach { pred ->
             when (pred) {
-                is KandraPredicate.Eq -> { parts += "${pred.column} = ?"; values += pred.value }
-                is KandraPredicate.Gt -> { parts += "${pred.column} > ?"; values += pred.value }
-                is KandraPredicate.Gte -> { parts += "${pred.column} >= ?"; values += pred.value }
-                is KandraPredicate.Lt -> { parts += "${pred.column} < ?"; values += pred.value }
-                is KandraPredicate.Lte -> { parts += "${pred.column} <= ?"; values += pred.value }
+                is KandraPredicate.Eq -> { parts += "${pred.column} = ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Gt -> { parts += "${pred.column} > ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Gte -> { parts += "${pred.column} >= ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Lt -> { parts += "${pred.column} < ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Lte -> { parts += "${pred.column} <= ?"; values += encodePredicateValue(pred.column, pred.value) }
                 is KandraPredicate.In -> {
                     val placeholders = pred.values.joinToString(", ") { "?" }
                     parts += "${pred.column} IN ($placeholders)"
-                    values.addAll(pred.values)
+                    values.addAll(pred.values.map { encodePredicateValue(pred.column, it) })
                 }
             }
         }
