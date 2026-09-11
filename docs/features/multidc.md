@@ -70,3 +70,30 @@ before merge, not just at the next nightly run. `ubuntu-latest` GitHub Actions r
 preinstalled, so no extra runner setup is needed. No manual pre-release step is required for this
 suite specifically; the workflow's `schedule`/`workflow_dispatch` triggers exist for cases (dependency
 bumps, base-image drift) that don't show up as a diff against these paths.
+
+### Known gap: not yet validated against a genuine multi-region topology
+
+Every multi-DC test this project has run so far — `KandraMultiDcTestcontainers` above, and the
+manual test rounds in `docs/test-plan/` — has been an approximation, not a real multi-region
+deployment:
+
+- `KandraMultiDcTestcontainers` runs both "DCs" as containers on **one Docker host**: real
+  `NetworkTopologyStrategy` gossip/replication, but no real inter-region network (latency, jitter,
+  packet loss) and no real geographic separation. `pause`'s own KDoc already flags this for the
+  node-failure simulation specifically (GH #108); the same caveat applies to the topology as a whole.
+- The v2.0 test round (`docs/test-plan:2.0/` in the companion testing project) went further —
+  genuinely separate physical hosts (a home-lab box + a second machine) — but at RF=1-per-DC on one
+  LAN, still without real inter-region latency.
+- The v3.0 round attempted this against ScyllaDB Cloud and found that the available tier there
+  provisions **multi-AZ, not multi-DC** — a cluster reports one DC name (e.g. `AWS_US_EAST_1`) with
+  nodes spread across availability zones (`use1-az1`, `use1-az2`, ...), not separate datacenters.
+  Provisioning two separate ScyllaDB Cloud clusters does **not** produce a multi-DC deployment either
+  — they're independent rings with no shared keyspace/replication, confirmed via disjoint
+  `system.peers` and distinct `cluster_name` UUIDs.
+
+Net effect: `kandra-multidc`'s actual value proposition — cross-DC consistency resolution and
+DC-aware failover under real inter-region conditions — has never been exercised against real
+multi-region infrastructure. Everything tested so far says the *config surface* and *local-topology
+mechanics* work; real cross-region latency, clock skew, and genuine network partition behavior
+remain unvalidated. Closing this gap needs either a ScyllaDB Cloud tier that actually offers
+multi-region clusters, or a more deliberate self-hosted multi-region setup than any tried so far.
