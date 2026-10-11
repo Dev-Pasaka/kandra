@@ -31,9 +31,12 @@ runner.run(CreateUsersTable, AddPhoneColumn)
 ```
 
 - Migrations are applied in version-number order.
-- Checksums (SHA-256, hashing version/name/class name **and the migration class's own compiled
-  bytecode**) are stored in `kandra_migrations` and validated on re-run; mismatch throws
-  `KandraMigrationException`.
+- Checksums (SHA-256, hashing version/name/class name, the migration class's own compiled bytecode,
+  **and every sibling synthetic class file its `up()` body produces** — object expressions,
+  local/anonymous classes, and SAM-conversion lambdas that still compile to a real class file on
+  Kotlin 2.x — GH #102/ISS-089) are stored in `kandra_migrations` and validated on re-run; mismatch
+  throws `KandraMigrationException`. Editing an anonymous class or object expression inside `up()`
+  changes the checksum just like editing `up()`'s own body does.
 - Each migration is claimed via an LWT (`INSERT ... IF NOT EXISTS`) before it runs, so two
   runner instances racing against the same keyspace can't both execute the same migration
   concurrently. If `up()` throws, the claim is released so a retry can pick it up.

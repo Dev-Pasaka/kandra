@@ -12,13 +12,21 @@ users.saveIfNotExists(user)        // LWT IF NOT EXISTS
 users.update(old, new)             // LWT if @Version; otherwise upsert
 users.updateForce(user)            // skip @Version check
 users.delete(user)                 // respects @SoftDelete
+
+// ...AndGet siblings — same write, but return what was actually persisted instead of
+// Unit/Boolean (generated id, @CreatedAt/@UpdatedAt, post-write @Version — all otherwise discarded):
+users.saveAndGet(user)                 // User
+users.saveIfNotExistsAndGet(user)      // User? — null if it already existed
+users.updateAndGet(old, new)           // User — avoids a spurious KandraOptimisticLockException
+                                        // from reusing old's stale version in a follow-up update()
 users.deleteAll(entities)          // warns if > tombstoneWarnThreshold
 users.deleteById(uuid)             // also respects @SoftDelete
 users.deleteBy { UserTable.email eq "x@y.com" }
 
 users.findById(uuid)
 users.find { UserTable.email eq "x@y.com" }
-users.findAll { UserTable.status eq "active" }
+users.findAll { UserTable.status eq "active" }    // unpaged — see row-cap note below
+users.findAll(limit = 100) { UserTable.status eq "active" }
 users.findPage(pageSize = 20, pageToken = token) { ... }
 users.exists { UserTable.email eq "x@y.com" }
 users.findActive()                 // see below — @SoftDelete(markerProperty = "...") only
@@ -78,6 +86,14 @@ behavior requires opt-in (`@Version`, `saveIfNotExists`):
 
 See [ISS-036](../issues/ISS-036-findactive-allow-filtering-scope.md) for the full rationale.
 
+### Row cap on unpaged reads
+
+`findAll`/`find`/`findActive` without an explicit `limit` cap at `maxUnpagedResultRows` (10,000
+rows) — logging a loud WARN and **truncating** to that many rows rather than throwing. There's no
+exception, so a caller that never checks the server log has no way to know the result was
+incomplete. For a result set that might exceed this, use `findPage()`/`findPageSuspend()` instead of
+relying on an unbounded `findAll`.
+
 ## Batch scope
 
 Collect multiple saves and deletes into a single LOGGED batch, using `saveInBatch`/`deleteInBatch`
@@ -107,7 +123,13 @@ val rows = repo.rawQuery(
 )
 ```
 
-Calling `raw(cql)` with no bind parameters and a CQL string containing literals logs a `WARN`.
+`raw(cql)` logs a `WARN` whenever `cql` looks like it has a value or extra syntax spliced directly
+into it — a single-quoted string literal, a `;` statement terminator, or a `--`/`/* */` comment
+marker — **regardless of whether other `?` parameters are also bound** in the same string (GH
+#32/#142: one legitimately bound placeholder elsewhere doesn't make an embedded literal/terminator/
+comment any safer). It's a heuristic, not a parser — it can miss a punctuation-free payload and can
+false-positive on a legitimately embedded literal. Set `debug { rawQueryStrictMode = true }` to make
+it throw `KandraQueryException` instead of only warning, so `raw()`/`rawQuery()` fail closed.
 
 ## Consistency overrides
 

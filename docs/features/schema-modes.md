@@ -3,9 +3,21 @@
 | Mode | Behaviour |
 |---|---|
 | `SchemaMode.AUTO_CREATE` | `CREATE TABLE IF NOT EXISTS` on startup |
-| `SchemaMode.AUTO_MIGRATE` | `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD` for new columns; warns on unmapped Scylla columns |
+| `SchemaMode.AUTO_MIGRATE` | `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD` for new columns; warns on unmapped Scylla columns; refuses (throws) if a "new" column would be a partition/clustering key — see below |
 | `SchemaMode.VALIDATE` | Verifies every entity column exists in Scylla; throws on mismatch |
 | `SchemaMode.NONE` | No DDL; manage schema externally |
+
+## `AUTO_MIGRATE` refuses to add a key column (GH #92 / ISS-079)
+
+CQL has no way to `ALTER TABLE ADD` a column into an existing primary key. If `AUTO_MIGRATE` finds an
+entity column missing from the live table (a new `@ClusteringKey` added for versioning, say) and that
+column is a `@PartitionKey`/`@ClusteringKey` on the entity, it does **not** silently run
+`ALTER TABLE ADD` — doing so would create the column as a plain column while Kandra keeps treating it
+as part of row identity, collapsing distinct logical rows onto the same physical row and silently
+overwriting each other's other columns. Instead it throws `KandraSchemaException` at startup,
+explaining that this requires a manual migration (e.g. via `kandra-migrate`: create a new table with
+the desired key and backfill, or recreate the table if the data can be discarded). Plain non-key
+columns are unaffected — those still get a normal `ALTER TABLE ADD`.
 
 ## Concurrent-instance coordination (GH #79 / ISS-071)
 
