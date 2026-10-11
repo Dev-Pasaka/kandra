@@ -679,6 +679,30 @@ class StatementBuilder(
     fun deleteByPartitionKeys(schema: TableSchema, vararg keyValues: Any): BoundStatement =
         deleteById(schema, *keyValues)
 
+    /**
+     * Coerces the caller-supplied collection to the JVM collection type the driver's codec expects
+     * for the column's actual CQL collection type (GH #145).
+     *
+     * [io.kandra.runtime.repository.KandraRepository.append]/[remove] (and their suspend
+     * counterparts) accept `values: Collection<V>` -- any `Collection`, including a plain `List`.
+     * But the four `*Collection(Suspend)` functions below bound that value as-is: a `Set<T>`-typed
+     * column needs a `java.util.Set` for the driver to resolve a codec at all, and passing the
+     * natural `listOf(x)` for a single-element update failed with
+     * `CodecNotFoundException: [Set(TEXT, not frozen) <-> java.util.List<java.lang.String>]` --
+     * 100% reproducible, not a flaky/environment-specific failure (confirmed live against ScyllaDB
+     * Cloud). Non-collection-typed columns (shouldn't reach here, but pass through unchanged) and
+     * `Map` columns (append/remove aren't used for maps -- see `put`/`increment`-style methods
+     * instead) are left as-is.
+     */
+    private fun coerceToColumnCollectionType(values: Any, columnType: kotlin.reflect.KType): Any {
+        val collection = values as? Collection<*> ?: return values
+        return when (columnType.classifier) {
+            Set::class -> if (collection is Set<*>) collection else LinkedHashSet(collection)
+            List::class -> if (collection is List<*>) collection else collection.toList()
+            else -> values
+        }
+    }
+
     fun appendToCollection(
         schema: TableSchema,
         keyValues: List<Any>,
@@ -696,7 +720,7 @@ class StatementBuilder(
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
         }
-        return prepared.bind(values, *encodedKeys.toTypedArray())
+        return prepared.bind(coerceToColumnCollectionType(values, col.type), *encodedKeys.toTypedArray())
             .setIdempotent(false)
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
@@ -719,7 +743,7 @@ class StatementBuilder(
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
         }
-        return prepared.bind(values, *encodedKeys.toTypedArray())
+        return prepared.bind(coerceToColumnCollectionType(values, col.type), *encodedKeys.toTypedArray())
             .setIdempotent(false)
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
@@ -741,7 +765,7 @@ class StatementBuilder(
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
         }
-        return prepared.bind(values, *encodedKeys.toTypedArray())
+        return prepared.bind(coerceToColumnCollectionType(values, col.type), *encodedKeys.toTypedArray())
             .setIdempotent(false)
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }
@@ -764,7 +788,7 @@ class StatementBuilder(
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
         }
-        return prepared.bind(values, *encodedKeys.toTypedArray())
+        return prepared.bind(coerceToColumnCollectionType(values, col.type), *encodedKeys.toTypedArray())
             .setIdempotent(false)
             .setConsistencyLevel(resolveWriteConsistency(schema, consistency).toDriverLevel())
     }

@@ -83,7 +83,7 @@ class ScriptedCqlSession(outcomes: List<ExecuteOutcome> = emptyList()) : CqlSess
     var lastPreparedCql: String? = null
         private set
 
-    /** The values passed to the most recent `PreparedStatement.bind(...)` call (GH #144 coverage). */
+    /** The values passed to the most recent `PreparedStatement.bind(...)` call (GH #144/#145 coverage). */
     var lastBoundValues: List<Any?>? = null
         private set
 
