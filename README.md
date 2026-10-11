@@ -709,6 +709,11 @@ Logs a WARN whenever a query resolves to `LOCAL_ONE`/`ONE` **and** the deploymen
 observability — never changes query behavior. See [`docs/features/multidc.md`](docs/features/multidc.md)
 and [ISS-037](docs/issues/ISS-037-consistency-strict-mode.md).
 
+> **The multi-DC feature is not yet fully tested against a genuine multi-region topology.**
+> Every round so far (Testcontainers, self-hosted, ScyllaDB Cloud) has been an approximation —
+> see [multidc.md's "Known gap" section](docs/features/multidc.md#known-gap-not-yet-validated-against-a-genuine-multi-region-topology)
+> for exactly what has and hasn't been validated.
+
 **Do not begin experimental testing against a real multi-cluster DC topology yet.** A follow-up
 critical audit done immediately after the 2026-09-08 review's fixes landed
 ([`docs/reviews/2026-09-09-post-fix-critical-audit.md`](docs/reviews/2026-09-09-post-fix-critical-audit.md))
