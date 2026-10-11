@@ -29,7 +29,7 @@ First-class support for denormalized lookup tables, composite partition keys, TT
 | `kandra-koin` | Koin DI auto-binding |
 | `kandra-codegen` | KSP processor — generates type-safe `*Table` objects |
 | `kandra-test` | `FakeKandraSession` + Testcontainers integration helpers |
-| `kandra-multidc` | Multi-datacenter utilities and documentation |
+| `kandra-multidc` | Multi-datacenter utilities and documentation — **experimental: not yet validated against a real multi-region cluster** (see [Multi-Datacenter](#multi-datacenter-030) below) |
 | `kandra-migrate` | Versioned, checksum-validated schema migration runner |
 | `kandra-jakarta` | Jakarta Bean Validation adapter (`JakartaKandraValidator`) |
 | `kandra-bom` | Bill of Materials for version alignment |
@@ -181,6 +181,7 @@ fun Application.configureDatabase() {
         debug {
             logQueries = false        // CQL templates at DEBUG (no bound values)
             logSlowQueriesMs = 500    // WARN if query exceeds this threshold
+            rawQueryStrictMode = false  // true = raw()/rawQuery()'s injection guard throws instead of warning
         }
 
         eventListener = object : KandraEventListener {
@@ -213,11 +214,12 @@ fun Route.userRoutes() {
 
     post("/users") {
         val user = call.receive<User>()
-        userRepo.save(user)
-        // ↑ @CreatedAt and @UpdatedAt auto-set to Instant.now()
+        val saved = userRepo.saveAndGet(user)
+        // ↑ @CreatedAt and @UpdatedAt auto-set to Instant.now() — saveAndGet() returns the entity
+        //   with those generated values populated; save() (Unit-returning) discards them
         // ↑ writes users (primary) + users_by_email (BATCH) atomically
         // ↑ users_by_phone fires asynchronously (EVENTUAL)
-        call.respond(HttpStatusCode.Created)
+        call.respond(HttpStatusCode.Created, saved)
     }
 
     post("/users/register") {
@@ -363,6 +365,9 @@ install(Kandra) {
 ```kotlin
 val inserted = userRepo.saveIfNotExists(user)
 if (!inserted) throw ConflictException("Email already registered")
+
+// Need the row as actually persisted (e.g. its generated @Version) instead of a Boolean?
+val persisted: User? = userRepo.saveIfNotExistsAndGet(user)  // null if it already existed
 ```
 
 Generates `INSERT ... IF NOT EXISTS`. Lookup table writes only happen when `[applied] == true`. Cannot be batched with other statements (ScyllaDB constraint).
@@ -415,6 +420,12 @@ val flagged = userRepo.findAll {
     UserTable.status eq AccountStatus.FLAGGED
 }
 ```
+
+> **`findAll`/`find`/`findActive` without `limit` cap at 10,000 rows — silently.** Any unpaged query
+> that returns more than `maxUnpagedResultRows` (10,000) rows logs a WARN and **truncates** the result
+> to that many rows rather than throwing — there is no exception, just a server log line. Don't rely on
+> an unbounded `findAll { ... }` to return a genuinely complete result set for a large table; use
+> `findPage()`/`findPageSuspend()` (see [Pagination](#pagination) above) instead.
 
 ---
 
@@ -690,7 +701,16 @@ repo.findById(id, consistency = KandraConsistency.QUORUM)
 
 Resolution order: **per-call override → class annotation → `ConsistencyConfig` default**
 
-**Strict Mode (0.4.7)** — opt-in warning for a common multi-DC footgun: `LOCAL_ONE`/`ONE` reads/writes
+> **Not every level in the table above is valid for every operation.** `EACH_QUORUM` is write-only —
+> using it as a read consistency (`defaultRead`, `@ReadConsistency`, or a per-call override on a read)
+> throws `KandraQueryException` (Cassandra/Scylla reject it server-side for reads). `SERIAL`/
+> `LOCAL_SERIAL` are the opposite: they're only valid as the separate `serialConsistency` parameter of
+> a conditional write (`saveIfNotExists()`/`update()`'s `IF` check) — using either as a regular
+> `defaultWrite`/`@WriteConsistency`/per-call write consistency throws the same exception. Both checks
+> run before the value ever reaches the driver, so the error is always a clear Kandra message, not an
+> opaque driver one (GH #140/#141).
+
+**Strict Mode (GH #5)** — opt-in warning for a common multi-DC footgun: `LOCAL_ONE`/`ONE` reads/writes
 hit a single node's local view, which may not yet have the latest write from another DC.
 
 ```kotlin
@@ -883,9 +903,14 @@ balanceRepo.update(loaded, loaded.copy(amountUsd = newAmount))
 // ↑ UPDATE ... IF version = ? — throws KandraOptimisticLockException on conflict
 
 balanceRepo.updateForce(loaded.copy(amountUsd = newAmount))  // bypasses the version check entirely
+
+// Need the row as actually persisted (post-update @Version/@UpdatedAt) instead of nothing back?
+val updated: Balance = balanceRepo.updateAndGet(loaded, loaded.copy(amountUsd = newAmount))
 ```
 
-`@Version` also accepts `Instant` fields. `save()` always sets the initial version; only `update()` enforces the LWT check.
+`@Version` also accepts `Instant` fields. `save()` always sets the initial version; only `update()` enforces the LWT check. `save()`/`saveIfNotExists()`/`update()` all have an `...AndGet()` sibling
+(`saveAndGet`, `saveIfNotExistsAndGet`, `updateAndGet`) that returns the entity actually persisted —
+including generated/incremented values the plain version computes and discards — instead of `Unit`/`Boolean`.
 
 > **No automatic retry on transient errors.** Every other write path retries on `WriteTimeoutException`/
 > `ReadTimeoutException`/`NoNodeAvailableException` per `RetryConfig`; `update()`/`updateSuspend()` on a
@@ -893,7 +918,9 @@ balanceRepo.updateForce(loaded.copy(amountUsd = newAmount))  // bypasses the ver
 > error the write may have already been applied server-side, and retrying the identical conditional
 > statement would then see `[applied] = false` and raise a **spurious** `KandraOptimisticLockException`.
 > If you want retry-on-timeout semantics for a versioned update, catch the transient exception yourself,
-> re-fetch the entity, and reissue `update()` with the freshly-read `old` — see
+> re-fetch the entity, and reissue `update()` with the freshly-read `old` — prefer `updateAndGet()` for
+> the retry itself, since its returned entity already carries the fresh version a follow-up `update()`
+> needs, with no extra `findById()` round-trip. See
 > [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for the full recipe and [ISS-032](docs/issues/ISS-032-versioned-update-spurious-optimistic-lock.md).
 
 ---
@@ -947,6 +974,25 @@ walletRepo.saveAll(largeListOfWallets)
 // ↑ auto-chunked into multiple LOGGED BATCHes if batchAutoChunk = true
 ```
 
+**Backpressure:** opt-in client-side admission control, off by default:
+
+```kotlin
+install(Kandra) {
+    throttle {
+        enabled = true
+        maxConcurrentRequests = 10_000   // requests the driver will have in flight at once
+        maxQueueSize = 10_000            // additional requests allowed to queue past that
+    }
+}
+```
+
+Once `enabled`, a request beyond `maxConcurrentRequests + maxQueueSize` is rejected immediately
+instead of queuing unbounded — surfaced as `KandraThrottledException`, not the raw driver
+`RequestThrottlingException`. Never retried regardless of `RetryConfig.retryOn`: retrying an
+already-throttled request immediately just adds another request on top of an overloaded throttler.
+Enabling this alongside `speculativeExecution` means each speculative retry also counts toward
+`maxConcurrentRequests` — size both together, or go conservative on one of them (GH #81/#103).
+
 ---
 
 ## Sensitive Field Masking (0.4.2)
@@ -993,6 +1039,11 @@ install(Kandra) {
 ```
 
 Safer than `AUTO_CREATE` for evolving schemas in place — it never drops or renames columns, only adds.
+**One exception: it refuses to add a missing `@PartitionKey`/`@ClusteringKey` column.** CQL has no way
+to `ALTER TABLE ADD` a column into an existing primary key — doing it anyway would create it as a
+plain column while Kandra keeps treating it as part of row identity, silently collapsing distinct
+logical rows onto the same physical row. `AUTO_MIGRATE` throws `KandraSchemaException` at startup
+instead; use `kandra-migrate` for that kind of key-shape change (new table + backfill) (GH #92).
 
 ---
 
@@ -1056,12 +1107,17 @@ On `ApplicationStopping`, Kandra sets `KandraRuntime.isShuttingDown = true` and 
 
 ```kotlin
 userRepo.raw("SELECT * FROM users WHERE email = '$untrustedInput'")
-// ↑ WARN logged: raw CQL with string literals and no bound parameters
+// ↑ WARN logged: raw CQL looks like it has a literal, a `;` statement terminator, or a `--`/`/* */`
+//   comment marker spliced directly into it — regardless of whether any `?` is also bound elsewhere
 
 val query = KandraRawQuery.cql("SELECT * FROM users WHERE email = ?").bind(untrustedInput).build()
 userRepo.rawQuery(query)
 // ↑ safe — always parameterised
 ```
+
+This is a heuristic, not a CQL parser — it can miss a punctuation-free payload and can false-positive
+on a legitimately embedded literal. By default it only warns; set `debug { rawQueryStrictMode = true }`
+to make it throw `KandraQueryException` instead, so `raw()`/`rawQuery()` fail closed (GH #32/#142).
 
 ---
 

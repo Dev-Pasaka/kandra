@@ -373,6 +373,7 @@ data class Product(
 | `save(product)` | Sets `version = 1L` automatically |
 | `update(old, new)` | Emits `UPDATE … SET … WHERE id = ? IF version = ?`; throws `KandraOptimisticLockException` if another writer changed the version first |
 | `updateForce(product)` | Skips the version check entirely |
+| `updateAndGet(old, new)` | Same write as `update`, but returns the entity actually persisted — including the post-update `version` — instead of discarding it (GH #136) |
 
 ```kotlin
 try {
@@ -394,11 +395,14 @@ try {
 > when actually "your own prior attempt already succeeded." Only the caller can tell those two
 > situations apart. If you want retry-on-timeout semantics for a versioned update, catch the transient
 > exception yourself, re-fetch the entity (to learn its true current version), and reissue `update()`
-> with that freshly-read `old` — do not retry the same `(old, new)` pair blindly:
+> with that freshly-read `old` — do not retry the same `(old, new)` pair blindly. Prefer
+> `updateAndGet()` for the *original* call too: on success it hands you the post-update entity (with
+> its new `version` already populated) with no extra round-trip, so you only need the `findById()`
+> fallback on the exception path shown here:
 >
 > ```kotlin
 > try {
->     repo.update(old, new)
+>     repo.updateAndGet(old, new)
 > } catch (e: WriteTimeoutException) {
 >     val current = repo.findById(old.id)!!
 >     repo.update(current, new.copy(version = current.version))
@@ -646,6 +650,14 @@ install(Kandra) {
 
 Available levels: `ANY`, `ONE`, `TWO`, `THREE`, `QUORUM`, `ALL`, `LOCAL_QUORUM`, `EACH_QUORUM`, `LOCAL_ONE`, `LOCAL_SERIAL`, `SERIAL`.
 
+> **Not all 11 are valid as `defaultRead`/`defaultWrite` (or `@ReadConsistency`/`@WriteConsistency`,
+> or a per-call override).** `EACH_QUORUM` is write-only — using it to resolve a *read* consistency
+> throws `KandraQueryException` (Cassandra/Scylla reject it server-side for reads). `SERIAL`/
+> `LOCAL_SERIAL` are the reverse: valid only as the separate `serialConsistency` parameter of a
+> conditional write (`saveIfNotExists()`/`update()`'s `IF` check) — using either to resolve a
+> *regular write* consistency throws the same exception. Both are validated before the value ever
+> reaches the driver, regardless of which of the three resolution sources produced it (GH #140/#141).
+
 > **Read-your-writes above RF 3:** the defaults (`LOCAL_ONE` read / `LOCAL_QUORUM` write) only
 > guarantee read-your-writes when `R + W ≥ RF`, which holds for `RF ≤ 3` but not higher. If your
 > keyspace's replication factor is greater than 3 (common in larger multi-DC deployments), raise
@@ -717,12 +729,18 @@ path is never retried by this policy at all, regardless of configuration — see
 ```kotlin
 install(Kandra) {
     debug {
-        logQueries       = true    // logs every CQL statement at DEBUG level
-        logBatches       = true    // logs batch statement counts
-        logSlowQueriesMs = 500     // logs WARN for queries > 500ms
+        logQueries        = true    // logs every CQL statement at DEBUG level
+        logBatches        = true    // logs batch statement counts
+        logSlowQueriesMs  = 500     // logs WARN for queries > 500ms
+        rawQueryStrictMode = false  // true = raw()/rawQuery()'s injection guard throws instead of warning
     }
 }
 ```
+
+`rawQueryStrictMode` (default `false`) affects `QueryExecutor.raw()`/`rawSuspend()`/`rawQuery()`/
+`rawQuerySuspend()`'s injection-risk heuristic (see [Raw Queries](#raw-queries)) — set it to `true` to
+make that heuristic throw `KandraQueryException` instead of only logging a WARN, so a raw query that
+looks like it has a literal, `;`, or comment marker spliced into it fails closed.
 
 ---
 
@@ -910,6 +928,11 @@ repo.saveWithNulls(user)                                  // write actual NULL (
 repo.update(oldUser, newUser)                             // respects @Version if present
 repo.updateForce(user)                                    // skip @Version check
 repo.delete(user)                                         // respects @SoftDelete if present
+
+// ── ...AndGet: same write, but returns what was actually persisted ──
+val saved: User = repo.saveAndGet(user)                   // save()'s generated id/@CreatedAt/@UpdatedAt, returned
+val inserted: User? = repo.saveIfNotExistsAndGet(user)    // null if it already existed
+val updated: User = repo.updateAndGet(oldUser, newUser)   // post-update @Version/@UpdatedAt, returned
 repo.deleteAll(listOf(u1, u2, u3))                       // warns if > tombstoneWarnThreshold
 repo.deleteById(uuid)
 repo.deleteBy { UserTable.email eq "x@example.com" }
@@ -927,6 +950,13 @@ val exists: Boolean = repo.exists { UserTable.email eq "x@example.com" }
 the root [`README.md`](../README.md#type-safe-queries-kandra-codegen)'s "Type-Safe Queries" section)
 — there is no `where { }` wrapper or raw string column names; the comparison itself
 (`eq`/`gt`/`gte`/`lt`/`lte`/`isIn`) registers the predicate.
+
+> **`findAll`/`find`/`findActive` without an explicit `limit` cap at 10,000 rows — silently.** Any
+> unpaged query returning more than `maxUnpagedResultRows` (10,000) rows logs a WARN and **truncates**
+> to that many rows instead of throwing — there is no exception, so a caller that doesn't check the
+> server log for the WARN has no way to know the result is incomplete. For a result set that might
+> exceed this, use `findPage()`/`findPageSuspend()` (see [Pagination](#pagination)) instead of relying
+> on an unbounded `findAll`.
 
 ---
 
@@ -1059,12 +1089,21 @@ val users = rows.map { row ->
 }
 ```
 
-The raw shorthand (no builder) is available but logs a `WARN` when called without parameters and the CQL string contains literals — a reminder to check for injection risk:
+The raw shorthand (no builder) is available but logs a `WARN` whenever the CQL string looks like it
+has a value or extra syntax spliced directly into it — a single-quoted string literal, a `;`
+statement terminator, or a `--`/`/* */` comment marker — **regardless of whether any `?` parameters
+are also bound** elsewhere in the same string (GH #32/#142: one legitimately bound placeholder
+doesn't make an embedded literal/terminator/comment any safer). It's a heuristic, not a CQL parser,
+so it can miss a punctuation-free payload and can false-positive on a legitimately embedded literal:
 
 ```kotlin
 val rows = repo.raw("SELECT * FROM users LIMIT 10")   // WARN logged
-val rows = repo.raw("SELECT * FROM users WHERE id = ?", uuid)  // OK
+val rows = repo.raw("SELECT * FROM users WHERE id = ?", uuid)  // OK — no literal/`;`/comment in the string
+val rows = repo.raw("SELECT * FROM users WHERE id = 5; DROP TABLE users; --")  // WARN logged — the `;`/comment alone trigger it
 ```
+
+Set `debug { rawQueryStrictMode = true }` to make this throw `KandraQueryException` instead of only
+warning, so `raw()`/`rawQuery()` fail closed rather than just logging.
 
 ---
 
@@ -1394,6 +1433,16 @@ GRANT ALTER  ON KEYSPACE myapp TO service_role;
 
 `kandra-multidc` configures DC-aware load balancing and failover for multi-region deployments.
 
+> **Experimental: not yet validated against a genuine multi-region topology.** Every test round run
+> so far — Testcontainers (both "DCs" as containers on one Docker host), a two-physical-host self-hosted
+> round, and an attempt against ScyllaDB Cloud (whose available tier turned out to provision multi-AZ,
+> not multi-DC) — has been an approximation, without real inter-region latency, jitter, or geographic
+> separation. The config surface and local-topology mechanics below are exercised by real tests; the
+> actual value proposition (cross-DC consistency resolution and DC-aware failover under real
+> inter-region network conditions) has not been. See
+> [`docs/features/multidc.md`'s "Known gap"](features/multidc.md#known-gap-not-yet-validated-against-a-genuine-multi-region-topology)
+> section for the full detail before relying on this in a real multi-region production deployment.
+
 ```kotlin
 install(Kandra) {
     localDatacenter = "us-east-1"
@@ -1464,8 +1513,9 @@ install(Kandra) {
 |---|---|
 | `KandraOptimisticLockException` | `update()` / `updateSuspend()` on a `@Version` entity when another writer changed the version first |
 | `KandraValidationException` | Entity fails a registered `KandraValidator` — contains a list of `KandraValidationError` |
-| `KandraSchemaException` | Schema validation fails at startup (`VALIDATE` mode) or an unsupported type is used |
-| `KandraQueryException` | Query rejected (shutting down, null partition key, counter table misuse) or all retries exhausted |
+| `KandraSchemaException` | Schema validation fails at startup (`VALIDATE` mode), an unsupported type is used, or `AUTO_MIGRATE` would need to add a missing partition/clustering key column |
+| `KandraQueryException` | Query rejected (shutting down, null partition key, counter table misuse, an invalid consistency level for the operation — see [Consistency Levels](#consistency-levels) — or, with `rawQueryStrictMode` enabled, a raw query that fails the injection heuristic) or all retries exhausted |
+| `KandraThrottledException` | `throttle { enabled = true }`'s client-side admission control rejects a request once `maxConcurrentRequests`/`maxQueueSize` is exceeded — wraps the driver's `RequestThrottlingException`, never retried |
 | `KandraAuthException` | Connecting role is missing required permissions and `validatePermissions = true` |
 | `KandraMigrationException` | Checksum mismatch on a previously-applied migration |
 
