@@ -6,7 +6,7 @@ Koin/Kodein qualifiers, one repository singleton per entity (not built per-reque
 config (auth, retry, consistency, health, graceful shutdown) wired once at startup.
 
 Every signature below is verified against current source (`kandra-core`/`kandra-runtime`/`kandra-ktor`
-as of 0.4.7-in-progress) — if something here looks off after a future change, that's drift to fix, not
+as of 0.4.7) — if something here looks off after a future change, that's drift to fix, not
 intentional simplification.
 
 ## 1. Define your entities

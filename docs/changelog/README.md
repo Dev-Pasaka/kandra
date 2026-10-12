@@ -4,6 +4,7 @@ All notable changes to Kandra, one file per version — newest first.
 
 | Version | Highlights |
 |---|---|
+| [0.4.7](0.4.7.md) | Consolidates 66 PRs (GH #5–#151) merged with no version bump since 0.4.6: three adversarial review rounds, `saveAndGet`/`saveIfNotExistsAndGet`/`updateAndGet`, `KandraThrottledException`/`throttle { }`, consistency-level validation, and the multi-DC "not yet validated against a genuine multi-region topology" disclosure |
 | [0.4.6](0.4.6.md) | `@GeneratedUuid` — UUIDv7/v4 auto-populated key columns, fixing a silent same-millisecond clustering-key collision risk |
 | [0.4.5](0.4.5.md) | **Breaking**: query DSL drops the `+` predicate-registration operator, fixing a silent-predicate-drop footgun |
 | [0.4.4](0.4.4.md) | Fixes 3 regressions/gaps surfaced while re-verifying 0.4.3's fixes end-to-end: cache-invalidation key mismatch, `@LookupIndex` + clustering key, soft-delete removing lookup rows |
