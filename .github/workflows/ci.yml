@@ -92,7 +92,7 @@ jobs:
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.KANDRA_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/dokka/htmlMultiModule
           destination_dir: ${{ github.ref_name }}
 
@@ -117,6 +117,7 @@ jobs:
       - name: Deploy root redirect to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.KANDRA_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./redirect
           keep_files: true
+          cname: kandraorm.com
