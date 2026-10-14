@@ -42,7 +42,10 @@ data class IntegrationUser(
 @SoftDelete(ttlSeconds = 2, markerProperty = "isDeleted")
 data class IntegrationWidget(
     @PartitionKey val id: UUID,
-    val name: String,
+    // Constructor default, not a bare non-nullable String -- GH #153/ISS-098: every non-key,
+    // non-marker column on a @SoftDelete entity must be nullable or have a default, since it reads
+    // back as NULL once ttlSeconds expires.
+    val name: String = "",
     val isDeleted: Boolean = false
 )
 
@@ -54,7 +57,8 @@ data class IntegrationWidget(
 @SoftDelete(ttlSeconds = 2, markerProperty = "isDeleted")
 data class IntegrationIndexedWidget(
     @PartitionKey val id: UUID,
-    val name: String,
+    // See IntegrationWidget's identical comment above (GH #153/ISS-098).
+    val name: String = "",
     @SecondaryIndex val isDeleted: Boolean = false
 )
 
@@ -67,7 +71,10 @@ data class IntegrationIndexedWidget(
 @SoftDelete(ttlSeconds = 60, markerProperty = "isDeleted")
 data class IntegrationSoftDeletedLookup(
     @PartitionKey val id: UUID,
-    @LookupIndex(tableSuffix = "by_slug") val slug: String,
+    // Constructor default, not a bare non-nullable String -- GH #153/ISS-098 (see
+    // IntegrationWidget's comment above). A default rather than nullable here specifically to
+    // avoid any complication from a nullable @LookupIndex key.
+    @LookupIndex(tableSuffix = "by_slug") val slug: String = "",
     val isDeleted: Boolean = false
 )
 
