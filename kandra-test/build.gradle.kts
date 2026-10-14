@@ -10,8 +10,11 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
 }
 
 dependencies {
-    implementation(project(":kandra-core"))
-    implementation(project(":kandra-runtime"))
+    // KandraRuntimeHandle/KandraTestUtils/FakeKandraSession's public surface directly returns
+    // kandra-core/kandra-runtime types (TableSchema, repositories, CqlSession) -- api, not
+    // implementation (GH #152).
+    api(project(":kandra-core"))
+    api(project(":kandra-runtime"))
     implementation(libs.datastax.driver)
     implementation(libs.kotlin.reflect)
     implementation(libs.coroutines.core)

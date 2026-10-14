@@ -10,9 +10,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
 }
 
 dependencies {
-    implementation(project(":kandra-core"))
-    implementation(project(":kandra-runtime"))
-    implementation(project(":kandra-ktor"))
+    // Bound repositories are KandraRepository<T>/KandraSuspendRepository<T> (kandra-runtime) over
+    // @ScyllaTable entities (kandra-core), and kandraKoin() itself is a kandra-ktor Application
+    // extension -- api, not implementation, so a consumer depending on kandra-koin alone can
+    // compile against what it actually hands back (GH #152).
+    api(project(":kandra-core"))
+    api(project(":kandra-runtime"))
+    api(project(":kandra-ktor"))
     implementation(libs.datastax.driver)
     implementation(libs.ktor.server.core)
     implementation(libs.coroutines.core)

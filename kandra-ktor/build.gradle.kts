@@ -6,10 +6,14 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
 }
 
 dependencies {
-    implementation(project(":kandra-core"))
-    implementation(project(":kandra-runtime"))
+    // kandra-core/kandra-runtime types (annotations, KandraAuth, repositories) and Ktor's own
+    // ApplicationPlugin/Application types all appear in this module's public API (install(Kandra),
+    // Application.kandra) -- api, not implementation, so a consumer depending on kandra-ktor alone
+    // can compile against them without adding kandra-core/kandra-runtime itself (GH #152).
+    api(project(":kandra-core"))
+    api(project(":kandra-runtime"))
+    api(libs.ktor.server.core)
     implementation(libs.datastax.driver)
-    implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.host.common)
     implementation(libs.coroutines.core)
     implementation(libs.kotlin.logging)
