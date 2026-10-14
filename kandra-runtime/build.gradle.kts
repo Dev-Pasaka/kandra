@@ -6,7 +6,10 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
 }
 
 dependencies {
-    implementation(project(":kandra-core"))
+    // kandra-core annotations/types appear directly in this module's own public API
+    // (TableSchema, repositories' constructor params, etc.) -- api, not implementation,
+    // so a consumer depending on kandra-runtime alone can compile against them (GH #152).
+    api(project(":kandra-core"))
     implementation(libs.datastax.driver)
     implementation(libs.kotlin.reflect)
     implementation(libs.coroutines.core)

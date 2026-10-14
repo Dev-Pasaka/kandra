@@ -10,9 +10,11 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
 }
 
 dependencies {
-    implementation(project(":kandra-core"))
-    implementation(project(":kandra-runtime"))
-    implementation(project(":kandra-ktor"))
+    // Same rationale as kandra-koin's identical block (GH #152): bound repositories and
+    // kandraKodein() itself expose kandra-core/kandra-runtime/kandra-ktor types directly.
+    api(project(":kandra-core"))
+    api(project(":kandra-runtime"))
+    api(project(":kandra-ktor"))
     implementation(libs.datastax.driver)
     implementation(libs.ktor.server.core)
     implementation(libs.coroutines.core)
