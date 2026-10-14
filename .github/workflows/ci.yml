@@ -120,4 +120,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./redirect
           keep_files: true
-          cname: kandraorm.com
