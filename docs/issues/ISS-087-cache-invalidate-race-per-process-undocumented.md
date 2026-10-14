@@ -1,6 +1,6 @@
 # ISS-087: Cache invalidate-after-write race can pin a stale value indefinitely; @CacheResult is per-process and undocumented as such
 
-**Status:** Open
+**Status:** Fixed — verified closed on GitHub 2026-10-14; this file's own narrative wasn't backfilled with resolution detail, see the linked GH issue's PR for the actual fix
 
 ## Problem
 

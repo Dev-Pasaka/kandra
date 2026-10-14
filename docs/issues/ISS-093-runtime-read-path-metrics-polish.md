@@ -1,6 +1,6 @@
 # ISS-093: kandra-runtime read-path and metrics polish (no implicit LIMIT 1, non-atomic getOrPut, no cache-stampede protection, generic metrics labels)
 
-**Status:** Open
+**Status:** Fixed — verified closed on GitHub 2026-10-14; this file's own narrative wasn't backfilled with resolution detail, see the linked GH issue's PR for the actual fix
 
 ## Problem
 

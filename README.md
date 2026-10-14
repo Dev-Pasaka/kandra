@@ -947,13 +947,23 @@ userRepo.saveWithNulls(user.copy(middleName = null))
 ```kotlin
 @ScyllaTable("sessions", gcGraceSeconds = 3600)
 @SoftDelete(ttlSeconds = 86_400)
-data class Session(@PartitionKey val sessionId: UUID, val userId: UUID)
+data class Session(@PartitionKey val sessionId: UUID, val userId: UUID? = null)
 
 sessionRepo.delete(session)
 // ↑ UPDATE ... USING TTL 86400 — sets a TTL on non-key columns instead of DELETE
 ```
 
+> **Every non-key, non-marker column on a `@SoftDelete` entity must be nullable or have a
+> constructor default** (`userId: UUID? = null` above, not plain `UUID`) — `SchemaRegistry` rejects
+> the entity at registration time otherwise. After `ttlSeconds`, that column reads back as `NULL`;
+> a non-nullable property with no default has no legal value to decode into, and would throw on any
+> read that reaches the row. See [ISS-098](docs/issues/ISS-098-softdelete-non-nullable-decode-throws.md).
+
 `gcGraceSeconds` on `@ScyllaTable` controls how long the tombstoned row's primary key survives before ScyllaDB's compaction reclaims it. For a `findActive()` that filters out soft-deleted rows, add `@SoftDelete(ttlSeconds = ..., markerProperty = "isDeleted")` with a `Boolean` field — see [`docs/features/repositories.md`](docs/features/repositories.md#findactive-soft-delete-entities-only) and [ISS-007](docs/issues/ISS-007-find-active-soft-delete.md). `@LookupIndex` rows on a soft-deleted entity are deliberately kept alive until the entity's own TTL expires, not hard-deleted — see [ISS-030](docs/issues/ISS-030-soft-delete-removes-lookup-rows.md) and [ISS-035](docs/issues/ISS-035-lookupindex-softdelete-storage-growth.md) for the storage-growth implication on high-churn tables combining both annotations.
+
+> **The marker column itself also has a TTL now** (`@SoftDelete(markerTtlSeconds = ...)`, defaulting
+> to `ttlSeconds + gcGraceSeconds`) — so a soft-deleted row eventually disappears completely instead
+> of leaving a permanent key+marker husk. See [ISS-097](docs/issues/ISS-097-softdelete-marker-no-ttl-permanent-husk.md).
 
 > **`findActive(allowFullScan: Boolean = false)` — breaking change as of GH #12.** If the marker column
 > has `@SecondaryIndex`, `findActive()` queries it directly, no `ALLOW FILTERING` needed. Without one,

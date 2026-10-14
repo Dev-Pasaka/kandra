@@ -1,6 +1,6 @@
 # ISS-092: kandra-ktor driver-config hardening gaps (TLS silent downgrade, reverse-DNS hostname verification, unvalidated pool sizes)
 
-**Status:** Open
+**Status:** Fixed — verified closed on GitHub 2026-10-14; this file's own narrative wasn't backfilled with resolution detail, see the linked GH issue's PR for the actual fix
 
 ## Problem
 

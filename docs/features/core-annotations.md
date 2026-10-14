@@ -77,6 +77,16 @@ Optionally add `markerProperty` to enable `findActive()` — see
 data class Widget(@PartitionKey val id: UUID, val isDeleted: Boolean = false, ...)
 ```
 
+**Every non-key, non-marker property must be nullable or have a constructor default**
+(`SchemaRegistry` rejects the entity at registration otherwise) — after `ttlSeconds`, that column
+reads back as `NULL`, and a non-nullable property with no default has no legal value to decode
+into there. See [ISS-098](../issues/ISS-098-softdelete-non-nullable-decode-throws.md).
+
+**The marker column has its own, longer TTL** (`markerTtlSeconds`, defaulting to
+`ttlSeconds + gcGraceSeconds`) — so the row eventually disappears completely rather than leaving a
+permanent key+marker husk once past `ttlSeconds`. See
+[ISS-097](../issues/ISS-097-softdelete-marker-no-ttl-permanent-husk.md).
+
 **Storage cost with `@LookupIndex`:** combining `@SoftDelete` with `@LookupIndex` on the same entity
 means the lookup row outlives the primary table's effectively-deleted data — it isn't removed until
 the *entity's* soft-delete TTL expires, not when the primary row's non-key columns TTL out. For

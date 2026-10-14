@@ -1,6 +1,6 @@
 # ISS-096: Assorted low-severity findings from the 2026-09-09 post-fix critical audit
 
-**Status:** Open
+**Status:** Fixed — verified closed on GitHub 2026-10-14; this file's own narrative wasn't backfilled with resolution detail, see the linked GH issue's PR for the actual fix
 
 ## Problem
 
