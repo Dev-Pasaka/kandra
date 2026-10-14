@@ -956,12 +956,27 @@ class BatchEngine(
             keyValues.forEach { values.add(it) }
             executeWithRetry(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
         }
-        // Marker column is written without TTL — it must outlive the other columns so
-        // findActive() can still tell this row apart from a live one after they expire.
+        // Marker write is an INSERT, not an UPDATE -- deliberately. The row's original save()
+        // created it via a plain INSERT with no TTL, which in Cassandra/Scylla writes a row-marker
+        // cell with no TTL of its own, entirely separate from any column's cell; that row marker
+        // alone keeps the partition "alive" for SELECT forever, no matter what TTL later UPDATEs
+        // put on individual columns -- an UPDATE never touches it. Re-INSERTing the key columns
+        // (identical values, harmless) plus the marker column, all under USING TTL, writes a fresh
+        // row-marker cell with a real TTL that supersedes the original eternal one (Cassandra
+        // resolves same-cell conflicts by latest write time), so the whole partition -- not just
+        // its column values -- actually expires once markerTtlSeconds elapses (GH #154 / ISS-097).
+        // The marker's own TTL is resolved by SchemaRegistry at registration time to always exceed
+        // the data columns' ttlSeconds -- see TableSchema.softDeleteMarkerTtlSeconds's KDoc -- so
+        // findActive() can still tell this row apart from a live one for that whole husk window.
         if (marker != null) {
-            val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
+            val markerTtl = schema.softDeleteMarkerTtlSeconds!!
+            val keyCols = schema.partitionKeys + schema.clusteringKeys
+            val insertCols = (keyCols.map { it.cqlName } + marker.cqlName).joinToString(", ")
+            val placeholders = keyCols.indices.map { "?" }.plus("?").joinToString(", ")
+            val cql = "INSERT INTO ${schema.tableName} ($insertCols) VALUES ($placeholders) USING TTL $markerTtl"
             val prepared = session.prepare(cql)
-            executeWithRetry(prepared.bind(true, *keyValues.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
+            val values = keyValues.toMutableList<Any?>().also { it.add(true) }
+            executeWithRetry(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
         }
         // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
         // until its TTL expires, so it must remain resolvable via its @LookupIndex too, exactly like
@@ -992,9 +1007,16 @@ class BatchEngine(
             executeWithRetrySuspend(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
         }
         if (marker != null) {
-            val cql = "UPDATE ${schema.tableName} SET ${marker.cqlName} = ? WHERE $whereParts"
+            // INSERT, not UPDATE -- see softDeleteBlocking's identical comment for why
+            // (GH #154 / ISS-097: refreshing the row marker itself, not just the marker column).
+            val markerTtl = schema.softDeleteMarkerTtlSeconds!!
+            val keyCols = schema.partitionKeys + schema.clusteringKeys
+            val insertCols = (keyCols.map { it.cqlName } + marker.cqlName).joinToString(", ")
+            val placeholders = keyCols.indices.map { "?" }.plus("?").joinToString(", ")
+            val cql = "INSERT INTO ${schema.tableName} ($insertCols) VALUES ($placeholders) USING TTL $markerTtl"
             val prepared = session.prepareSuspend(cql)
-            executeWithRetrySuspend(prepared.bind(true, *keyValues.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
+            val values = keyValues.toMutableList<Any?>().also { it.add(true) }
+            executeWithRetrySuspend(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.tableName, "delete")
         }
         // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
         // until its TTL expires, so it must remain resolvable via its @LookupIndex too, exactly like

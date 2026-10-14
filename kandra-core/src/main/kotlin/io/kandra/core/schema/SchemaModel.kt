@@ -45,6 +45,13 @@ data class TableSchema(
     val softDeleteTtlSeconds: Int? = null,
     /** The `markerProperty` column from `@SoftDelete`, if configured. Enables `findActive()`. */
     val softDeleteMarkerColumn: ColumnSchema? = null,
+    /**
+     * Resolved TTL (seconds) for the `@SoftDelete` marker column — always strictly greater than
+     * [softDeleteTtlSeconds], already defaulted to `softDeleteTtlSeconds + gcGraceSeconds` by
+     * [io.kandra.core.SchemaRegistry] if `@SoftDelete.markerTtlSeconds` was left unset (GH #154).
+     * `null` whenever [softDeleteMarkerColumn] is `null`.
+     */
+    val softDeleteMarkerTtlSeconds: Int? = null,
     val gcGraceSeconds: Int? = null,
     val cacheConfig: CacheResultConfig? = null,
     /** Columns marked `@GeneratedUuid`, auto-populated on INSERT. Excludes `@Transient` columns. */
