@@ -108,17 +108,41 @@ enum class UuidStrategy { TIME_ORDERED, RANDOM }
 @Retention(AnnotationRetention.RUNTIME)
 annotation class GeneratedUuid(val strategy: UuidStrategy = UuidStrategy.TIME_ORDERED)
 
-/** When applied, delete() sets a TTL on the row instead of issuing a DELETE. Avoids tombstone accumulation. */
 /**
- * @param markerProperty Opt-in name of a `Boolean` property on the entity that permanently
- * records deletion state (`true` = deleted). Required to use `findActive()` — without it there
- * is no CQL predicate that can distinguish a soft-deleted row from a live one before its TTL
- * expires. The marker column itself is written without a TTL, so it survives after the other
- * columns' values are gone.
+ * When applied, delete() sets a TTL on the non-key, non-marker columns instead of issuing a
+ * DELETE — deferring the tombstone rather than avoiding it, see below.
+ *
+ * Lifecycle: at [ttlSeconds], the entity's data columns expire. The row survives past that as a
+ * key+marker **husk** — [markerProperty]'s column is deliberately given a *longer* TTL than the
+ * data (see [markerTtlSeconds]) so `findActive()` can keep telling this row apart from a live one
+ * for the whole window between the two expiries; without that window there'd be no way to
+ * distinguish "deleted, data not yet expired" from "never deleted." The husk itself fully
+ * disappears once the marker's own TTL elapses — this is deferred tombstone accumulation, not
+ * avoided, and only for as long as [markerTtlSeconds] (GH #154 / ISS-097).
+ *
+ * Every persisted, non-key, non-marker property on a `@SoftDelete` entity must be nullable (or
+ * have a constructor default) — `SchemaRegistry.register()` rejects the entity otherwise. During
+ * the husk window its data columns genuinely read back as `NULL`; a non-nullable property with no
+ * default has no legal value to decode into there, and would otherwise throw on any read that
+ * reaches the row (GH #153 / ISS-098).
+ *
+ * @param markerProperty Opt-in name of a `Boolean` property on the entity that records deletion
+ * state (`true` = deleted) for as long as [markerTtlSeconds]. Required to use `findActive()` —
+ * without it there is no CQL predicate that can distinguish a soft-deleted row from a live one
+ * before its TTL expires.
+ * @param markerTtlSeconds How long the marker column (and so the whole husk row) survives past
+ * the data columns' own [ttlSeconds]. Must be strictly greater than [ttlSeconds] — if left at the
+ * default `null`, resolves to `ttlSeconds + gcGraceSeconds` of the entity's own `@ScyllaTable`
+ * (Cassandra/Scylla's real default of 864000s/10 days when `gcGraceSeconds` is left at its own
+ * sentinel default of `-1`).
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
-annotation class SoftDelete(val ttlSeconds: Int = 86400, val markerProperty: String = "")
+annotation class SoftDelete(
+    val ttlSeconds: Int = 86400,
+    val markerProperty: String = "",
+    val markerTtlSeconds: Int = -1
+)
 
 /** Marks a field as sensitive — never logged. */
 @Target(AnnotationTarget.PROPERTY)

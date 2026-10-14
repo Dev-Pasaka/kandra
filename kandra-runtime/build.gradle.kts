@@ -25,3 +25,25 @@ dependencies {
     testImplementation(libs.caffeine)
     testRuntimeOnly(libs.junit.launcher)
 }
+
+tasks.named<Test>("test") {
+    // SoftDeleteMarkerTtlLiveClusterTest (GH #153/#154) is tagged "manual" and excluded here --
+    // it connects directly to an already-running real cluster on localhost:9042 rather than a
+    // Testcontainers-managed one, so it isn't portable to CI. Same convention as kandra-ktor's
+    // SslRoundTripIntegrationTest. Run it explicitly via
+    // `./gradlew :kandra-runtime:softDeleteLiveClusterTest`.
+    useJUnitPlatform {
+        excludeTags("manual")
+    }
+}
+
+tasks.register<Test>("softDeleteLiveClusterTest") {
+    description = "Runs SoftDeleteMarkerTtlLiveClusterTest (GH #153/#154) against a real cluster " +
+        "at localhost:9042 -- not part of the default test/check/build lifecycle."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags("manual")
+    }
+}

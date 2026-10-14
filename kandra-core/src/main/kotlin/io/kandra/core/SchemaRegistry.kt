@@ -45,6 +45,13 @@ object SchemaRegistry {
     private val logger = KotlinLogging.logger {}
     private val registry = ConcurrentHashMap<KClass<*>, TableSchema>()
 
+    /**
+     * Cassandra/Scylla's real default `gc_grace_seconds` (10 days) -- used as the fallback when
+     * resolving a `@SoftDelete` marker's default TTL and `@ScyllaTable.gcGraceSeconds` is itself
+     * left at its own `-1` ("use the cluster default") sentinel. See GH #154 / ISS-097.
+     */
+    private const val DEFAULT_GC_GRACE_SECONDS = 864_000
+
     // computeIfAbsent, not the Kotlin stdlib's getOrPut -- getOrPut on a ConcurrentHashMap is still
     // a plain check-then-act (get, then put if absent), not atomic, so two threads racing to
     // register the same not-yet-registered class could both run buildSchema (wasted, but harmless
@@ -324,6 +331,51 @@ object SchemaRegistry {
                 col
             }
 
+        // ── @SoftDelete marker TTL resolution (GH #154 / ISS-097) ──────────────
+        // The marker must outlive the data columns so findActive() can keep telling a soft-deleted
+        // row apart from a live one for the whole husk window -- but it must still eventually
+        // expire too, or the husk (key + marker, forever) never actually goes away. Default to
+        // ttlSeconds + gcGraceSeconds (falling back to Cassandra/Scylla's real 864000s default when
+        // gcGraceSeconds is itself left at its own -1 "use the cluster default" sentinel) when
+        // markerTtlSeconds is left unset (-1).
+        val softDeleteMarkerTtlSeconds = softDeleteMarkerColumn?.let { _ ->
+            val ann = softDeleteAnn!!
+            val resolved = ann.markerTtlSeconds.takeIf { it >= 0 } ?: run {
+                val gcGrace = tableAnnotation.gcGraceSeconds.takeIf { it >= 0 } ?: DEFAULT_GC_GRACE_SECONDS
+                ann.ttlSeconds + gcGrace
+            }
+            if (resolved <= ann.ttlSeconds) {
+                throw KandraSchemaException(
+                    "@SoftDelete(markerTtlSeconds = ${ann.markerTtlSeconds}) on '${klass.simpleName}' must " +
+                        "be strictly greater than ttlSeconds (${ann.ttlSeconds}) -- the marker must outlive " +
+                        "the data columns so findActive() can tell a soft-deleted row apart from a live one."
+                )
+            }
+            resolved
+        }
+
+        // ── @SoftDelete non-nullable-column validation (GH #153 / ISS-098) ─────
+        // Every persisted, non-key, non-marker, non-counter column on this entity reads back as
+        // NULL during the husk window (after ttlSeconds, before markerTtlSeconds). A non-nullable
+        // property with no constructor default has no legal value to decode into there and would
+        // throw on any read that reaches the row -- reject the shape at registration time instead.
+        if (softDeleteAnn != null) {
+            val constructorParamsByName = klass.primaryConstructor?.parameters.orEmpty().associateBy { it.name }
+            regularColumns
+                .filter { !it.isCounter && it != softDeleteMarkerColumn }
+                .forEach { col ->
+                    val param = constructorParamsByName[col.propertyName]
+                    val hasDefault = param?.isOptional == true
+                    if (!col.type.isMarkedNullable && !hasDefault) {
+                        throw KandraSchemaException(
+                            "${klass.simpleName}.${col.propertyName} must be nullable: @SoftDelete expires " +
+                                "it after ttlSeconds, and this property has no constructor default to fall " +
+                                "back to once the column reads back as NULL."
+                        )
+                    }
+                }
+        }
+
         return TableSchema(
             entityClass = klass,
             tableName = tableName,
@@ -340,6 +392,7 @@ object SchemaRegistry {
             isSoftDelete = softDeleteAnn != null,
             softDeleteTtlSeconds = softDeleteAnn?.ttlSeconds,
             softDeleteMarkerColumn = softDeleteMarkerColumn,
+            softDeleteMarkerTtlSeconds = softDeleteMarkerTtlSeconds,
             gcGraceSeconds = tableAnnotation.gcGraceSeconds.takeIf { it >= 0 },
             cacheConfig = cacheResultAnn?.let { CacheResultConfig(it.ttlSeconds, it.maxSize) },
             generatedUuidColumns = generatedUuidColumns,
