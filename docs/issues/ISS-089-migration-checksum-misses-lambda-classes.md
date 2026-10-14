@@ -1,6 +1,6 @@
 # ISS-089: Migration checksum only hashes the migration's own class file, missing sibling lambda/anonymous class files
 
-**Status:** Open
+**Status:** Fixed — verified closed on GitHub 2026-10-14; this file's own narrative wasn't backfilled with resolution detail, see the linked GH issue's PR for the actual fix
 
 ## Problem
 

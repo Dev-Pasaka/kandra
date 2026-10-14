@@ -1,6 +1,6 @@
 # ISS-086: Suspend/blocking batch-collection split is bypassable by mixing repository types in one batch{} block
 
-**Status:** Open
+**Status:** Fixed — verified closed on GitHub 2026-10-14; this file's own narrative wasn't backfilled with resolution detail, see the linked GH issue's PR for the actual fix
 
 ## Problem
 

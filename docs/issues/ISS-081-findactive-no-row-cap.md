@@ -1,6 +1,6 @@
 # ISS-081: findActive()/findActiveSuspend() have no row cap — OOM risk on an ALLOW FILTERING scan
 
-**Status:** Open
+**Status:** Fixed — verified closed on GitHub 2026-10-14; this file's own narrative wasn't backfilled with resolution detail, see the linked GH issue's PR for the actual fix
 
 ## Problem
 

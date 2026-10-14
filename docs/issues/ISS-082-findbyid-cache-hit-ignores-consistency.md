@@ -1,6 +1,6 @@
 # ISS-082: findById() cache hits silently ignore the caller's consistency override
 
-**Status:** Open
+**Status:** Fixed — verified closed on GitHub 2026-10-14; this file's own narrative wasn't backfilled with resolution detail, see the linked GH issue's PR for the actual fix
 
 ## Problem
 

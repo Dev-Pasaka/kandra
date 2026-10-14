@@ -8,40 +8,13 @@ policy; nothing was lost, they're just not represented here.
 
 ## Open
 
-Filed 2026-09-09 from a critical post-fix audit — seven independent read-only reviews covering
-every part of a distributed ORM's surface (consistency/batching, caching/read-path, driver/connection/
-security wiring, migrations/schema, codegen/DI, test infrastructure, and cross-cutting security) —
-commissioned specifically to re-check the ISS-070–ISS-076 fixes below (none of which had a second
-reviewer before merging) and to give the rest of the library a fresh, critical look ahead of
-experimental multi-DC cluster testing. See
-[docs/reviews/2026-09-09-post-fix-critical-audit.md](../reviews/2026-09-09-post-fix-critical-audit.md)
-for the full write-up, including which findings are genuine regressions in the brand-new fix code
-versus longer-standing gaps this audit was the first to catch.
+Nothing currently open as of 2026-10-14.
 
-| ID | GH | Severity | Title |
-|---|---|---|---|
-| [ISS-080](ISS-080-counter-column-null-decode-throws.md) | [#93](https://github.com/Dev-Pasaka/kandra/issues/93) | Critical | Counter columns throw on decode whenever any counter cell is untouched (NULL) |
-| [ISS-081](ISS-081-findactive-no-row-cap.md) | [#94](https://github.com/Dev-Pasaka/kandra/issues/94) | Critical | `findActive()`/`findActiveSuspend()` have no row cap — OOM risk on `ALLOW FILTERING` |
-| [ISS-082](ISS-082-findbyid-cache-hit-ignores-consistency.md) | [#95](https://github.com/Dev-Pasaka/kandra/issues/95) | Critical | `findById()` cache hits silently ignore the caller's consistency override |
-| [ISS-083](ISS-083-lookup-index-bypasses-consistency.md) | [#96](https://github.com/Dev-Pasaka/kandra/issues/96) | Critical | Lookup-index reads and versioned-update lookup-table writes both bypass configured consistency |
-| [ISS-084](ISS-084-multidc-tests-not-run-in-ci.md) | [#97](https://github.com/Dev-Pasaka/kandra/issues/97) | Critical | `kandra-multidc`'s entire test suite is tagged "manual" with zero CI/scheduled execution |
-| [ISS-085](ISS-085-strict-mode-rf-math-wrong-multidc.md) | [#98](https://github.com/Dev-Pasaka/kandra/issues/98) | High | Strict Mode's RF-vs-consistency math is wrong for multi-DC `NetworkTopologyStrategy` (false positives) |
-| [ISS-086](ISS-086-batch-suspend-split-bypassable.md) | [#99](https://github.com/Dev-Pasaka/kandra/issues/99) | High | Suspend/blocking batch-collection split is bypassable by mixing repository types |
-| [ISS-087](ISS-087-cache-invalidate-race-per-process-undocumented.md) | [#100](https://github.com/Dev-Pasaka/kandra/issues/100) | High | Cache invalidate-after-write race can pin a stale value indefinitely; cache is undocumented per-process |
-| [ISS-088](ISS-088-migration-claim-applied-vs-claimed-conflated.md) | [#101](https://github.com/Dev-Pasaka/kandra/issues/101) | High | Migration claim resolution conflates losing to an APPLIED row with losing to a CLAIMED row |
-| [ISS-089](ISS-089-migration-checksum-misses-lambda-classes.md) | [#102](https://github.com/Dev-Pasaka/kandra/issues/102) | High | Migration checksum misses sibling lambda/anonymous class files |
-| [ISS-090](ISS-090-throttle-exception-not-wrapped.md) | [#103](https://github.com/Dev-Pasaka/kandra/issues/103) | High | Backpressure throttle rejections leak as an unwrapped driver exception |
-| [ISS-091](ISS-091-codegen-nested-class-collision-nondata-class.md) | [#104](https://github.com/Dev-Pasaka/kandra/issues/104) | High | Codegen can crash on same-simple-name nested entity classes; non-data-class entities fail late |
-| [ISS-092](ISS-092-ktor-driver-config-hardening-gaps.md) | [#105](https://github.com/Dev-Pasaka/kandra/issues/105) | Medium | `kandra-ktor` driver-config hardening gaps (TLS silent downgrade, reverse-DNS hostname verification, pool size validation) |
-| [ISS-093](ISS-093-runtime-read-path-metrics-polish.md) | [#106](https://github.com/Dev-Pasaka/kandra/issues/106) | Medium | `kandra-runtime` read-path/metrics polish (no implicit `LIMIT 1`, non-atomic `getOrPut`, no stampede protection, generic metrics labels) |
-| [ISS-094](ISS-094-security-defense-in-depth-gaps.md) | [#107](https://github.com/Dev-Pasaka/kandra/issues/107) | Medium | Security defense-in-depth gaps (silent skip-auth, unguarded `existsQuery`, unvalidated `KandraPredicate`) |
-| [ISS-095](ISS-095-multidc-fixture-hardening.md) | [#108](https://github.com/Dev-Pasaka/kandra/issues/108) | Medium | Multi-DC test fixture hardening (fixed ports, pause-vs-partition realism, missing hostname-mismatch test) |
-| [ISS-096](ISS-096-assorted-low-severity-post-fix-audit.md) | [#109](https://github.com/Dev-Pasaka/kandra/issues/109) | Low | Assorted low-severity findings (codegen NPE risk, redundant Jakarta factory, missing edge-case tests, metrics/RF-cache minutiae) |
-
-The prior pre-multi-DC-cluster-testing review batch (`ISS-070`–`ISS-076` / GH #78–#84, filed
-2026-09-08) is fully closed out — every item is in the `Fixed` table below. See
-[docs/reviews/2026-09-08-pre-multidc-cluster-review.md](../reviews/2026-09-08-pre-multidc-cluster-review.md)
-for that write-up.
+(The 2026-09-09 post-fix critical-audit batch, ISS-080–ISS-096, sat in this section listed as
+"Open" for over a month after every one of its GH issues had actually been closed — caught and
+corrected in this pass; see the note at the top of the `Fixed` table below. Lesson for next time:
+this table needs to move an entry the moment its PR merges, not whenever someone happens to audit
+it again.)
 
 ## Fixed — pending live-cluster verification
 
@@ -63,6 +36,11 @@ Docker before relying on them.
 
 | ID | Title |
 |---|---|
+| [ISS-097](ISS-097-softdelete-marker-no-ttl-permanent-husk.md) | `@SoftDelete` marker written without TTL left a permanent key+marker husk row |
+| [ISS-098](ISS-098-softdelete-non-nullable-decode-throws.md) | `@SoftDelete` reads threw once a deleted row's TTL expired if any property was non-nullable |
+| [ISS-099](ISS-099-codegen-default-package-empty-line.md) | `kandra-codegen` emitted an invalid empty `package` line for default-package entities |
+| [ISS-100](ISS-100-integration-modules-runtime-scope-deps.md) | Integration modules published `kandra-core`/`kandra-runtime` at runtime scope, breaking consumer compilation |
+| [ISS-101](ISS-101-ktor-version-range-undocumented.md) | No documented supported Ktor version range (partially fixed — see file for the CI/3.x follow-up) |
 | [ISS-011](ISS-011-jakarta-bean-validation.md) | Jakarta Bean Validation not auto-detected |
 | [ISS-021](ISS-021-allow-filtering-error-message.md) | Error message referenced a non-existent `allowFiltering()` |
 | [ISS-022](ISS-022-codegen-collection-raw-types.md) | `kandra-codegen` generated invalid Kotlin for any `Set`/`Map` column |
@@ -123,6 +101,41 @@ Docker before relying on them.
 | [ISS-077](ISS-077-ddl-bootstrap-claim-never-resets.md) | Schema DDL bootstrap claim never reset — AUTO_CREATE/AUTO_MIGRATE ran at most once ever per keyspace |
 | [ISS-078](ISS-078-ddl-claim-no-holder-fencing-clock-fallback.md) | DDL claim completion/release had no holder fencing; clock-skew check had a local-clock fallback bug |
 | [ISS-079](ISS-079-auto-migrate-key-column-add-corrupts-data.md) | AUTO_MIGRATE could silently ALTER TABLE ADD a missing key column as a plain column, causing row collisions |
+
+### 2026-09-09 post-fix critical audit (ISS-080–ISS-096 / GH #93–#109)
+
+Moved here 2026-10-14 — these sat in the `Open` section above for over a month after their GH
+issues had actually been closed (all 17 verified closed on GitHub before this move; see the note at
+the top of `Open`). Filed from a critical post-fix audit — seven independent read-only reviews
+covering every part of a distributed ORM's surface (consistency/batching, caching/read-path,
+driver/connection/security wiring, migrations/schema, codegen/DI, test infrastructure, and
+cross-cutting security) — commissioned specifically to re-check the ISS-070–ISS-076 fixes above
+(none of which had a second reviewer before merging) and to give the rest of the library a fresh,
+critical look ahead of experimental multi-DC cluster testing. See
+[docs/reviews/2026-09-09-post-fix-critical-audit.md](../reviews/2026-09-09-post-fix-critical-audit.md)
+for the full write-up. Each individual `ISS-0NN-*.md` file's own `Status:` line now says `Fixed`,
+but — unlike the rest of this table — their narratives weren't backfilled with resolution detail as
+part of this move; the linked GH issue's merged PR is the actual record of what changed.
+
+| ID | GH | Severity | Title |
+|---|---|---|---|
+| [ISS-080](ISS-080-counter-column-null-decode-throws.md) | [#93](https://github.com/Dev-Pasaka/kandra/issues/93) | Critical | Counter columns throw on decode whenever any counter cell is untouched (NULL) |
+| [ISS-081](ISS-081-findactive-no-row-cap.md) | [#94](https://github.com/Dev-Pasaka/kandra/issues/94) | Critical | `findActive()`/`findActiveSuspend()` have no row cap — OOM risk on `ALLOW FILTERING` |
+| [ISS-082](ISS-082-findbyid-cache-hit-ignores-consistency.md) | [#95](https://github.com/Dev-Pasaka/kandra/issues/95) | Critical | `findById()` cache hits silently ignore the caller's consistency override |
+| [ISS-083](ISS-083-lookup-index-bypasses-consistency.md) | [#96](https://github.com/Dev-Pasaka/kandra/issues/96) | Critical | Lookup-index reads and versioned-update lookup-table writes both bypass configured consistency |
+| [ISS-084](ISS-084-multidc-tests-not-run-in-ci.md) | [#97](https://github.com/Dev-Pasaka/kandra/issues/97) | Critical | `kandra-multidc`'s entire test suite is tagged "manual" with zero CI/scheduled execution |
+| [ISS-085](ISS-085-strict-mode-rf-math-wrong-multidc.md) | [#98](https://github.com/Dev-Pasaka/kandra/issues/98) | High | Strict Mode's RF-vs-consistency math is wrong for multi-DC `NetworkTopologyStrategy` (false positives) |
+| [ISS-086](ISS-086-batch-suspend-split-bypassable.md) | [#99](https://github.com/Dev-Pasaka/kandra/issues/99) | High | Suspend/blocking batch-collection split is bypassable by mixing repository types |
+| [ISS-087](ISS-087-cache-invalidate-race-per-process-undocumented.md) | [#100](https://github.com/Dev-Pasaka/kandra/issues/100) | High | Cache invalidate-after-write race can pin a stale value indefinitely; cache is undocumented per-process |
+| [ISS-088](ISS-088-migration-claim-applied-vs-claimed-conflated.md) | [#101](https://github.com/Dev-Pasaka/kandra/issues/101) | High | Migration claim resolution conflates losing to an APPLIED row with losing to a CLAIMED row |
+| [ISS-089](ISS-089-migration-checksum-misses-lambda-classes.md) | [#102](https://github.com/Dev-Pasaka/kandra/issues/102) | High | Migration checksum misses sibling lambda/anonymous class files |
+| [ISS-090](ISS-090-throttle-exception-not-wrapped.md) | [#103](https://github.com/Dev-Pasaka/kandra/issues/103) | High | Backpressure throttle rejections leak as an unwrapped driver exception |
+| [ISS-091](ISS-091-codegen-nested-class-collision-nondata-class.md) | [#104](https://github.com/Dev-Pasaka/kandra/issues/104) | High | Codegen can crash on same-simple-name nested entity classes; non-data-class entities fail late |
+| [ISS-092](ISS-092-ktor-driver-config-hardening-gaps.md) | [#105](https://github.com/Dev-Pasaka/kandra/issues/105) | Medium | `kandra-ktor` driver-config hardening gaps (TLS silent downgrade, reverse-DNS hostname verification, pool size validation) |
+| [ISS-093](ISS-093-runtime-read-path-metrics-polish.md) | [#106](https://github.com/Dev-Pasaka/kandra/issues/106) | Medium | `kandra-runtime` read-path/metrics polish (no implicit `LIMIT 1`, non-atomic `getOrPut`, no stampede protection, generic metrics labels) |
+| [ISS-094](ISS-094-security-defense-in-depth-gaps.md) | [#107](https://github.com/Dev-Pasaka/kandra/issues/107) | Medium | Security defense-in-depth gaps (silent skip-auth, unguarded `existsQuery`, unvalidated `KandraPredicate`) |
+| [ISS-095](ISS-095-multidc-fixture-hardening.md) | [#108](https://github.com/Dev-Pasaka/kandra/issues/108) | Medium | Multi-DC test fixture hardening (fixed ports, pause-vs-partition realism, missing hostname-mismatch test) |
+| [ISS-096](ISS-096-assorted-low-severity-post-fix-audit.md) | [#109](https://github.com/Dev-Pasaka/kandra/issues/109) | Low | Assorted low-severity findings (codegen NPE risk, redundant Jakarta factory, missing edge-case tests, metrics/RF-cache minutiae) |
 
 ## Closed — not a bug
 
