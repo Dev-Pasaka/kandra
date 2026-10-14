@@ -62,6 +62,10 @@ private const val DDL_CLAIM_POLL_MS = 200L
 /**
  * Ktor plugin that wires ScyllaDB/Cassandra via the DataStax Java driver.
  *
+ * Built and tested against Ktor 2.3.x (`ktor-server-core` 2.3.13, see `gradle.properties`'
+ * `ktorVersion`). Ktor 3.x is untested — it restructured parts of the plugin-installation API, so
+ * compatibility isn't assumed; see GH #155 for tracking a real 3.x compatibility pass.
+ *
  * ```kotlin
  * install(Kandra) {
  *     contactPoints = "localhost:9042"

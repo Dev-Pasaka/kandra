@@ -81,6 +81,9 @@ authoring a schema migration.
 
 ## Quick Start
 
+**Built and tested against Ktor 2.3.x.** Ktor 3.x is untested — it restructured parts of the
+plugin-installation API, so compatibility with `kandra-ktor` isn't assumed yet (GH #155).
+
 ### 1. Add dependencies (with BOM)
 
 ```kotlin
