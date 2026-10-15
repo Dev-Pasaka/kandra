@@ -89,7 +89,7 @@ plugin-installation API, so compatibility with `kandra-ktor` isn't assumed yet (
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.7"))
+    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.8"))
     implementation("ke.co.coinx.kandra:kandra-ktor")
     implementation("ke.co.coinx.kandra:kandra-koin")   // or kandra-kodein
     ksp("ke.co.coinx.kandra:kandra-codegen")           // optional — type-safe table objects
