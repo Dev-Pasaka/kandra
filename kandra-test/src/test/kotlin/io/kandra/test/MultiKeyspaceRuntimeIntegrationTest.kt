@@ -79,10 +79,7 @@ class MultiKeyspaceRuntimeIntegrationTest {
     private lateinit var scope: CoroutineScope
 
     private fun newSession(): CqlSession =
-        if (cloud) KandraCloud.newSession() else CqlSession.builder()
-            .addContactPoint(KandraTestcontainers.container.contactPoint)
-            .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-            .build()
+        KandraTestBackend.newSession()
 
     private fun createKeyspace(name: String, rf: Int) {
         session.execute("DROP KEYSPACE IF EXISTS $name")

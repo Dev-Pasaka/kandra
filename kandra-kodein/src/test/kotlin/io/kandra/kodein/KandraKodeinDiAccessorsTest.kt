@@ -8,6 +8,7 @@ import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.ktor.Kandra
 import io.kandra.ktor.SchemaMode
+import io.kandra.test.KandraTestBackend
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
@@ -46,10 +47,7 @@ class KandraKodeinDiAccessorsTest {
     fun cleanup() {
         SchemaRegistry.clear()
         testKeyspace?.let { ks ->
-            CqlSession.builder()
-                .addContactPoint(KandraTestcontainers.container.contactPoint)
-                .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-                .build().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
+            KandraTestBackend.newSession().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
         }
         testKeyspace = null
     }
@@ -57,7 +55,7 @@ class KandraKodeinDiAccessorsTest {
     private fun freshKeyspaceName(): String {
         // "kandra_kodein_" (14 chars) + a 32-char dash-stripped UUID = 46 chars, safely under
         // Cassandra's 48-character keyspace name limit (see ISS-021-adjacent fix in GH-16).
-        val ks = "kandra_kodein_${UUID.randomUUID().toString().replace("-", "")}"
+        val ks = KandraTestBackend.keyspaceName("kodein")
         testKeyspace = ks
         return ks
     }
@@ -65,24 +63,17 @@ class KandraKodeinDiAccessorsTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `generated kodeinDiWidgetSuspendRepo resolves kandraKodein's binding against a real cluster`() {
-        val cp = KandraTestcontainers.container.contactPoint
         lateinit var app: Application
 
         testApplication {
             application {
                 app = this
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(KodeinDiWidget::class)
-                    // The Cassandra Testcontainers image runs with AllowAllAuthenticator (no auth
-                    // required) — use a blank-credentials provider instead of the default
-                    // KandraAuth.fromEnv(), which throws if SCYLLA_USERNAME/SCYLLA_PASSWORD aren't
-                    // set in the environment (they never are in CI or local dev for this test).
-                    auth { provider = KandraAuth.static("", "") }
                 }
                 kandraKodein() // installs the DIPlugin itself via `di { ... }` — no separate install(DIPlugin) needed
             }

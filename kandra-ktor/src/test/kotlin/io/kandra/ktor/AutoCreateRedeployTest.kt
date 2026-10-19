@@ -6,6 +6,7 @@ import io.kandra.core.KandraAuth
 import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
+import io.kandra.test.KandraTestBackend
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.install
 import io.ktor.server.testing.testApplication
@@ -42,26 +43,19 @@ class AutoCreateRedeployTest {
     fun cleanup() {
         SchemaRegistry.clear()
         testKeyspace?.let { ks ->
-            CqlSession.builder()
-                .addContactPoint(KandraTestcontainers.container.contactPoint)
-                .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-                .build().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
+            KandraTestBackend.newSession().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
         }
         testKeyspace = null
     }
 
     private fun freshKeyspaceName(): String {
-        val ks = "kandra_redeploy_${UUID.randomUUID().toString().replace("-", "")}"
+        val ks = KandraTestBackend.keyspaceName("redeploy")
         testKeyspace = ks
         return ks
     }
 
     private fun tableExists(keyspace: String, tableName: String): Boolean {
-        CqlSession.builder()
-            .addContactPoint(KandraTestcontainers.container.contactPoint)
-            .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-            .withKeyspace(keyspace)
-            .build().use { session ->
+        KandraTestBackend.newSession(keyspace).use { session ->
                 val row = session.execute(
                     "SELECT table_name FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
                     keyspace, tableName
@@ -73,7 +67,6 @@ class AutoCreateRedeployTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `a later deploy that registers a new entity still gets its table created, even though an earlier deploy already completed the DDL bootstrap claim`() {
-        val cp = KandraTestcontainers.container.contactPoint
         val keyspaceName = freshKeyspaceName()
 
         // Deploy 1: only RedeployEntityA is registered. This wins the DDL bootstrap claim and
@@ -81,13 +74,11 @@ class AutoCreateRedeployTest {
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = keyspaceName
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(RedeployEntityA::class)
-                    auth { provider = KandraAuth.static("", "") }
                 }
             }
         }
@@ -100,13 +91,11 @@ class AutoCreateRedeployTest {
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = keyspaceName
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(RedeployEntityA::class, RedeployEntityB::class)
-                    auth { provider = KandraAuth.static("", "") }
                 }
             }
         }

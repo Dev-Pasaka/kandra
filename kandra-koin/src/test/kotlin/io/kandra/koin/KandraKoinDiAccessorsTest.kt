@@ -8,6 +8,7 @@ import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.ktor.Kandra
 import io.kandra.ktor.SchemaMode
+import io.kandra.test.KandraTestBackend
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.install
 import io.ktor.server.testing.testApplication
@@ -44,10 +45,7 @@ class KandraKoinDiAccessorsTest : KoinComponent {
     fun cleanup() {
         SchemaRegistry.clear()
         testKeyspace?.let { ks ->
-            CqlSession.builder()
-                .addContactPoint(KandraTestcontainers.container.contactPoint)
-                .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-                .build().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
+            KandraTestBackend.newSession().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
         }
         testKeyspace = null
     }
@@ -55,7 +53,7 @@ class KandraKoinDiAccessorsTest : KoinComponent {
     private fun freshKeyspaceName(): String {
         // "kandra_koin_" (12 chars) + a 32-char dash-stripped UUID = 44 chars, safely under
         // Cassandra's 48-character keyspace name limit (see ISS-021-adjacent fix in GH-16).
-        val ks = "kandra_koin_${UUID.randomUUID().toString().replace("-", "")}"
+        val ks = KandraTestBackend.keyspaceName("koin")
         testKeyspace = ks
         return ks
     }
@@ -63,23 +61,16 @@ class KandraKoinDiAccessorsTest : KoinComponent {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `generated koinDiWidgetSuspendRepo resolves kandraKoin's binding against a real cluster`() {
-        val cp = KandraTestcontainers.container.contactPoint
 
         testApplication {
             application {
                 install(Koin) {}
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(KoinDiWidget::class)
-                    // The Cassandra Testcontainers image runs with AllowAllAuthenticator (no auth
-                    // required) — use a blank-credentials provider instead of the default
-                    // KandraAuth.fromEnv(), which throws if SCYLLA_USERNAME/SCYLLA_PASSWORD aren't
-                    // set in the environment (they never are in CI or local dev for this test).
-                    auth { provider = KandraAuth.static("", "") }
                 }
                 kandraKoin()
             }

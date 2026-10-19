@@ -2,7 +2,7 @@ package io.kandra.migrate
 
 import com.datastax.oss.driver.api.core.CqlSession
 import io.kandra.core.exception.KandraSchemaException
-import io.kandra.test.KandraTestcontainers
+import io.kandra.test.KandraTestBackend
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -35,25 +35,10 @@ class DdlBootstrapClaimTest {
     private lateinit var session: CqlSession
 
     private fun freshSession(): CqlSession {
-        keyspace = "kandra_ddlck_${UUID.randomUUID().toString().replace("-", "")}"
-        val contactPoint = KandraTestcontainers.container.contactPoint
-        val localDc = KandraTestcontainers.container.localDatacenter
+        keyspace = KandraTestBackend.keyspaceName("ddlck")
+        KandraTestBackend.createKeyspace(keyspace)
 
-        CqlSession.builder()
-            .addContactPoint(contactPoint)
-            .withLocalDatacenter(localDc)
-            .build().use {
-                it.execute(
-                    "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-                    "{'class': 'SimpleStrategy', 'replication_factor': 1}"
-                )
-            }
-
-        session = CqlSession.builder()
-            .addContactPoint(contactPoint)
-            .withLocalDatacenter(localDc)
-            .withKeyspace(keyspace)
-            .build()
+        session = KandraTestBackend.newSession(keyspace)
         return session
     }
 
