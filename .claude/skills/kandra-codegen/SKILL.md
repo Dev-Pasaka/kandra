@@ -218,7 +218,7 @@ property-level annotations and one class-level annotation are ever read by this 
 
 | Annotation | Read by codegen? | Effect on generated code |
 |---|---|---|
-| `@ScyllaTable` (class) | Yes | Triggers processing at all; `name`/`gcGraceSeconds` arguments are **not read** — codegen doesn't even look at them. |
+| `@ScyllaTable` (class) | Yes | Triggers processing at all; `name`/`gcGraceSeconds` arguments are **not read**. The `keyspace` argument is read only to validate it (`CqlNaming.isValidIdentifier`; invalid blank-excluded values fail the build via `logger.error`) — the generated `*Table` carries no table/keyspace name, so output is byte-identical with or without a keyspace (ISS-110). |
 | `@Transient` (property) | Yes | Property excluded entirely — no `KandraColumnRef` emitted for it. |
 | `@Column` (property) | Yes | Supplies the CQL column-name string (see `resolveCqlName` above). |
 | `@LookupIndex` (property) | Yes | Sets `isLookup = true` on the generated `KandraColumnRef` (see below). Its `tableSuffix`/`consistency` arguments are **not read** — codegen doesn't emit anything about the denormalized lookup table itself, only flips the boolean. |

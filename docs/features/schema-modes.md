@@ -47,3 +47,11 @@ mechanism — see [`docs/features/migrations.md`](migrations.md) and
 The one race this cannot remove: creating `kandra_ddl_locks` itself, the first time it doesn't yet
 exist. That's a single `CREATE TABLE IF NOT EXISTS` for one small, schema-stable table — a far
 narrower and lower-impact race than the one this guard removes.
+
+## Multiple keyspaces
+
+Every mode applies per keyspace: entities are grouped by their `@ScyllaTable(keyspace)` (blank = the
+default keyspace), and `AUTO_CREATE` / `AUTO_MIGRATE` / `VALIDATE` run against each group's own
+keyspace, including its `system_schema` lookups and a keyspace-scoped DDL lock. `autoCreate` and
+`replicationStrategy` come from the matching `keyspace("x") { }` block (see
+[ktor-plugin.md](ktor-plugin.md#multiple-keyspaces)). `NONE` skips DDL everywhere.

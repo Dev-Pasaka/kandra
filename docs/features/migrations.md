@@ -73,3 +73,16 @@ bodies) — the bootstrap itself is a fixed, fast operation (one `CREATE TABLE` 
 constructor parameter. See [ISS-071](../issues/ISS-071-concurrent-ddl-bootstrap-race.md) for the
 full design writeup, including the one residual race this can't remove (creating `kandra_ddl_locks`
 itself, the first time it doesn't exist yet).
+
+## Per-keyspace migrations
+
+`KandraMigrationRunner` accepts an optional keyspace. When given, `kandra_migrations`, its
+bootstrap lock and the per-migration claims live in that keyspace, so each keyspace keeps its own
+independent version history:
+
+```kotlin
+KandraMigrationRunner(session, keyspace = "billing").run(V1_CreateInvoices)
+KandraMigrationRunner(session).run(V1_CreateUsers)   // unchanged: the session keyspace
+```
+
+Without a keyspace, behaviour is identical to before.

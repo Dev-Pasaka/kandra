@@ -363,6 +363,40 @@ install(Kandra) {
 
 ---
 
+## Multiple Keyspaces
+
+One `install(Kandra)`, one `CqlSession` (one connection pool), many keyspaces. The keyspace is a
+property of the **entity**, set at compile time:
+
+```kotlin
+@ScyllaTable(name = "invoices", keyspace = "billing")   // keyspace = "" (default) = the plugin's default keyspace
+data class Invoice(@PartitionKey val id: UUID, val total: Long)
+```
+
+Declare each extra keyspace's settings in the plugin (the annotation, not the DSL, decides which
+entities live where):
+
+```kotlin
+install(Kandra) {
+    keyspace = "core"                       // default keyspace (unchanged)
+    keyspace("billing") {                   // extra keyspace: settings only
+        autoCreate = true
+        replicationStrategy = ReplicationStrategy.SimpleStrategy(3)
+    }
+    register(User::class, Invoice::class)   // Invoice is @ScyllaTable(keyspace = "billing")
+}
+```
+
+- An entity whose `keyspace` is neither the default nor declared with `keyspace("x") { }` fails
+  startup with a `KandraSchemaException` that names the entity and the missing declaration.
+- Creation, permission checks, DDL (`AUTO_CREATE` / `AUTO_MIGRATE` / `VALIDATE`), `system_schema`
+  lookups and DDL locks all run per keyspace. Lookup tables live in their parent entity's keyspace.
+- **Zero regression:** entities without `keyspace` generate exactly the same unqualified CQL as before.
+- Not supported: choosing a keyspace per call or per tenant at runtime (the keyspace is fixed on the
+  entity), and logged batches spanning keyspaces. See [`docs/features/ktor-plugin.md`](docs/features/ktor-plugin.md#multiple-keyspaces).
+
+---
+
 ## LWT — saveIfNotExists
 
 ```kotlin

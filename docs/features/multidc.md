@@ -97,3 +97,10 @@ multi-region infrastructure. Everything tested so far says the *config surface* 
 mechanics* work; real cross-region latency, clock skew, and genuine network partition behavior
 remain unvalidated. Closing this gap needs either a ScyllaDB Cloud tier that actually offers
 multi-region clusters, or a more deliberate self-hosted multi-region setup than any tried so far.
+
+## Multiple keyspaces and strict mode
+
+With several keyspaces on one install, the strict-mode replication-factor check resolves the
+replication of the *entity's own* keyspace rather than the session keyspace, so each keyspace may
+use a different `NetworkTopologyStrategy` map. (As noted above, none of this has been validated
+against a genuine multi-region topology.)

@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS users (
 |---|---|---|---|
 | `name` | `String` | **required** | CQL table name |
 | `gcGraceSeconds` | `Int` | `-1` (use ScyllaDB's own default) | Grace period before tombstones are purged |
+| `keyspace` | `String` | `""` (the plugin's default keyspace) | Keyspace this entity lives in. Must be a valid CQL identifier. When non-blank, all generated CQL uses `keyspace.table`; when blank, CQL is unqualified exactly as before. See [Multiple Keyspaces](#multiple-keyspaces) |
 
 ---
 
@@ -546,6 +547,58 @@ When `AUTO_MIGRATE` is set, Kandra:
 5. For every ScyllaDB column **not** in the entity: logs `WARN` (data preserved, not mapped).
 
 > **`AUTO_MIGRATE` does not support:** dropping columns, renaming columns, or changing types. Use the [schema migration runner](#schema-migration-runner) for those operations.
+
+---
+
+## Multiple Keyspaces
+
+One `install(Kandra)` and one `CqlSession` can serve many keyspaces, so feature modules of a
+multi-module app can each own entities in their own keyspace while sharing one connection pool.
+
+**1. Put the keyspace on the entity** (compile-time, the single source of truth for membership):
+
+```kotlin
+@ScyllaTable(name = "invoices", keyspace = "billing")
+data class Invoice(@PartitionKey val id: UUID, val total: Long)
+```
+
+**2. Declare extra keyspaces in the plugin** (settings only, nothing is populated by the DSL):
+
+```kotlin
+install(Kandra) {
+    keyspace = "core"                       // default keyspace (unchanged)
+    keyspace("billing") {                   // extra keyspace: settings only
+        autoCreate = true
+        replicationStrategy = ReplicationStrategy.SimpleStrategy(3)
+    }
+    register(User::class, Invoice::class)   // Invoice is @ScyllaTable(keyspace = "billing")
+}
+```
+
+**Precedence and errors.** `keyspace = "x"` on the plugin remains the default keyspace and is used by
+every entity whose annotation `keyspace` is blank. An entity naming a keyspace that is neither the
+default nor declared with `keyspace("x") { }` throws `KandraSchemaException` at startup with an
+actionable message. A keyspace name that is not a valid CQL identifier is rejected (by the KSP
+processor at build time when `kandra-codegen` is used, and by `SchemaRegistry` at registration).
+
+**Per-keyspace bootstrap.** Keyspace creation, permission validation, DDL for every
+[schema mode](#schema-modes), `system_schema` lookups and the `kandra_ddl_locks` table (lock names
+include the keyspace) are handled per keyspace. Lookup tables inherit the parent entity's keyspace.
+
+**Zero regression.** An entity with a blank `keyspace` produces byte-for-byte the same, unqualified
+CQL as before; existing single-keyspace applications need no change.
+
+**Strict mode.** The [strict-mode](#strict-mode-multi-dc-local_oneone-warning) replication-factor
+check resolves the replication of the *entity's* keyspace, not the session keyspace.
+
+**Migrations.** `KandraMigrationRunner` takes an optional keyspace and keeps `kandra_migrations`
+and its locks per keyspace; see [Schema Migration Runner](#schema-migration-runner).
+
+**Codegen.** Generated `*Table` objects contain only column references, so they are identical
+for keyspaced and non-keyspaced entities; the keyspace is applied by the runtime.
+
+**Non-goals.** Runtime / per-call / per-tenant keyspace selection (the keyspace is fixed on the
+entity), and logged batches that span keyspaces.
 
 ---
 
@@ -1262,6 +1315,16 @@ Kandra creates a `kandra_migrations` table to track applied migrations. On subse
 - `run()` requires LWT support on the cluster — each migration is claimed via `INSERT ... IF NOT
   EXISTS` before it runs, so two runner instances racing the same keyspace can't both execute the
   same migration concurrently.
+
+### Per-keyspace migrations
+
+With multiple keyspaces, give each runner the keyspace it owns. `kandra_migrations` and the
+migration locks then live in that keyspace, so two keyspaces keep independent version histories:
+
+```kotlin
+KandraMigrationRunner(session, keyspace = "billing").run(V1_CreateInvoices)
+KandraMigrationRunner(session).run(V1_CreateUsers)   // no keyspace: the session keyspace, as before
+```
 
 ### Inspecting history
 
