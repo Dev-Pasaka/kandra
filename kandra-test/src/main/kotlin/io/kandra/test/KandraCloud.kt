@@ -61,8 +61,46 @@ object KandraCloud {
                 InetSocketAddress.createUnresolved(host, port)
             }
 
-    private val tlsEnabled: Boolean
+    val tlsEnabled: Boolean
         get() = env("KANDRA_CLOUD_TLS")?.lowercase() == "true" || env("KANDRA_CLOUD_SSL")?.lowercase() == "true"
+
+    /** Contact points as a `host:port` CSV (TLS port 9142 substituted when TLS is on), for config DSLs taking a string. */
+    fun contactPointsCsv(): String = contactPoints().joinToString(",") { "${it.hostString}:${it.port}" }
+
+    /** Username / password from the env (null when unset). Never log these. */
+    val username: String? get() = env("KANDRA_CLOUD_USERNAME")
+    val password: String? get() = env("KANDRA_CLOUD_PASSWORD")
+
+    /**
+     * A temporary PKCS12 truststore built from `KANDRA_CLOUD_CA_PEM`, for APIs that want a truststore file
+     * (e.g. Kandra's `ssl { trustStorePath = ... }`). Deleted on close. Null when TLS is off or no PEM is set.
+     */
+    fun tempTruststore(): TempTruststore? {
+        val pem = env("KANDRA_CLOUD_CA_PEM")
+        if (!tlsEnabled || pem == null) return null
+        val dir = java.nio.file.Files.createTempDirectory("kandra-cloud-ts")
+        val file = dir.resolve("truststore.p12")
+        val pw = UUID.randomUUID().toString()
+        val ks = KeyStore.getInstance("PKCS12").apply { load(null, null) }
+        FileInputStream(pem).use { ins ->
+            CertificateFactory.getInstance("X.509").generateCertificates(ins).forEachIndexed { i, c ->
+                ks.setCertificateEntry("kandra-cloud-ca-$i", c)
+            }
+        }
+        java.io.FileOutputStream(file.toFile()).use { ks.store(it, pw.toCharArray()) }
+        return TempTruststore(dir, file.toString(), pw)
+    }
+
+    class TempTruststore internal constructor(
+        private val dir: java.nio.file.Path,
+        val path: String,
+        val password: String
+    ) : AutoCloseable {
+        val type: String = "PKCS12"
+        override fun close() {
+            runCatching { dir.toFile().deleteRecursively() }
+        }
+    }
 
     private fun sslContext(): SSLContext? {
         if (!tlsEnabled) return null

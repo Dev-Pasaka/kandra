@@ -39,6 +39,8 @@ class MultiKeyspaceIntegrationTest {
         if (KandraCloud.isConfigured) dropAll(Backend.CLOUD)
     }
 
+    private var cloudTrust: KandraCloud.TempTruststore? = null
+
     private enum class Backend { DOCKER, CLOUD }
 
     private fun admin(b: Backend): CqlSession = when (b) {
@@ -61,10 +63,18 @@ class MultiKeyspaceIntegrationTest {
                 auth { provider = KandraAuth.static("", "") }
             }
             Backend.CLOUD -> {
-                contactPoints = System.getenv("KANDRA_CLOUD_CONTACT_POINTS")
+                contactPoints = KandraCloud.contactPointsCsv()
                 localDatacenter = KandraCloud.localDc
-                val u = System.getenv("KANDRA_CLOUD_USERNAME"); val p = System.getenv("KANDRA_CLOUD_PASSWORD")
-                auth { provider = KandraAuth.static(u ?: "", p ?: "") }
+                auth { provider = KandraAuth.static(KandraCloud.username ?: "", KandraCloud.password ?: "") }
+                cloudTrust?.let { ts ->
+                    ssl {
+                        enabled = true
+                        hostnameVerification = false // cloud node certs are not issued for the contact-point host names
+                        trustStorePath = ts.path
+                        trustStorePassword = ts.password
+                        trustStoreType = ts.type
+                    }
+                }
                 pool { requestTimeoutMillis = 30_000 }
             }
         }
@@ -144,7 +154,12 @@ class MultiKeyspaceIntegrationTest {
     @Test
     fun `two keyspaces one session - cloud`() {
         KandraCloud.assumeConfigured()
-        scenario(Backend.CLOUD, 3)
+        cloudTrust = KandraCloud.tempTruststore()
+        try {
+            scenario(Backend.CLOUD, 3)
+        } finally {
+            cloudTrust?.close(); cloudTrust = null
+        }
     }
 
     @Test
