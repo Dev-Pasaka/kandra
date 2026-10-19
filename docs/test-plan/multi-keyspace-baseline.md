@@ -59,3 +59,35 @@ KANDRA_CLOUD_TLS=true ./gradlew :kandra-test:test --tests '*KandraCloudSmokeTest
 # Existing kandra-test integration tests against the cloud
 KANDRA_TEST_BACKEND=cloud ./gradlew :kandra-test:test --tests '*KandraIntegrationTest*'
 ```
+
+## Test backend switch (`KandraTestBackend`) and flake fixes
+
+`io.kandra.test.KandraTestBackend` (kandra-test) is the shared connection provider for live tests:
+contact points CSV, local DC, credentials, TLS truststore, `newSession(ks)`, `keyspaceName(tag)`,
+`createKeyspace/dropKeyspace/freshKeyspace`, `effectiveRf(rf)`. `KANDRA_TEST_BACKEND` unset/`docker` keeps the
+Testcontainers behaviour; `cloud` targets the `KANDRA_CLOUD_*` cluster (use `KANDRA_CLOUD_TLS=true`; cloud keyspaces
+are `kt_<tag>_<8hex>`, RF 1 is bumped to 3, tablets disabled for SimpleStrategy). In ktor/koin/kodein tests,
+`KandraConfig.useTestBackend()` (a small `TestBackendConfig.kt` per module) fills an `install(Kandra)` block
+(30s pool request timeout, creds, TLS truststore, NetworkTopologyStrategy on cloud).
+
+Flake fixes: (a) the `DriverTimeoutException ... PT2S` came from raw `CqlSession.builder()` calls in test
+cleanup/helpers (driver default 2s); every session now comes from `KandraTestBackend` with 30s request/schema timeouts,
+and `KandraTestcontainers.container` waits for readiness (query + DDL probe, 3 min deadline) after start. (b) The
+`IntegrationWidget`/`IntegrationIndexedWidget` soft-delete TTL went 2s -> 60s: the tests only assert the row is still
+present right after the delete and never wait for expiry, so nothing is weakened. Strict-mode RF=1 test now asserts
+against `effectiveRf(1)` (no warning at RF=1, RF=3 warning where the cloud bump applies).
+
+Results (docker, run twice, all green): kandra-test 46 (2 skipped: cloud smoke), kandra-ktor 88 (2 skipped),
+kandra-koin 5, kandra-kodein 5, kandra-migrate full suites.
+Results (`KANDRA_TEST_BACKEND=cloud`, TLS, all green): kandra-test KandraIntegrationTest 30 + StrictModeRfIntegrationTest 4 +
+MultiKeyspaceRuntimeIntegrationTest 5; ktor KandraPluginTest 19 (2 skipped, see below), AutoCreateRedeployTest 1,
+AutoMigrateKeyColumnGuardTest 3, DdlBootstrapClaimTest 6; koin/kodein DiAccessorsTest 1 each; migrate KandraMigrationRunnerTest 13,
+DdlBootstrapClaimTest 6, ClaimConcurrencyTest 3.
+
+Remaining gaps / by design Docker-only:
+- `SslRoundTripIntegrationTest` and multi-DC tests need their own containers.
+- koin/kodein `*MultiKeyspaceTest`: keyspaces are compile-time constants in `@ScyllaTable(keyspace=...)` (non-`kt_` names), so
+  they stay on Docker; cloud multi-keyspace coverage is in ktor `MultiKeyspaceIntegrationTest`/`MultiKeyspaceCloudE2ETest` and kandra-test.
+- Two KandraPluginTest credential-rotation tests skip on cloud (`assumeFalse`): they need fake credentials / a no-auth cluster.
+- Not run on cloud: the rest of kandra-ktor (config/unit tests need no cluster), kandra-runtime live tests (not migrated here), `KandraMigrationMultiKeyspace*`
+  (already has its own cloud variant).

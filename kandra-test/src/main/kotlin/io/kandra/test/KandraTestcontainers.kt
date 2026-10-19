@@ -41,7 +41,39 @@ object KandraTestcontainers {
         @Suppress("UNCHECKED_CAST")
         (CassandraContainer("cassandra:4.1") as CassandraContainer<*>)
             .withExposedPorts(9042)
-            .also { it.start() }
+            .also {
+                it.start()
+                awaitReady(it)
+            }
+    }
+
+    /**
+     * The container being "started" (port open) does not mean CQL is serving yet: under load the first
+     * queries can time out. Poll a trivial query (and a DDL, the slowest first operation) until it
+     * succeeds (deadline 3 min) so no test pays for the cold start, instead of sprinkling sleeps in tests.
+     */
+    private fun awaitReady(c: CassandraContainer<*>) {
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(3)
+        var last: Throwable? = null
+        while (System.nanoTime() < deadline) {
+            try {
+                CqlSession.builder()
+                    .addContactPoint(c.contactPoint)
+                    .withLocalDatacenter(c.localDatacenter)
+                    .withConfigLoader(KandraTestBackend.longTimeoutConfig())
+                    .build().use { s ->
+                        s.execute("SELECT release_version FROM system.local").one()
+                        s.execute("CREATE KEYSPACE IF NOT EXISTS kandra_ready_probe WITH replication = " +
+                            "{'class': 'SimpleStrategy', 'replication_factor': 1}")
+                        s.execute("DROP KEYSPACE IF EXISTS kandra_ready_probe")
+                    }
+                return
+            } catch (e: Exception) {
+                last = e
+                Thread.sleep(1000)
+            }
+        }
+        throw IllegalStateException("Cassandra container not ready after 3 minutes", last)
     }
 
     /**
@@ -66,30 +98,12 @@ object KandraTestcontainers {
         replicationFactor: Int = 1,
         statementBuilderConsistencyConfig: ConsistencyConfig = ConsistencyConfig()
     ): KandraRuntimeHandle {
-        // KANDRA_TEST_BACKEND=cloud => run against the KANDRA_CLOUD_* cluster instead of a container
-        // (only for callers of freshKeyspace(); tests that touch `container` directly stay on Docker).
-        val useCloud = System.getenv("KANDRA_TEST_BACKEND")?.lowercase() == "cloud"
-        if (useCloud) check(KandraCloud.isConfigured) { "KANDRA_TEST_BACKEND=cloud but KANDRA_CLOUD_CONTACT_POINTS is unset" }
-        val keyspace = if (useCloud) "kt_it_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+        // KANDRA_TEST_BACKEND=cloud => the KANDRA_CLOUD_* cluster instead of the container (see KandraTestBackend).
+        val keyspace = if (KandraTestBackend.isCloud) KandraTestBackend.keyspaceName("it")
             else "kandra_test_${UUID.randomUUID().toString().replace("-", "")}"
 
-        val bootstrapSession = if (useCloud) KandraCloud.newSession() else CqlSession.builder()
-            .addContactPoint(container.contactPoint)
-            .withLocalDatacenter(container.localDatacenter)
-            .build()
-
-        bootstrapSession.execute(
-            "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-            "{'class': 'SimpleStrategy', 'replication_factor': ${if (useCloud && replicationFactor == 1) 3 else replicationFactor}}" +
-            if (useCloud) " AND tablets = {'enabled': false}" else ""
-        )
-        bootstrapSession.close()
-
-        val session = if (useCloud) KandraCloud.newSession(keyspace) else CqlSession.builder()
-            .addContactPoint(container.contactPoint)
-            .withLocalDatacenter(container.localDatacenter)
-            .withKeyspace(keyspace)
-            .build()
+        KandraTestBackend.newSession().use { it.execute(KandraTestBackend.createKeyspaceCql(keyspace, replicationFactor)) }
+        val session = KandraTestBackend.newSession(keyspace)
 
         // Register schemas and create tables
         val registry = mutableListOf<io.kandra.core.schema.TableSchema>()

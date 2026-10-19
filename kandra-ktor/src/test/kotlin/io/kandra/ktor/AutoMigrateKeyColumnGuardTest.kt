@@ -8,6 +8,7 @@ import io.kandra.core.annotations.ClusteringKey
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.exception.KandraSchemaException
+import io.kandra.test.KandraTestBackend
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.install
 import io.ktor.server.testing.testApplication
@@ -65,10 +66,7 @@ class AutoMigrateKeyColumnGuardTest {
     fun cleanup() {
         SchemaRegistry.clear()
         testKeyspace?.let { ks ->
-            CqlSession.builder()
-                .addContactPoint(KandraTestcontainers.container.contactPoint)
-                .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-                .build().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
+            KandraTestBackend.newSession().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
         }
         testKeyspace = null
     }
@@ -77,17 +75,13 @@ class AutoMigrateKeyColumnGuardTest {
         // "kandra_mg_" (10 chars) + a 32-char dash-stripped UUID = 42 chars, safely under
         // Cassandra's 48-character keyspace name limit (see KandraPluginTest.freshKeyspaceName
         // for the same reasoning -- a longer prefix here previously pushed this over the limit).
-        val ks = "kandra_mg_${UUID.randomUUID().toString().replace("-", "")}"
+        val ks = KandraTestBackend.keyspaceName("mg")
         testKeyspace = ks
         return ks
     }
 
     private fun columnNames(keyspace: String, tableName: String): Set<String> {
-        CqlSession.builder()
-            .addContactPoint(KandraTestcontainers.container.contactPoint)
-            .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-            .withKeyspace(keyspace)
-            .build().use { session ->
+        KandraTestBackend.newSession(keyspace).use { session ->
                 return session.execute(
                     "SELECT column_name FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
                     keyspace, tableName
@@ -96,17 +90,15 @@ class AutoMigrateKeyColumnGuardTest {
     }
 
     @OptIn(ExperimentalKandraApi::class)
-    private fun installV1(keyspaceName: String, cp: java.net.InetSocketAddress) {
+    private fun installV1(keyspaceName: String) {
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = keyspaceName
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(MigrateGuardV1::class)
-                    auth { provider = KandraAuth.static("", "") }
                 }
             }
         }
@@ -115,21 +107,18 @@ class AutoMigrateKeyColumnGuardTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `AUTO_MIGRATE still adds a new plain column exactly as before`() {
-        val cp = KandraTestcontainers.container.contactPoint
         val keyspaceName = freshKeyspaceName()
-        installV1(keyspaceName, cp)
+        installV1(keyspaceName)
 
         SchemaRegistry.clear()
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = keyspaceName
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_MIGRATE
                     register(MigrateGuardWithPlainColumn::class)
-                    auth { provider = KandraAuth.static("", "") }
                 }
             }
         }
@@ -143,22 +132,19 @@ class AutoMigrateKeyColumnGuardTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `AUTO_MIGRATE refuses to ALTER TABLE ADD a new clustering key column`() {
-        val cp = KandraTestcontainers.container.contactPoint
         val keyspaceName = freshKeyspaceName()
-        installV1(keyspaceName, cp)
+        installV1(keyspaceName)
 
         SchemaRegistry.clear()
         val ex = assertThrows(KandraSchemaException::class.java) {
             testApplication {
                 application {
                     install(Kandra) {
-                        contactPoints = "${cp.hostString}:${cp.port}"
-                        localDatacenter = KandraTestcontainers.container.localDatacenter
+                        useTestBackend()
                         keyspace = keyspaceName
                         autoCreateKeyspace = true
                         schemaMode = SchemaMode.AUTO_MIGRATE
                         register(MigrateGuardWithNewClusteringKey::class)
-                        auth { provider = KandraAuth.static("", "") }
                     }
                 }
             }
@@ -175,22 +161,19 @@ class AutoMigrateKeyColumnGuardTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `AUTO_MIGRATE refuses to ALTER TABLE ADD a new partition key column`() {
-        val cp = KandraTestcontainers.container.contactPoint
         val keyspaceName = freshKeyspaceName()
-        installV1(keyspaceName, cp)
+        installV1(keyspaceName)
 
         SchemaRegistry.clear()
         val ex = assertThrows(KandraSchemaException::class.java) {
             testApplication {
                 application {
                     install(Kandra) {
-                        contactPoints = "${cp.hostString}:${cp.port}"
-                        localDatacenter = KandraTestcontainers.container.localDatacenter
+                        useTestBackend()
                         keyspace = keyspaceName
                         autoCreateKeyspace = true
                         schemaMode = SchemaMode.AUTO_MIGRATE
                         register(MigrateGuardWithNewPartitionKey::class)
-                        auth { provider = KandraAuth.static("", "") }
                     }
                 }
             }

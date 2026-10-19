@@ -37,6 +37,10 @@ data class KodeinMksCustomer(@PartitionKey val id: UUID, val name: String)
 data class KodeinMksOrder(@PartitionKey val id: UUID, val amount: Long)
 
 /** ISS-107: Kodein bindings for registry entities that live in different keyspaces. */
+// Docker-only by design: the entities' keyspaces are compile-time constants in @ScyllaTable(keyspace = ...)
+// (fixed, non-`kt_` names), so they cannot be pointed at the shared cloud cluster without name collisions
+// between concurrent runs. The cloud-capable multi-keyspace coverage lives in kandra-ktor
+// (MultiKeyspaceIntegrationTest / MultiKeyspaceCloudE2ETest) and kandra-test.
 class KandraKodeinMultiKeyspaceTest {
 
     @AfterEach

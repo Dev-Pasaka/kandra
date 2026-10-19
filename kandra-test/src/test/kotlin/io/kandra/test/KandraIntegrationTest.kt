@@ -39,7 +39,10 @@ data class IntegrationUser(
 )
 
 @ScyllaTable("integration_widgets")
-@SoftDelete(ttlSeconds = 2, markerProperty = "isDeleted")
+// TTL is deliberately generous (60s): the tests assert the row is *still present* right after the soft delete,
+// which a 2s TTL turned into a race against WAN latency / a loaded container (flaked once on the cloud cluster).
+// Nothing here waits for expiry, so a long TTL weakens no assertion.
+@SoftDelete(ttlSeconds = 60, markerProperty = "isDeleted")
 data class IntegrationWidget(
     @PartitionKey val id: UUID,
     // Constructor default, not a bare non-nullable String -- GH #153/ISS-098: every non-key,
@@ -54,7 +57,10 @@ data class IntegrationWidget(
  * query is answered by the index and no `ALLOW FILTERING` (nor `allowFullScan = true`) is required.
  */
 @ScyllaTable("integration_indexed_widgets")
-@SoftDelete(ttlSeconds = 2, markerProperty = "isDeleted")
+// TTL is deliberately generous (60s): the tests assert the row is *still present* right after the soft delete,
+// which a 2s TTL turned into a race against WAN latency / a loaded container (flaked once on the cloud cluster).
+// Nothing here waits for expiry, so a long TTL weakens no assertion.
+@SoftDelete(ttlSeconds = 60, markerProperty = "isDeleted")
 data class IntegrationIndexedWidget(
     @PartitionKey val id: UUID,
     // See IntegrationWidget's identical comment above (GH #153/ISS-098).

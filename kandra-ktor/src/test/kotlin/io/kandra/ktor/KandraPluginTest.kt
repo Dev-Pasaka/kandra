@@ -13,6 +13,7 @@ import io.kandra.core.SchemaRegistry
 import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.exception.KandraSchemaException
+import io.kandra.test.KandraTestBackend
 import io.kandra.test.KandraTestcontainers
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -51,10 +53,7 @@ class KandraPluginTest {
     fun cleanup() {
         SchemaRegistry.clear()
         testKeyspace?.let { ks ->
-            CqlSession.builder()
-                .addContactPoint(KandraTestcontainers.container.contactPoint)
-                .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-                .build().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
+            KandraTestBackend.newSession().use { it.execute("DROP KEYSPACE IF EXISTS $ks") }
         }
         testKeyspace = null
     }
@@ -63,7 +62,7 @@ class KandraPluginTest {
         // "kandra_ktor_" (12 chars) + a 32-char dash-stripped UUID = 44 chars, safely under
         // Cassandra's 48-character keyspace name limit. The previous "kandra_ktor_test_" prefix
         // (17 chars) pushed this to 49 chars and made every install() throw InvalidQueryException.
-        val ks = "kandra_ktor_${UUID.randomUUID().toString().replace("-", "")}"
+        val ks = KandraTestBackend.keyspaceName("ktor")
         testKeyspace = ks
         return ks
     }
@@ -79,21 +78,14 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `plugin installs without error`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(TestItem::class)
-                    // The Cassandra Testcontainers image runs with AllowAllAuthenticator (no auth
-                    // required) — use a blank-credentials provider instead of the default
-                    // KandraAuth.fromEnv(), which throws if SCYLLA_USERNAME/SCYLLA_PASSWORD aren't
-                    // set in the environment (they never are in CI or local dev for this test).
-                    auth { provider = KandraAuth.static("", "") }
                 }
             }
         }
@@ -102,17 +94,14 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `kandraSession is accessible after install`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
                     register(TestItem::class)
-                    auth { provider = KandraAuth.static("", "") }
                 }
                 val session = kandraSession
                 assertNotNull(session)
@@ -130,17 +119,14 @@ class KandraPluginTest {
      */
     @Test
     fun `strictMode and allowedRemoteDcs can be set together without breaking real query execution`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(TestItem::class)
-                    auth { provider = KandraAuth.static("", "") }
                     consistency {
                         strictMode = true
                     }
@@ -176,16 +162,13 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `graceful shutdown drain exits promptly once in-flight queries finish`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
-                    auth { provider = KandraAuth.static("", "") }
                     shutdown {
                         graceful = true
                         drainTimeoutMs = 5_000
@@ -222,16 +205,13 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `graceful shutdown forces close after drainTimeoutMs when in-flight queries never finish`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
-                    auth { provider = KandraAuth.static("", "") }
                     shutdown {
                         graceful = true
                         drainTimeoutMs = 300
@@ -306,17 +286,14 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `kandra health debounces repeated hits within the cache TTL and re-probes after it elapses`() {
-        val cp = KandraTestcontainers.container.contactPoint
         lateinit var cache: HealthCheckCache
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
-                    auth { provider = KandraAuth.static("", "") }
                     healthCheck = true
                     healthCheckCacheTtlMs = 400
                 }
@@ -443,17 +420,14 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `install succeeds and queries work with a valid non-default read consistency`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(TestItem::class)
-                    auth { provider = KandraAuth.static("", "") }
                     consistency { defaultRead = KandraConsistency.SERIAL }
                 }
 
@@ -474,17 +448,14 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `install succeeds and queries work with a valid keyspace name`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(TestItem::class)
-                    auth { provider = KandraAuth.static("", "") }
                 }
 
                 val repo = kandra.suspendRepository<TestItem>()
@@ -508,17 +479,14 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `dcAwareFailover with RETRY_REMOTE_DC wires the driver's native DC-failover options`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.AUTO_CREATE
                     register(TestItem::class)
-                    auth { provider = KandraAuth.static("", "") }
                     loadBalancing {
                         dcAwareFailover = true
                         allowedRemoteDcs = listOf("fake-remote-dc")
@@ -556,16 +524,13 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `dcAwareFailover without RETRY_REMOTE_DC leaves the driver's DC-failover options inert`() {
-        val cp = KandraTestcontainers.container.contactPoint
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
-                    auth { provider = KandraAuth.static("", "") }
                     loadBalancing {
                         dcAwareFailover = true
                         allowedRemoteDcs = listOf("fake-remote-dc")
@@ -592,7 +557,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `credential rotation pushes refreshed credentials into the live session's auth provider`() {
-        val cp = KandraTestcontainers.container.contactPoint
+        assumeFalse(KandraTestBackend.isCloud, "uses fake rotating credentials, which only an AllowAllAuthenticator (Docker) cluster accepts")
         val callCount = AtomicInteger(0)
         val rotatingProvider = KandraAuthProvider {
             if (callCount.incrementAndGet() == 1) {
@@ -612,8 +577,7 @@ class KandraPluginTest {
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
@@ -649,7 +613,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `credential rotation does not fire onCredentialRefreshed when the session has no live auth provider`() {
-        val cp = KandraTestcontainers.container.contactPoint
+        assumeFalse(KandraTestBackend.isCloud, "asserts the session has no auth provider at all, which only holds for a no-auth (Docker) cluster")
         val refreshedCount = AtomicInteger(0)
         val listener = object : KandraEventListener {
             override fun onEventualWriteFailed(tableName: String, entity: Any, error: Throwable) {}
@@ -661,8 +625,7 @@ class KandraPluginTest {
         testApplication {
             application {
                 install(Kandra) {
-                    contactPoints = "${cp.hostString}:${cp.port}"
-                    localDatacenter = KandraTestcontainers.container.localDatacenter
+                    useTestBackend()
                     keyspace = freshKeyspaceName()
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
