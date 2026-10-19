@@ -35,3 +35,4 @@ local.properties
 # Local live-cluster credentials (never commit)
 .kandra-cloud.env
 .kandra-cloud-ca.pem
+.kandra-cloud2.env
