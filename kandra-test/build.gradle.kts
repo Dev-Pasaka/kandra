@@ -20,6 +20,7 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.kotlin.logging)
     implementation(libs.slf4j.simple)
+    compileOnly(libs.junit) // KandraCloud.assumeConfigured() (JUnit assumptions)
     compileOnly(libs.testcontainers.cassandra)
     // ComposeContainer (org.testcontainers.containers.ComposeContainer), backing
     // KandraMultiDcTestcontainers (GH #84 / ISS-076), lives in the base `testcontainers` artifact

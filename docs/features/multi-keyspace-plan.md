@@ -54,6 +54,19 @@ Rules for every agent, because the cluster is **shared by parallel agents**:
 - Create keyspaces named `kt_<task>_<random8>` (lowercase), **always drop them in `finally`/teardown**.
   Never touch any keyspace that doesn't start with `kt_`. Never touch `system*`.
 - Use `SimpleStrategy` RF=1 or 3 only (the cluster is multi-AZ in one DC, not multi-DC).
+  The cluster enables **tablets by default**, and `SimpleStrategy` rejects tablets, so
+  `CREATE KEYSPACE ... SimpleStrategy` must end with `AND tablets = {'enabled': false}`
+  (`KandraCloud.freshKeyspace` does this for you).
+- Verified (ISS-109): a single datacenter `AWS_US_EAST_1` (so `KANDRA_CLOUD_LOCAL_DC=AWS_US_EAST_1`
+  is correct), 3 nodes, racks `use1-az4`/`use1-az4`/`use1-az2` (2 distinct AZs), `system.local.release_version`
+  reports 3.0.8 (Scylla's Cassandra-compat version string). Plain username/password on port 9042 works (TLS not required); TLS is also available on 9142
+  (`KANDRA_CLOUD_TLS=true` + `KANDRA_CLOUD_CA_PEM`, harness builds the trust store from the PEM at runtime).
+  RF=1 keyspaces can hit `Unavailable` on this cluster; prefer RF=3.
+- Use the `KandraCloud` harness (kandra-test): `KandraCloud.assumeConfigured()` in `@BeforeAll`
+  (skips when unset), `KandraCloud.freshKeyspace("prefix", rf).use { ks -> ks.session ... }`
+  (creates `kt_<prefix>_<random8>`, always drops it), `KandraCloud.newSession(keyspace?)`.
+  The default driver timeout (2s) is too short for DDL over the WAN; the harness sets 30s.
+  Run: `source /Users/pasaka/Developer/Kandra/.kandra-cloud.env && ./gradlew :<module>:test --tests '<Class>'`.
 - Don't run the whole suite concurrently with others; run only your module's tests plus the
   cloud tests you add. The full regression run is done once, at integration time (Phase 3).
 - Cloud tests must be skipped (not failed) when `KANDRA_CLOUD_CONTACT_POINTS` is unset, so CI and

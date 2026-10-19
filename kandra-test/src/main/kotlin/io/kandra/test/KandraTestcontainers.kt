@@ -66,22 +66,26 @@ object KandraTestcontainers {
         replicationFactor: Int = 1,
         statementBuilderConsistencyConfig: ConsistencyConfig = ConsistencyConfig()
     ): KandraRuntimeHandle {
-        val keyspace = "kandra_test_${UUID.randomUUID().toString().replace("-", "")}"
-        val cp = container.contactPoint
-        val contactPoint = "${cp.hostString}:${cp.port}"
+        // KANDRA_TEST_BACKEND=cloud => run against the KANDRA_CLOUD_* cluster instead of a container
+        // (only for callers of freshKeyspace(); tests that touch `container` directly stay on Docker).
+        val useCloud = System.getenv("KANDRA_TEST_BACKEND")?.lowercase() == "cloud"
+        if (useCloud) check(KandraCloud.isConfigured) { "KANDRA_TEST_BACKEND=cloud but KANDRA_CLOUD_CONTACT_POINTS is unset" }
+        val keyspace = if (useCloud) "kt_it_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+            else "kandra_test_${UUID.randomUUID().toString().replace("-", "")}"
 
-        val bootstrapSession = CqlSession.builder()
+        val bootstrapSession = if (useCloud) KandraCloud.newSession() else CqlSession.builder()
             .addContactPoint(container.contactPoint)
             .withLocalDatacenter(container.localDatacenter)
             .build()
 
         bootstrapSession.execute(
             "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-            "{'class': 'SimpleStrategy', 'replication_factor': $replicationFactor}"
+            "{'class': 'SimpleStrategy', 'replication_factor': ${if (useCloud && replicationFactor == 1) 3 else replicationFactor}}" +
+            if (useCloud) " AND tablets = {'enabled': false}" else ""
         )
         bootstrapSession.close()
 
-        val session = CqlSession.builder()
+        val session = if (useCloud) KandraCloud.newSession(keyspace) else CqlSession.builder()
             .addContactPoint(container.contactPoint)
             .withLocalDatacenter(container.localDatacenter)
             .withKeyspace(keyspace)
