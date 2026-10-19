@@ -153,12 +153,12 @@ class QueryExecutor(
         // way to iterate all rows — ALLOW FILTERING is never used.
         val cql = if (primaryPredicates.isEmpty()) {
             if (pageToken == null) {
-                logger.info { "findPage on '${schema.tableName}' with no predicates — full token-range scan (driver paging). Use sparingly on large tables." }
+                logger.info { "findPage on '${schema.qualifiedTableName}' with no predicates — full token-range scan (driver paging). Use sparingly on large tables." }
             }
-            "SELECT * FROM ${schema.tableName}"
+            "SELECT * FROM ${schema.qualifiedTableName}"
         } else {
             val (whereParts, _) = buildWhere(primaryPredicates)
-            "SELECT * FROM ${schema.tableName} WHERE $whereParts"
+            "SELECT * FROM ${schema.qualifiedTableName} WHERE $whereParts"
         }
         val values = if (primaryPredicates.isEmpty()) emptyList() else buildWhere(primaryPredicates).second
         val prepared = session.prepare(cql)
@@ -276,12 +276,12 @@ class QueryExecutor(
 
         val cql = if (primaryPredicates.isEmpty()) {
             if (pageToken == null) {
-                logger.info { "findPage on '${schema.tableName}' with no predicates — full token-range scan (driver paging). Use sparingly on large tables." }
+                logger.info { "findPage on '${schema.qualifiedTableName}' with no predicates — full token-range scan (driver paging). Use sparingly on large tables." }
             }
-            "SELECT * FROM ${schema.tableName}"
+            "SELECT * FROM ${schema.qualifiedTableName}"
         } else {
             val (whereParts, _) = buildWhere(primaryPredicates)
-            "SELECT * FROM ${schema.tableName} WHERE $whereParts"
+            "SELECT * FROM ${schema.qualifiedTableName} WHERE $whereParts"
         }
         val values = if (primaryPredicates.isEmpty()) emptyList() else buildWhere(primaryPredicates).second
         val prepared = session.prepareSuspend(cql)
@@ -372,12 +372,12 @@ class QueryExecutor(
 
     private fun requireActiveMarker() = schema.softDeleteMarkerColumn
         ?: throw KandraSchemaException(
-            "findActive() requires @SoftDelete(markerProperty = \"...\") on '${schema.tableName}'."
+            "findActive() requires @SoftDelete(markerProperty = \"...\") on '${schema.qualifiedTableName}'."
         )
 
     private fun activeMarkerWarning(marker: io.kandra.core.schema.ColumnSchema) {
         logger.warn {
-            "findActive() on '${schema.tableName}' scans with ALLOW FILTERING on '${marker.cqlName}' — " +
+            "findActive() on '${schema.qualifiedTableName}' scans with ALLOW FILTERING on '${marker.cqlName}' — " +
             "scatter-gather across all nodes. Consider @SecondaryIndex on the marker column for large tables."
         }
     }
@@ -391,17 +391,17 @@ class QueryExecutor(
     private fun buildActiveQueryCql(marker: io.kandra.core.schema.ColumnSchema, allowFullScan: Boolean): String {
         val hasSecondaryIndex = schema.secondaryIndexes.any { it.cqlName == marker.cqlName }
         if (hasSecondaryIndex) {
-            return "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ?"
+            return "SELECT * FROM ${schema.qualifiedTableName} WHERE ${marker.cqlName} = ?"
         }
         if (!allowFullScan) {
             throw KandraQueryException(
-                "findActive() on '${schema.tableName}' requires ALLOW FILTERING on '${marker.cqlName}', " +
+                "findActive() on '${schema.qualifiedTableName}' requires ALLOW FILTERING on '${marker.cqlName}', " +
                 "which Kandra does not emit implicitly. Add a @SecondaryIndex to the marker column, or " +
                 "pass allowFullScan = true to findActive() to opt in explicitly."
             )
         }
         activeMarkerWarning(marker)
-        return "SELECT * FROM ${schema.tableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
+        return "SELECT * FROM ${schema.qualifiedTableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
     }
 
     fun <T : Any> findActive(entityClass: KClass<T>, allowFullScan: Boolean = false): List<T> {
@@ -463,7 +463,7 @@ class QueryExecutor(
             // a secondary-index IN falls through to the direct-CQL path below, which builds
             // `<actual column> IN (?, ?, ...)` against the right column, correctly encoded (GH #144).
             if (isOnPk) {
-                logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
+                logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.qualifiedTableName}' — scatter-gather across partitions." }
                 val encodedIds = inPredicate.values.filterNotNull()
                 val rs = session.execute(statementBuilder.selectByPartitionKeyIn(schema, encodedIds, consistency))
                 return boundedAll(rs)
@@ -501,7 +501,7 @@ class QueryExecutor(
         }
 
         if (secondaryIndexPredicate != null) {
-            logger.warn { "Secondary index query on '${predicateColumn(secondaryIndexPredicate)}' in '${schema.tableName}' — scatter-gather across all nodes." }
+            logger.warn { "Secondary index query on '${predicateColumn(secondaryIndexPredicate)}' in '${schema.qualifiedTableName}' — scatter-gather across all nodes." }
         }
 
         // ── Direct CQL query ──────────────────────────────────────────────────
@@ -512,7 +512,7 @@ class QueryExecutor(
             ctx.limit != null -> " LIMIT ${ctx.limit}"
             else -> ""
         }
-        val cql = "SELECT $selectCols FROM ${schema.tableName} WHERE $whereParts$limitClause"
+        val cql = "SELECT $selectCols FROM ${schema.qualifiedTableName} WHERE $whereParts$limitClause"
         val prepared = session.prepare(cql)
         val resolvedConsistency = statementBuilder.resolveReadConsistency(schema, consistency)
         val stmt = prepared.bind(*values.toTypedArray())
@@ -531,7 +531,7 @@ class QueryExecutor(
         while (iterator.hasNext() && rows.size <= maxUnpagedResultRows) rows.add(iterator.next())
         if (rows.size > maxUnpagedResultRows) {
             logger.warn {
-                "Query on '${schema.tableName}' returned more than $maxUnpagedResultRows rows without " +
+                "Query on '${schema.qualifiedTableName}' returned more than $maxUnpagedResultRows rows without " +
                 "paging — truncating to $maxUnpagedResultRows. Use findPage() for large or unbounded result sets."
             }
             return rows.subList(0, maxUnpagedResultRows)
@@ -569,7 +569,7 @@ class QueryExecutor(
             // genuine-partition-key case takes this shortcut; a secondary-index IN falls through
             // to the direct-CQL path below (correct column, correct per-value encoding via GH #144).
             if (isOnPk) {
-                logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.tableName}' — scatter-gather across partitions." }
+                logger.debug { "IN query on partition key '${inPredicate.column}' in '${schema.qualifiedTableName}' — scatter-gather across partitions." }
                 val encodedIds = inPredicate.values.filterNotNull()
                 return boundedSuspendAll(statementBuilder.selectByPartitionKeyInSuspend(schema, encodedIds, consistency))
             }
@@ -607,7 +607,7 @@ class QueryExecutor(
         }
 
         if (secondaryIndexPredicate != null) {
-            logger.warn { "Secondary index query on '${predicateColumn(secondaryIndexPredicate)}' in '${schema.tableName}' — scatter-gather across all nodes." }
+            logger.warn { "Secondary index query on '${predicateColumn(secondaryIndexPredicate)}' in '${schema.qualifiedTableName}' — scatter-gather across all nodes." }
         }
 
         // ── Direct CQL query ──────────────────────────────────────────────────
@@ -618,7 +618,7 @@ class QueryExecutor(
             ctx.limit != null -> " LIMIT ${ctx.limit}"
             else -> ""
         }
-        val cql = "SELECT $selectCols FROM ${schema.tableName} WHERE $whereParts$limitClause"
+        val cql = "SELECT $selectCols FROM ${schema.qualifiedTableName} WHERE $whereParts$limitClause"
         val prepared = session.prepareSuspend(cql)
         val resolvedConsistency = statementBuilder.resolveReadConsistency(schema, consistency)
         val stmt = prepared.bind(*values.toTypedArray())
@@ -635,7 +635,7 @@ class QueryExecutor(
         val rows = session.executeSuspendUpTo(statement, maxUnpagedResultRows)
         if (rows.size > maxUnpagedResultRows) {
             logger.warn {
-                "Query on '${schema.tableName}' returned more than $maxUnpagedResultRows rows without " +
+                "Query on '${schema.qualifiedTableName}' returned more than $maxUnpagedResultRows rows without " +
                 "paging — truncating to $maxUnpagedResultRows. Use findPageSuspend() for large or unbounded result sets."
             }
             return rows.subList(0, maxUnpagedResultRows)
