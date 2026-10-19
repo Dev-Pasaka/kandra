@@ -98,6 +98,14 @@ object SchemaRegistry {
                     "only letters, digits, and underscores."
             )
         }
+        val keyspace = tableAnnotation.keyspace.takeIf { it.isNotBlank() }
+        if (keyspace != null && !CqlNaming.isValidIdentifier(keyspace)) {
+            throw KandraSchemaException(
+                "Class '${klass.simpleName}' has an invalid @ScyllaTable keyspace '$keyspace' — " +
+                    "keyspace names must start with a letter or underscore and contain only " +
+                    "letters, digits, and underscores. Use keyspace = \"\" for the default keyspace."
+            )
+        }
         val ttlAnnotation = klass.findAnnotation<Ttl>()
 
         val properties = klass.memberProperties
@@ -303,7 +311,8 @@ object SchemaRegistry {
                 indexColumn = col,
                 partitionKeyColumns = partitionKeys,
                 consistency = col.lookupIndex.consistency,
-                clusteringKeyColumns = clusteringKeys
+                clusteringKeyColumns = clusteringKeys,
+                keyspace = keyspace
             )
         }
 
@@ -396,7 +405,8 @@ object SchemaRegistry {
             gcGraceSeconds = tableAnnotation.gcGraceSeconds.takeIf { it >= 0 },
             cacheConfig = cacheResultAnn?.let { CacheResultConfig(it.ttlSeconds, it.maxSize) },
             generatedUuidColumns = generatedUuidColumns,
-            reflection = buildEntityReflection(klass, columnSchemas)
+            reflection = buildEntityReflection(klass, columnSchemas),
+            keyspace = keyspace
         )
     }
 
