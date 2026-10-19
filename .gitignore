@@ -31,3 +31,6 @@ local.properties
 
 # KSP generated sources (optional — check in if you want reproducible builds)
 **/build/generated/ksp/
+
+# Local live-cluster credentials (never commit)
+.kandra-cloud.env
