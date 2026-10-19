@@ -653,3 +653,23 @@ routing {
 - `contactPoints` port parsing splits on the *last* colon per comma-separated entry — safe for IPv6 literals
   with a trailing port, but malformed entries without a numeric suffix after the last colon will throw a
   `NumberFormatException` from `.toInt()`, not a Kandra-specific error.
+
+## Multi-keyspace (ISS-105)
+
+One `install(Kandra)`, one `CqlSession`, many keyspaces:
+
+```kotlin
+install(Kandra) {
+    keyspace = "core"                         // default keyspace (blank allowed only if extra keyspaces are declared AND every entity names its keyspace)
+    keyspace("billing") {                     // declare an extra keyspace; settings only
+        autoCreate = true
+        replicationStrategy = ReplicationStrategy.NetworkTopologyStrategy(mapOf("dc1" to 3)) // null = inherit plugin-level strategy
+    }
+    register(User::class, Invoice::class)     // Invoice is @ScyllaTable(keyspace = "billing")
+}
+```
+
+- Entity membership comes from the annotation only. An entity naming a keyspace that is neither the default nor declared → `KandraSchemaException` (names the entity and lists declared keyspaces), thrown before connecting.
+- Validation (before connecting): identifiers valid, unique, not equal to the default (case-insensitive); DC names checked for auto-created keyspaces.
+- Per keyspace: `CREATE KEYSPACE` (when `autoCreate`), permission check, `AUTO_CREATE`/`AUTO_MIGRATE`/`VALIDATE` over only that keyspace's entities, `system_schema` lookups by that keyspace. Each non-default keyspace has its own `kandra_ddl_locks` table; the default keeps the old lock name.
+- Gotcha: `SimpleStrategy` autoCreate fails on tablets-enabled clusters (e.g. Scylla Cloud) — use `NetworkTopologyStrategy` there. Kandra does not add `tablets = {'enabled': false}`.

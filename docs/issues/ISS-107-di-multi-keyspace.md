@@ -1,6 +1,6 @@
 # ISS-107: Koin/Kodein bindings with multiple keyspaces
 
-**Status:** Implemented — pending integration (Phase 3). Part of ISS-102 (see [multi-keyspace-plan](../features/multi-keyspace-plan.md))
+**Status:** Fixed — verified 2026-10-20 (Docker regression + live Scylla Cloud over TLS); see [multi-keyspace-plan](../features/multi-keyspace-plan.md)
 
 **What was done:** Bindings were already keyspace-agnostic (each repo gets its entity's schema, so the runtime qualifies CQL).
 The simple-name guard in `kandraKoin()` / `kandraKodein()` is kept; its message now lists each colliding class with its

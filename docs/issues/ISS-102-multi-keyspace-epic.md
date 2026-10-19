@@ -1,6 +1,6 @@
 # ISS-102: Multiple keyspaces over a single connection (epic)
 
-**Status:** Open — part of ISS-102 (see [multi-keyspace-plan](../features/multi-keyspace-plan.md))
+**Status:** Fixed — verified 2026-10-20 (Docker regression + live Scylla Cloud over TLS); see [multi-keyspace-plan](../features/multi-keyspace-plan.md)
 
 ## Problem
 

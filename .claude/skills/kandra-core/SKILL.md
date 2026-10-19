@@ -516,3 +516,10 @@ gated by either annotation — they're considered stable public API.
 - `DdlGenerator.kotlinTypeToCql` recognizes exactly the types in the table above; anything else (e.g. a
   data class, `BigInteger`, `URI`) throws `KandraSchemaException` at DDL-generation time, not at
   compile time — a bad field type surfaces only when you first generate/register schema for that entity.
+
+## Multi-keyspace (ISS-103)
+
+- `@ScyllaTable(name, gcGraceSeconds, keyspace = "")` — blank = the plugin's default keyspace. Names are validated with `CqlNaming.isValidIdentifier`; an invalid name throws `KandraSchemaException` from `SchemaRegistry`.
+- `TableSchema.keyspace: String?` and `LookupTableSchema.keyspace` (lookup tables inherit the parent's). `null` = default keyspace.
+- `qualifiedTableName` = `tableName` when keyspace is null, else `"$keyspace.$tableName"`. Use it for any CQL you build; keep `tableName` for `system_schema` lookups, lock names and other bare-name uses. `LookupIndexSchema` has no keyspace — qualify via the parent schema.
+- `DdlGenerator` emits qualified names for keyspaced entities (including `CREATE INDEX` names); null-keyspace output is byte-identical to before.

@@ -1,10 +1,8 @@
 # ISS-104: Runtime emits keyspace-qualified CQL
 
-**Status:** Implemented — pending integration (Phase 3). All `schema.tableName`/`lookup.tableName` uses in StatementBuilder,
-BatchEngine, QueryExecutor and the repositories now use `qualifiedTableName` (CQL, prepared-statement cache keys which are the
-CQL string, metrics and log labels). Strict-mode RF check resolves `schema.keyspace ?: session.keyspace`. Tests:
-`StatementBuilderQualifiedCqlTest` (kandra-runtime) and `MultiKeyspaceRuntimeIntegrationTest` (kandra-test; Docker, or
-`KANDRA_TEST_BACKEND=cloud`).
+**Status:** Fixed — verified 2026-10-20 (Docker regression + live Scylla Cloud over TLS); see [multi-keyspace-plan](../features/multi-keyspace-plan.md)
+
+Implemented: all `schema.tableName`/`lookup.tableName` uses in StatementBuilder, BatchEngine, QueryExecutor and the repositories use `qualifiedTableName` (CQL, prepared-statement cache keys, metrics and log labels). Strict-mode RF check resolves `schema.keyspace ?: session.keyspace`. Tests: `StatementBuilderQualifiedCqlTest` (kandra-runtime) and `MultiKeyspaceRuntimeIntegrationTest` (kandra-test; Docker, or `KANDRA_TEST_BACKEND=cloud`).
 
 Part of ISS-102 (see [multi-keyspace-plan](../features/multi-keyspace-plan.md))
 

@@ -41,6 +41,15 @@ Docker before relying on them.
 | [ISS-099](ISS-099-codegen-default-package-empty-line.md) | `kandra-codegen` emitted an invalid empty `package` line for default-package entities |
 | [ISS-100](ISS-100-integration-modules-runtime-scope-deps.md) | Integration modules published `kandra-core`/`kandra-runtime` at runtime scope, breaking consumer compilation |
 | [ISS-101](ISS-101-ktor-version-range-undocumented.md) | No documented supported Ktor version range (partially fixed — see file for the CI/3.x follow-up) |
+| [ISS-102](ISS-102-multi-keyspace-epic.md) | Multiple keyspaces over a single connection (epic) |
+| [ISS-103](ISS-103-core-keyspace-contract.md) | Entity-level keyspace in kandra-core |
+| [ISS-104](ISS-104-runtime-qualified-cql.md) | Runtime emits keyspace-qualified CQL |
+| [ISS-105](ISS-105-ktor-multi-keyspace-config.md) | Plugin config and bootstrap for several keyspaces |
+| [ISS-107](ISS-107-di-multi-keyspace.md) | Koin/Kodein bindings with multiple keyspaces |
+| [ISS-108](ISS-108-migrate-per-keyspace.md) | Migrations tracked per keyspace |
+| [ISS-109](ISS-109-cloud-test-harness.md) | Live Scylla Cloud test harness |
+| [ISS-110](ISS-110-codegen-and-docs.md) | Codegen validation and docs for multi-keyspace |
+| [ISS-111](ISS-111-e2e-and-regression.md) | End-to-end multi-keyspace suite and full regression |
 | [ISS-011](ISS-011-jakarta-bean-validation.md) | Jakarta Bean Validation not auto-detected |
 | [ISS-021](ISS-021-allow-filtering-error-message.md) | Error message referenced a non-existent `allowFiltering()` |
 | [ISS-022](ISS-022-codegen-collection-raw-types.md) | `kandra-codegen` generated invalid Kotlin for any `Set`/`Map` column |

@@ -310,3 +310,7 @@ order, so a broken low-numbered migration blocks every migration after it, appli
 - Constructing multiple `KandraMigrationRunner`s concurrently against a keyspace with no `kandra_migrations`
   table yet races on the bootstrap DDL (`init` block) — this has no LWT guard, unlike per-migration claiming.
   See `docs/issues/ISS-071-concurrent-ddl-bootstrap-race.md`.
+
+## Multi-keyspace (ISS-108)
+
+`KandraMigrationRunner(session, staleClaimThreshold = 10min, keyspace: String? = null)`. `null` = exact old behaviour (session's keyspace). With a keyspace, `<ks>.kandra_migrations` and `<ks>.kandra_ddl_locks` are created/read/written qualified, so each keyspace has an independent history (same version numbers allowed) and checksum validation. Invalid name → `IllegalArgumentException`. The session is not switched to the keyspace: migration CQL must qualify its own table names, or override `KandraMigration.up(session, keyspace)` (defaults to `up(session)`; checksums unchanged).

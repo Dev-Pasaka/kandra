@@ -1,6 +1,6 @@
 # ISS-108: Migrations tracked per keyspace
 
-**Status:** Implemented — pending integration (Phase 3). Part of ISS-102 (see [multi-keyspace-plan](../features/multi-keyspace-plan.md)).
+**Status:** Fixed — verified 2026-10-20 (Docker regression + live Scylla Cloud over TLS); see [multi-keyspace-plan](../features/multi-keyspace-plan.md)
 
 Done: `KandraMigrationRunner(session, staleClaimThreshold, keyspace: String? = null)`; `kandra_migrations` and `kandra_ddl_locks` are created/read/written qualified in the target keyspace (null = session keyspace, unchanged). Keyspace validated with `CqlNaming.isValidIdentifier` (IllegalArgumentException). `KandraMigration` gained `open fun up(session, keyspace)` (defaults to `up(session)`); checksums unchanged. Tests: `KandraMigrationMultiKeyspaceTest` (Docker + cloud).
 
