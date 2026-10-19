@@ -1,6 +1,9 @@
 # ISS-105: Plugin config and bootstrap for several keyspaces
 
-**Status:** Open — part of ISS-102 (see [multi-keyspace-plan](../features/multi-keyspace-plan.md))
+**Status:** Implemented — pending integration (Phase 3). Part of ISS-102 (see [multi-keyspace-plan](../features/multi-keyspace-plan.md))
+
+**What was done:** `keyspace(name) { autoCreate; replicationStrategy }` DSL (`KeyspaceConfig`); up-front validation (identifiers, duplicates, clash with default, NTS DC names); entities registered before connecting and checked against default+declared keyspaces (`KandraSchemaException` listing declared keyspaces); one `CqlSession`; per-keyspace CREATE KEYSPACE, permission validation, AUTO_CREATE/AUTO_MIGRATE/VALIDATE restricted to that keyspace's entities with correct `system_schema` keyspace_name; `kandra_ddl_locks` lives in each non-default keyspace (qualified) with the keyspace in the lock name; the default keyspace keeps the unqualified table and unchanged lock names. A blank default keyspace is allowed only if extra keyspaces are declared and every entity names a keyspace. Tests: `MultiKeyspaceConfigTest`, `MultiKeyspaceIntegrationTest` (Docker + cloud; cloud skipped when env unset).
+
 
 ## Problem
 

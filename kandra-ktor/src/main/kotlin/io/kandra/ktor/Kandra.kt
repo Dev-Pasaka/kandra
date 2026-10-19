@@ -87,31 +87,13 @@ val Kandra: ApplicationPlugin<KandraConfig> =
     createApplicationPlugin(name = "Kandra", createConfiguration = ::KandraConfig) {
         val config = pluginConfig
 
-        if (config.keyspace.isBlank()) throw KandraSchemaException(
-            "Kandra: 'keyspace' must be set in the plugin configuration."
-        )
-        // GH #65: config.keyspace was previously only blank-checked before being spliced into CQL
-        // as both an unquoted identifier (`USE <keyspace>`) and a string literal
-        // (`... WHERE keyspace_name = '<keyspace>'`). Validate it as a CQL identifier up front, the
-        // same way SchemaRegistry validates table/column names, so a malformed or malicious value
-        // fails fast here rather than reaching interpolated CQL below.
-        if (!CqlNaming.isValidIdentifier(config.keyspace)) throw KandraSchemaException(
-            "Kandra: keyspace '${config.keyspace}' is not a valid CQL identifier. Identifiers must " +
-            "start with a letter or underscore and contain only letters, digits, and underscores."
-        )
-        // GH #65: validate NetworkTopologyStrategy's DC-name keys up front too, before any
-        // connection is attempted -- they get spliced into the CREATE KEYSPACE replication map
-        // literal (keyspaceDdl, CqlSessionBuilder.kt) once autoCreateKeyspace runs below.
-        val strategy = config.replicationStrategy
-        if (config.autoCreateKeyspace && strategy is ReplicationStrategy.NetworkTopologyStrategy) {
-            strategy.dcReplicationMap.keys.forEach { dc ->
-                if (!CqlNaming.isValidIdentifier(dc)) throw KandraSchemaException(
-                    "Kandra: replicationStrategy datacenter name '$dc' is not a valid CQL identifier. " +
-                    "Identifiers must start with a letter or underscore and contain only letters, " +
-                    "digits, and underscores."
-                )
-            }
-        }
+        // ISS-105: validates the default keyspace (GH #65: blank / valid-identifier checks, unchanged
+        // for the single-keyspace case) plus every extra keyspace declared via keyspace(name) { },
+        // including NetworkTopologyStrategy DC names (GH #65), all before any connection is attempted.
+        val keyspaceSpecs = resolveKeyspaceSpecs(config)
+        val defaultKeyspace = config.keyspace
+        val hasDefaultKeyspace = defaultKeyspace.isNotBlank()
+
         // GH #140: EACH_QUORUM is write-only (Cassandra/Scylla reject it server-side for reads) and
         // SERIAL/LOCAL_SERIAL are only valid as a conditional write's *serial* consistency, never as
         // a table's regular write consistency -- catch either misconfiguration here, before any
@@ -134,13 +116,27 @@ val Kandra: ApplicationPlugin<KandraConfig> =
             "THREE, QUORUM, ALL, LOCAL_ONE, LOCAL_QUORUM, EACH_QUORUM."
         )
 
-        val sessionHandle = if (config.autoCreateKeyspace) {
+        // ISS-105: register entities before connecting so an entity naming an undeclared keyspace
+        // (or lacking one when there is no default) fails fast, without leaking an open session.
+        config.entities.forEach { klass ->
+            SchemaRegistry.register(klass)
+            logger.debug { "Kandra: registered entity ${klass.simpleName}" }
+        }
+        validateEntityKeyspaces(config, SchemaRegistry.all())
+
+        // Exactly ONE CqlSession regardless of keyspace count. If any keyspace is auto-created, the
+        // session is opened without a keyspace, the keyspaces are created, and then the default one
+        // (if any) is USEd -- the single-keyspace flow is unchanged.
+        val anyAutoCreate = keyspaceSpecs.any { it.autoCreate }
+        val sessionHandle = if (anyAutoCreate) {
             val bootstrapHandle = buildCqlSession(config, withKeyspace = false)
-            // keyspaceDdl (CqlSessionBuilder.kt) also validates dcReplicationMap's DC-name keys
-            // before splicing them into the CREATE KEYSPACE literal (GH #65).
-            bootstrapHandle.session.execute(keyspaceDdl(config.keyspace, config.replicationStrategy))
-            bootstrapHandle.session.execute("USE ${config.keyspace}")
-            logger.info { "Kandra: keyspace '${config.keyspace}' ensured." }
+            keyspaceSpecs.filter { it.autoCreate }.forEach { spec ->
+                // keyspaceDdl (CqlSessionBuilder.kt) also validates dcReplicationMap's DC-name keys
+                // before splicing them into the CREATE KEYSPACE literal (GH #65).
+                bootstrapHandle.session.execute(keyspaceDdl(spec.name, spec.strategy))
+                logger.info { "Kandra: keyspace '${spec.name}' ensured." }
+            }
+            if (hasDefaultKeyspace) bootstrapHandle.session.execute("USE $defaultKeyspace")
             bootstrapHandle
         } else {
             buildCqlSession(config)
@@ -148,20 +144,25 @@ val Kandra: ApplicationPlugin<KandraConfig> =
         val session = sessionHandle.session
 
         config.eventListener?.onConnectionEstablished(config.contactPoints)
-        logger.info { "Kandra: connected to ${config.contactPoints}, keyspace=${config.keyspace}" }
+        logger.info {
+            if (keyspaceSpecs.size <= 1 && hasDefaultKeyspace) {
+                "Kandra: connected to ${config.contactPoints}, keyspace=$defaultKeyspace"
+            } else {
+                "Kandra: connected to ${config.contactPoints}, defaultKeyspace=" +
+                    "${defaultKeyspace.ifBlank { "<none>" }}, keyspaces=${keyspaceSpecs.map { it.name }}"
+            }
+        }
 
-        // ── Permission validation ────────────────────────────────────────────
+        // ── Permission validation (per keyspace) ─────────────────────────────
         if (config.validatePermissions && config.schemaMode != SchemaMode.NONE) {
-            validatePermissions(session, config.keyspace, config.schemaMode)
+            keyspaceSpecs.forEach { validatePermissions(session, it.name, config.schemaMode) }
         }
 
-        config.entities.forEach { klass ->
-            SchemaRegistry.register(klass)
-            logger.debug { "Kandra: registered entity ${klass.simpleName}" }
-        }
-
+        val allSchemas = SchemaRegistry.all()
         when (config.schemaMode) {
-            SchemaMode.AUTO_CREATE -> {
+            SchemaMode.AUTO_CREATE -> keyspaceSpecs.forEach { spec ->
+                val schemas = schemasForKeyspace(allSchemas, spec, defaultKeyspace)
+                if (!spec.isDefault && schemas.isEmpty()) return@forEach
                 // GH #79/ISS-071: a rolling deploy of N replicas otherwise races N instances' worth
                 // of `CREATE TABLE IF NOT EXISTS` against the same keyspace concurrently -- a known
                 // schema-disagreement risk on Cassandra/Scylla. Guard the whole pass behind a single
@@ -173,8 +174,14 @@ val Kandra: ApplicationPlugin<KandraConfig> =
                 // never block a later deploy whose registered entities (or their columns) changed,
                 // or AUTO_CREATE/AUTO_MIGRATE would only ever run once per keyspace's entire lifetime.
                 // See schemaFingerprint's KDoc.
-                claimAndRunDdlBootstrap(session, ddlBootstrapLockName(SchemaRegistry.all())) {
-                    SchemaRegistry.all().forEach { schema ->
+                //
+                // ISS-105: one claim per keyspace, over that keyspace's entities only, with the
+                // keyspace in the lock name (non-default keyspaces) and the lock table living in the
+                // target keyspace itself.
+                claimAndRunDdlBootstrap(
+                    session, ddlBootstrapLockName(schemas, lockKeyspaceSuffix(spec)), lockTableKeyspace(spec)
+                ) {
+                    schemas.forEach { schema ->
                         DdlGenerator.allStatements(schema).forEach { ddl ->
                             session.execute(ddl)
                             logger.debug { "Kandra: DDL executed: $ddl" }
@@ -182,113 +189,21 @@ val Kandra: ApplicationPlugin<KandraConfig> =
                     }
                 }
             }
-            SchemaMode.AUTO_MIGRATE -> {
+            SchemaMode.AUTO_MIGRATE -> keyspaceSpecs.forEach { spec ->
+                val schemas = schemasForKeyspace(allSchemas, spec, defaultKeyspace)
+                if (!spec.isDefault && schemas.isEmpty()) return@forEach
                 // Same claim guard and fingerprinted lock name as AUTO_CREATE above (GH #79, GH #90)
                 // -- this branch also runs ALTER TABLE ADD, which is exactly the multi-statement,
                 // multi-table DDL the guard exists to serialize.
-                claimAndRunDdlBootstrap(session, ddlBootstrapLockName(SchemaRegistry.all())) {
-                    SchemaRegistry.all().forEach { schema ->
-                        // Step 1: CREATE TABLE IF NOT EXISTS
-                        DdlGenerator.allStatements(schema).forEach { ddl ->
-                            session.execute(ddl)
-                            logger.debug { "Kandra: DDL executed: $ddl" }
-                        }
-                        // Step 2: Diff entity vs Scylla columns and ALTER TABLE ADD for new ones
-                        // GH #65: bound params instead of a string-interpolated literal -- keyspace_name
-                        // was previously spliced directly into a single-quoted CQL string literal.
-                        val rs = session.execute(
-                            "SELECT column_name, type FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
-                            config.keyspace, schema.tableName
-                        )
-                        val existingColumns = rs.all().associate { row ->
-                            row.getString("column_name")!! to row.getString("type")!!
-                        }
-                        val entityColumns = buildList {
-                            addAll(schema.partitionKeys)
-                            addAll(schema.clusteringKeys)
-                            addAll(schema.columns)
-                            addAll(schema.lookupTables.map { it.indexColumn })
-                        }.distinctBy { it.cqlName }
-
-                        entityColumns.forEach { col ->
-                            if (col.cqlName !in existingColumns) {
-                                // GH #92/ISS-079: CQL has no way to ALTER TABLE ADD a column into an
-                                // existing primary key. A missing partition/clustering key column
-                                // means the entity's key shape changed incompatibly since the table
-                                // was created (e.g. a new @ClusteringKey added for versioning) --
-                                // silently emitting a plain ALTER TABLE ADD would create it as a
-                                // regular column while Kandra keeps treating it as part of row
-                                // identity, so two logically-distinct rows collapse onto the same
-                                // physical row and silently overwrite each other's other columns.
-                                // This always needs a manual, explicit migration -- never a safe
-                                // auto-migration -- so refuse loudly instead of corrupting data.
-                                if (col.isPartitionKey || col.clusteringKey != null) {
-                                    throw KandraSchemaException(
-                                        "Kandra AUTO_MIGRATE: entity '${schema.entityClass.simpleName}' declares " +
-                                        "'${col.cqlName}' as a ${if (col.isPartitionKey) "partition" else "clustering"} " +
-                                        "key, but table '${schema.tableName}' does not have it as part of its " +
-                                        "primary key (or at all). CQL cannot ALTER TABLE ADD a column into an " +
-                                        "existing primary key -- ALTER TABLE ${schema.tableName} ADD " +
-                                        "${col.cqlName} would create it as a plain column, silently mapping " +
-                                        "distinct logical rows onto the same physical row. This requires a " +
-                                        "manual migration (e.g. via kandra-migrate: create a new table with the " +
-                                        "desired key and backfill, or recreate this table if the data can be " +
-                                        "discarded) -- refusing to auto-migrate."
-                                    )
-                                }
-                                val alterDdl = DdlGenerator.alterTableAddColumn(schema, col)
-                                session.execute(alterDdl)
-                                logger.info { "Kandra AUTO_MIGRATE: added column '${col.cqlName}' to '${schema.tableName}'" }
-                            } else {
-                                val scyllaType = existingColumns[col.cqlName]!!.lowercase()
-                                val expectedType = DdlGenerator.cqlTypeString(col).lowercase()
-                                if (scyllaType != expectedType) {
-                                    logger.error {
-                                        "Kandra AUTO_MIGRATE: type mismatch on '${schema.tableName}.${col.cqlName}' — " +
-                                        "ScyllaDB has '$scyllaType' but entity declares '$expectedType'. " +
-                                        "This will cause codec errors at runtime. " +
-                                        "Fix the entity type to match the DB, or run: " +
-                                        "ALTER TABLE ${schema.tableName} DROP ${col.cqlName}; then re-add."
-                                    }
-                                }
-                            }
-                        }
-                        // Columns in Scylla but not in entity — warn only
-                        existingColumns.keys.filter { col -> entityColumns.none { it.cqlName == col } }.forEach { col ->
-                            logger.warn {
-                                "Kandra: Column '$col' exists in Scylla table '${schema.tableName}' but is not mapped in ${schema.entityClass.simpleName} entity. " +
-                                "The data is still stored in ScyllaDB but will not be readable via Kandra. " +
-                                "To remove it permanently, run: ALTER TABLE ${schema.tableName} DROP $col; " +
-                                "Never run DROP COLUMN on a column with active data without a migration plan."
-                            }
-                        }
-                    }
+                claimAndRunDdlBootstrap(
+                    session, ddlBootstrapLockName(schemas, lockKeyspaceSuffix(spec)), lockTableKeyspace(spec)
+                ) {
+                    schemas.forEach { schema -> autoMigrateTable(session, schema, spec.name) }
                 }
             }
-            SchemaMode.VALIDATE -> {
-                SchemaRegistry.all().forEach { schema ->
-                    // GH #65: bound params instead of a string-interpolated literal.
-                    val rs = session.execute(
-                        "SELECT column_name FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
-                        config.keyspace, schema.tableName
-                    )
-                    val existingColumns = rs.all().map { row -> row.getString("column_name") }.toSet()
-                    val entityColumns = buildList {
-                        addAll(schema.partitionKeys)
-                        addAll(schema.clusteringKeys)
-                        addAll(schema.columns)
-                        addAll(schema.lookupTables.map { it.indexColumn })
-                    }.map { it.cqlName }.toSet()
-
-                    entityColumns.forEach { col ->
-                        if (col !in existingColumns) throw KandraSchemaException(
-                            "Column '$col' missing from table '${schema.tableName}' in Scylla. " +
-                                "Run migration or set schemaMode = SchemaMode.AUTO_MIGRATE."
-                        )
-                    }
-                    existingColumns.filter { it !in entityColumns }.forEach { col ->
-                        logger.warn { "Kandra: column '$col' exists in Scylla table '${schema.tableName}' but is not in entity — ignored." }
-                    }
+            SchemaMode.VALIDATE -> keyspaceSpecs.forEach { spec ->
+                schemasForKeyspace(allSchemas, spec, defaultKeyspace).forEach { schema ->
+                    validateTable(session, schema, spec.name)
                 }
             }
             SchemaMode.NONE -> logger.info { "Kandra: schemaMode=NONE — skipping all DDL." }
@@ -446,6 +361,110 @@ val Kandra: ApplicationPlugin<KandraConfig> =
         }
     }
 
+/** AUTO_MIGRATE's per-table pass: create-if-missing, then diff columns against `system_schema` and ALTER ADD. */
+private fun autoMigrateTable(session: CqlSession, schema: TableSchema, keyspaceName: String) {
+        // Step 1: CREATE TABLE IF NOT EXISTS
+        DdlGenerator.allStatements(schema).forEach { ddl ->
+            session.execute(ddl)
+            logger.debug { "Kandra: DDL executed: $ddl" }
+        }
+        // Step 2: Diff entity vs Scylla columns and ALTER TABLE ADD for new ones
+        // GH #65: bound params instead of a string-interpolated literal -- keyspace_name
+        // was previously spliced directly into a single-quoted CQL string literal.
+        val rs = session.execute(
+            "SELECT column_name, type FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
+            keyspaceName.lowercase(), schema.tableName
+        )
+        val existingColumns = rs.all().associate { row ->
+            row.getString("column_name")!! to row.getString("type")!!
+        }
+        val entityColumns = buildList {
+            addAll(schema.partitionKeys)
+            addAll(schema.clusteringKeys)
+            addAll(schema.columns)
+            addAll(schema.lookupTables.map { it.indexColumn })
+        }.distinctBy { it.cqlName }
+
+        entityColumns.forEach { col ->
+            if (col.cqlName !in existingColumns) {
+                // GH #92/ISS-079: CQL has no way to ALTER TABLE ADD a column into an
+                // existing primary key. A missing partition/clustering key column
+                // means the entity's key shape changed incompatibly since the table
+                // was created (e.g. a new @ClusteringKey added for versioning) --
+                // silently emitting a plain ALTER TABLE ADD would create it as a
+                // regular column while Kandra keeps treating it as part of row
+                // identity, so two logically-distinct rows collapse onto the same
+                // physical row and silently overwrite each other's other columns.
+                // This always needs a manual, explicit migration -- never a safe
+                // auto-migration -- so refuse loudly instead of corrupting data.
+                if (col.isPartitionKey || col.clusteringKey != null) {
+                    throw KandraSchemaException(
+                        "Kandra AUTO_MIGRATE: entity '${schema.entityClass.simpleName}' declares " +
+                        "'${col.cqlName}' as a ${if (col.isPartitionKey) "partition" else "clustering"} " +
+                        "key, but table '${schema.tableName}' does not have it as part of its " +
+                        "primary key (or at all). CQL cannot ALTER TABLE ADD a column into an " +
+                        "existing primary key -- ALTER TABLE ${schema.tableName} ADD " +
+                        "${col.cqlName} would create it as a plain column, silently mapping " +
+                        "distinct logical rows onto the same physical row. This requires a " +
+                        "manual migration (e.g. via kandra-migrate: create a new table with the " +
+                        "desired key and backfill, or recreate this table if the data can be " +
+                        "discarded) -- refusing to auto-migrate."
+                    )
+                }
+                val alterDdl = DdlGenerator.alterTableAddColumn(schema, col)
+                session.execute(alterDdl)
+                logger.info { "Kandra AUTO_MIGRATE: added column '${col.cqlName}' to '${schema.tableName}'" }
+            } else {
+                val scyllaType = existingColumns[col.cqlName]!!.lowercase()
+                val expectedType = DdlGenerator.cqlTypeString(col).lowercase()
+                if (scyllaType != expectedType) {
+                    logger.error {
+                        "Kandra AUTO_MIGRATE: type mismatch on '${schema.tableName}.${col.cqlName}' — " +
+                        "ScyllaDB has '$scyllaType' but entity declares '$expectedType'. " +
+                        "This will cause codec errors at runtime. " +
+                        "Fix the entity type to match the DB, or run: " +
+                        "ALTER TABLE ${schema.tableName} DROP ${col.cqlName}; then re-add."
+                    }
+                }
+            }
+        }
+        // Columns in Scylla but not in entity — warn only
+        existingColumns.keys.filter { col -> entityColumns.none { it.cqlName == col } }.forEach { col ->
+            logger.warn {
+                "Kandra: Column '$col' exists in Scylla table '${schema.tableName}' but is not mapped in ${schema.entityClass.simpleName} entity. " +
+                "The data is still stored in ScyllaDB but will not be readable via Kandra. " +
+                "To remove it permanently, run: ALTER TABLE ${schema.tableName} DROP $col; " +
+                "Never run DROP COLUMN on a column with active data without a migration plan."
+            }
+        }
+}
+
+/** VALIDATE's per-table pass: every entity column must exist in the table (looked up in [keyspaceName]). */
+private fun validateTable(session: CqlSession, schema: TableSchema, keyspaceName: String) {
+        // GH #65: bound params instead of a string-interpolated literal.
+        val rs = session.execute(
+            "SELECT column_name FROM system_schema.columns WHERE keyspace_name = ? AND table_name = ?",
+            keyspaceName.lowercase(), schema.tableName
+        )
+        val existingColumns = rs.all().map { row -> row.getString("column_name") }.toSet()
+        val entityColumns = buildList {
+            addAll(schema.partitionKeys)
+            addAll(schema.clusteringKeys)
+            addAll(schema.columns)
+            addAll(schema.lookupTables.map { it.indexColumn })
+        }.map { it.cqlName }.toSet()
+
+        entityColumns.forEach { col ->
+            if (col !in existingColumns) throw KandraSchemaException(
+                "Column '$col' missing from table '${schema.tableName}' in Scylla. " +
+                    "Run migration or set schemaMode = SchemaMode.AUTO_MIGRATE."
+            )
+        }
+        existingColumns.filter { it !in entityColumns }.forEach { col ->
+            logger.warn { "Kandra: column '$col' exists in Scylla table '${schema.tableName}' but is not in entity — ignored." }
+        }
+}
+
 /**
  * Lock key prefix used for the [SchemaMode.AUTO_CREATE]/[SchemaMode.AUTO_MIGRATE] DDL bootstrap
  * pass. One key covers every registered entity for a given install -- see
@@ -470,8 +489,9 @@ private const val DDL_BOOTSTRAP_SCHEMA_LOCK = "schema-bootstrap"
  * serialize against each other exactly as before -- only one of them wins the claim, the rest wait
  * and skip. See [schemaFingerprint] for what participates in the fingerprint.
  */
-internal fun ddlBootstrapLockName(schemas: List<TableSchema>): String =
-    "$DDL_BOOTSTRAP_SCHEMA_LOCK-${schemaFingerprint(schemas)}"
+internal fun ddlBootstrapLockName(schemas: List<TableSchema>, keyspace: String? = null): String =
+    if (keyspace == null) "$DDL_BOOTSTRAP_SCHEMA_LOCK-${schemaFingerprint(schemas)}"
+    else "$DDL_BOOTSTRAP_SCHEMA_LOCK-$keyspace-${schemaFingerprint(schemas)}"
 
 /**
  * Fingerprints the registered schema by hashing the exact DDL each table would emit
@@ -533,13 +553,19 @@ internal fun schemaFingerprint(schemas: List<TableSchema>): String {
  * KDoc, "Multi-instance caveat").
  */
 @InternalKandraApi
-internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, action: () -> Unit) {
-    ensureDdlLockTable(session)
+internal fun claimAndRunDdlBootstrap(
+    session: CqlSession,
+    lockName: String,
+    lockKeyspace: String? = null,
+    action: () -> Unit
+) {
+    val table = ddlLockTableName(lockKeyspace)
+    ensureDdlLockTable(session, table)
     val holder = UUID.randomUUID().toString()
 
-    if (tryClaimDdlLock(session, lockName, holder)) {
+    if (tryClaimDdlLock(session, table, lockName, holder)) {
         logger.info { "Kandra: claimed DDL bootstrap lock '$lockName' -- running schema DDL." }
-        runClaimedDdlAction(session, lockName, holder, action)
+        runClaimedDdlAction(session, table, lockName, holder, action)
         return
     }
 
@@ -549,15 +575,15 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
     }
     while (true) {
         val row = session.execute(
-            session.prepare("SELECT holder, status, claimed_at FROM kandra_ddl_locks WHERE lock_name = ?")
+            session.prepare("SELECT holder, status, claimed_at FROM $table WHERE lock_name = ?")
                 .bind(lockName)
         ).one()
 
         if (row == null) {
             // The row vanished between our failed claim and this read (shouldn't normally happen
             // outside of a manual operator intervention) -- treat it like nobody has claimed it.
-            if (tryClaimDdlLock(session, lockName, holder)) {
-                runClaimedDdlAction(session, lockName, holder, action)
+            if (tryClaimDdlLock(session, table, lockName, holder)) {
+                runClaimedDdlAction(session, table, lockName, holder, action)
                 return
             }
             continue
@@ -576,8 +602,8 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
                 "exceeding the staleness threshold of ${DDL_CLAIM_STALE_THRESHOLD.seconds}s -- the " +
                 "previous claimant is presumed crashed. Reclaiming and running the DDL here."
             }
-            if (reclaimStaleDdlLock(session, lockName, holder, claimedAt)) {
-                runClaimedDdlAction(session, lockName, holder, action)
+            if (reclaimStaleDdlLock(session, table, lockName, holder, claimedAt)) {
+                runClaimedDdlAction(session, table, lockName, holder, action)
                 return
             }
             // Someone else reclaimed (or finished) it between our staleness check and the reclaim
@@ -601,11 +627,11 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
  * instance's ownership of [lockName] was taken over mid-run -- exactly the schema-disagreement
  * risk #79 exists to prevent -- so it's surfaced loudly rather than silently no-oping.
  */
-private fun runClaimedDdlAction(session: CqlSession, lockName: String, holder: String, action: () -> Unit) {
+private fun runClaimedDdlAction(session: CqlSession, table: String, lockName: String, holder: String, action: () -> Unit) {
     try {
         action()
     } catch (e: Exception) {
-        if (!releaseDdlLock(session, lockName, holder)) {
+        if (!releaseDdlLock(session, table, lockName, holder)) {
             logger.warn {
                 "Kandra: DDL bootstrap lock '$lockName' could not be released by holder '$holder' " +
                 "after its action() failed -- the lock was already reclaimed by another instance " +
@@ -616,7 +642,7 @@ private fun runClaimedDdlAction(session: CqlSession, lockName: String, holder: S
         }
         throw e
     }
-    if (!markDdlLockDone(session, lockName, holder)) {
+    if (!markDdlLockDone(session, table, lockName, holder)) {
         throw KandraSchemaException(
             "Kandra: DDL bootstrap lock '$lockName' was reclaimed by another instance while holder " +
             "'$holder' was still running its DDL action. The action completed successfully here, but " +
@@ -636,10 +662,10 @@ private fun runClaimedDdlAction(session: CqlSession, lockName: String, holder: S
  * (no column is ever added after creation) to keep its own bootstrap -- the one race this
  * mechanism cannot itself guard, see [claimAndRunDdlBootstrap]'s KDoc -- as narrow as possible.
  */
-private fun ensureDdlLockTable(session: CqlSession) {
+private fun ensureDdlLockTable(session: CqlSession, table: String) {
     session.execute(
         """
-        CREATE TABLE IF NOT EXISTS kandra_ddl_locks (
+        CREATE TABLE IF NOT EXISTS $table (
             lock_name   TEXT PRIMARY KEY,
             holder      TEXT,
             status      TEXT,
@@ -650,9 +676,9 @@ private fun ensureDdlLockTable(session: CqlSession) {
 }
 
 /** Returns `true` if this call won the claim on [lockName]. */
-private fun tryClaimDdlLock(session: CqlSession, lockName: String, holder: String): Boolean {
+private fun tryClaimDdlLock(session: CqlSession, table: String, lockName: String, holder: String): Boolean {
     val prepared = session.prepare(
-        "INSERT INTO kandra_ddl_locks (lock_name, holder, status, claimed_at) " +
+        "INSERT INTO $table (lock_name, holder, status, claimed_at) " +
         "VALUES (?, ?, 'CLAIMED', toTimestamp(now())) IF NOT EXISTS"
     )
     return session.execute(prepared.bind(lockName, holder)).wasApplied()
@@ -662,9 +688,9 @@ private fun tryClaimDdlLock(session: CqlSession, lockName: String, holder: Strin
  * Reclaims a stale claim via compare-and-set on its previously-observed `claimed_at`, so that if
  * several waiters independently decide the same claim is stale, only one of them wins.
  */
-private fun reclaimStaleDdlLock(session: CqlSession, lockName: String, holder: String, previousClaimedAt: Instant): Boolean {
+private fun reclaimStaleDdlLock(session: CqlSession, table: String, lockName: String, holder: String, previousClaimedAt: Instant): Boolean {
     val prepared = session.prepare(
-        "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) " +
+        "UPDATE $table SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) " +
         "WHERE lock_name = ? IF claimed_at = ?"
     )
     return session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
@@ -677,9 +703,9 @@ private fun reclaimStaleDdlLock(session: CqlSession, lockName: String, holder: S
  * claimant) can't have its completion silently overwrite the new holder's active claim. Returns
  * `false` if the CAS lost -- see [runClaimedDdlAction] for how that's handled.
  */
-private fun markDdlLockDone(session: CqlSession, lockName: String, holder: String): Boolean {
+private fun markDdlLockDone(session: CqlSession, table: String, lockName: String, holder: String): Boolean {
     val prepared = session.prepare(
-        "UPDATE kandra_ddl_locks SET status = 'DONE' WHERE lock_name = ? IF holder = ?"
+        "UPDATE $table SET status = 'DONE' WHERE lock_name = ? IF holder = ?"
     )
     return session.execute(prepared.bind(lockName, holder)).wasApplied()
 }
@@ -691,8 +717,8 @@ private fun markDdlLockDone(session: CqlSession, lockName: String, holder: Strin
  * claim out from under it, after this holder's claim was itself reclaimed as stale while it was
  * still (unbeknownst to the reclaimer) alive and running. Returns `false` if the CAS lost.
  */
-private fun releaseDdlLock(session: CqlSession, lockName: String, holder: String): Boolean {
-    val prepared = session.prepare("DELETE FROM kandra_ddl_locks WHERE lock_name = ? IF holder = ?")
+private fun releaseDdlLock(session: CqlSession, table: String, lockName: String, holder: String): Boolean {
+    val prepared = session.prepare("DELETE FROM $table WHERE lock_name = ? IF holder = ?")
     return session.execute(prepared.bind(lockName, holder)).wasApplied()
 }
 

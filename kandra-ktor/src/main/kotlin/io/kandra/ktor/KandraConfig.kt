@@ -301,6 +301,22 @@ class MetricsConfig {
 }
 
 /**
+ * Settings for an additional keyspace declared with [KandraConfig.keyspace] (ISS-105). Declares the
+ * keyspace and how to bootstrap it; which entities live in it is decided by each entity's
+ * `@ScyllaTable(keyspace = "...")`, not here.
+ */
+class KeyspaceConfig {
+    /** When true, `CREATE KEYSPACE IF NOT EXISTS` is run for this keyspace at startup. Default false. */
+    var autoCreate: Boolean = false
+
+    /**
+     * Replication used when [autoCreate] is true. `null` (default) inherits
+     * [KandraConfig.replicationStrategy], whatever its value is at install time.
+     */
+    var replicationStrategy: ReplicationStrategy? = null
+}
+
+/**
  * Configuration for the [Kandra] Ktor plugin.
  *
  * ```kotlin
@@ -386,6 +402,18 @@ class KandraConfig {
 
     internal val entities = mutableListOf<KClass<*>>()
     internal val validators = mutableMapOf<KClass<*>, KandraValidator<*>>()
+
+    internal val extraKeyspaces = mutableListOf<Pair<String, KeyspaceConfig>>()
+
+    /**
+     * Declares an additional keyspace (ISS-105). One `install(Kandra)` still opens one `CqlSession`;
+     * entities choose their keyspace with `@ScyllaTable(keyspace = name)`. An entity naming a keyspace
+     * that is neither [keyspace] nor declared here fails startup with `KandraSchemaException`.
+     * With no default [keyspace] set, every registered entity must name a declared keyspace.
+     */
+    fun keyspace(name: String, block: KeyspaceConfig.() -> Unit = {}) {
+        extraKeyspaces.add(name to KeyspaceConfig().apply(block))
+    }
 
     fun register(vararg classes: KClass<*>) { entities.addAll(classes) }
 
