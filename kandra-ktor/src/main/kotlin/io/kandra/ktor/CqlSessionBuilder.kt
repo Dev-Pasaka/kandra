@@ -490,7 +490,8 @@ internal fun keyspaceDdl(keyspace: String, strategy: ReplicationStrategy): Strin
     return when (strategy) {
         is ReplicationStrategy.SimpleStrategy ->
             "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-                "{'class': 'SimpleStrategy', 'replication_factor': ${strategy.replicationFactor}}"
+                "{'class': 'SimpleStrategy', 'replication_factor': ${strategy.replicationFactor}}" +
+                (if (strategy.disableTablets) " AND tablets = {'enabled': false}" else "")
         is ReplicationStrategy.NetworkTopologyStrategy -> {
             strategy.dcReplicationMap.keys.forEach { dc ->
                 if (!CqlNaming.isValidIdentifier(dc)) {

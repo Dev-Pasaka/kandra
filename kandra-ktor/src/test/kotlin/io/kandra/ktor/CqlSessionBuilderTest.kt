@@ -81,6 +81,37 @@ class CqlSessionBuilderTest {
     }
 
     @Test
+    fun `keyspaceDdl appends tablets clause only when disableTablets is set`() {
+        assertEquals(
+            "CREATE KEYSPACE IF NOT EXISTS coinx WITH replication = " +
+                "{'class': 'SimpleStrategy', 'replication_factor': 3} AND tablets = {'enabled': false}",
+            keyspaceDdl("coinx", ReplicationStrategy.SimpleStrategy(3, disableTablets = true))
+        )
+        assertEquals(
+            keyspaceDdl("coinx", ReplicationStrategy.SimpleStrategy(3)),
+            keyspaceDdl("coinx", ReplicationStrategy.SimpleStrategy(3, disableTablets = false))
+        )
+        assertFalse(keyspaceDdl("coinx", ReplicationStrategy.SimpleStrategy()).contains("tablets"))
+        assertFalse(
+            keyspaceDdl("coinx", ReplicationStrategy.NetworkTopologyStrategy(mapOf("dc1" to 3))).contains("tablets")
+        )
+    }
+
+    @Test
+    fun `keyspace plan inherits disableTablets for default and extra keyspaces`() {
+        val cfg = KandraConfig().apply {
+            keyspace = "a"; autoCreateKeyspace = true
+            replicationStrategy = ReplicationStrategy.SimpleStrategy(3, disableTablets = true)
+            keyspace("b") { autoCreate = true }
+            keyspace("c") { autoCreate = true; replicationStrategy = ReplicationStrategy.SimpleStrategy(1) }
+        }
+        val ddls = resolveKeyspaceSpecs(cfg).associate { it.name to keyspaceDdl(it.name, it.strategy) }
+        assertTrue(ddls.getValue("a").endsWith("AND tablets = {'enabled': false}"))
+        assertTrue(ddls.getValue("b").endsWith("AND tablets = {'enabled': false}"))
+        assertFalse(ddls.getValue("c").contains("tablets"))
+    }
+
+    @Test
     fun `keyspaceDdl renders NetworkTopologyStrategy DDL for valid DC names`() {
         val ddl = keyspaceDdl(
             "coinx",

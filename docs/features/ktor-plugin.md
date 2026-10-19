@@ -101,6 +101,7 @@ install(Kandra) {
 ```
 
 - `keyspace("name") { }` accepts `autoCreate` and `replicationStrategy` for that keyspace.
+- Tablets-enabled ScyllaDB (e.g. Scylla Cloud) rejects `SimpleStrategy` keyspaces. Use `SimpleStrategy(rf, disableTablets = true)` (opt-in, default `false`, appends `AND tablets = {'enabled': false}`; ScyllaDB only, Cassandra rejects it) or `NetworkTopologyStrategy`. Applies to the default and extra keyspaces.
 - Precedence: the entity annotation decides membership; blank means the default keyspace.
 - An entity naming an undeclared, non-default keyspace fails startup with `KandraSchemaException`.
 - Creation, permission validation, DDL, `system_schema` lookups and `kandra_ddl_locks` entries run

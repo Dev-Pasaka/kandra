@@ -575,6 +575,13 @@ install(Kandra) {
 }
 ```
 
+**Tablets-enabled ScyllaDB (e.g. Scylla Cloud).** These clusters reject `SimpleStrategy` keyspaces unless tablets are
+disabled (`SimpleStrategy doesn't support tablet replication`). Opt in with
+`ReplicationStrategy.SimpleStrategy(3, disableTablets = true)`; Kandra then appends
+`AND tablets = {'enabled': false}` to `CREATE KEYSPACE`. Default is `false` (DDL unchanged). It works for the default
+keyspace and for `keyspace("x") { replicationStrategy = ... }`. ScyllaDB only: Apache Cassandra rejects the `tablets`
+option. `NetworkTopologyStrategy` works with tablets and needs no flag.
+
 **Precedence and errors.** `keyspace = "x"` on the plugin remains the default keyspace and is used by
 every entity whose annotation `keyspace` is blank. An entity naming a keyspace that is neither the
 default nor declared with `keyspace("x") { }` throws `KandraSchemaException` at startup with an
