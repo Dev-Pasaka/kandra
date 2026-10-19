@@ -245,19 +245,19 @@ class KandraRepository<T : Any>(
 
     fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
-            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.qualifiedTableName}'")
         batchEngine.append(schema, keyValuesOf(entity), col.cqlName, values, consistency)
     }
 
     fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
-            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.qualifiedTableName}'")
         batchEngine.remove(schema, keyValuesOf(entity), col.cqlName, values, consistency)
     }
 
     fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
-            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.qualifiedTableName}'")
         batchEngine.put(schema, keyValuesOf(entity), col.cqlName, entries, consistency)
     }
 
