@@ -1,0 +1,119 @@
+package io.kandra.koin
+
+import com.datastax.oss.driver.api.core.CqlSession
+import io.kandra.core.ExperimentalKandraApi
+import io.kandra.core.KandraAuth
+import io.kandra.core.SchemaRegistry
+import io.kandra.core.annotations.PartitionKey
+import io.kandra.core.annotations.ScyllaTable
+import io.kandra.core.exception.KandraSchemaException
+import io.kandra.koin.ksa.Invoice as KsaInvoice
+import io.kandra.koin.ksb.Invoice as KsbInvoice
+import io.kandra.ktor.Kandra
+import io.kandra.ktor.SchemaMode
+import io.kandra.runtime.repository.KandraSuspendRepository
+import io.kandra.test.KandraTestcontainers
+import io.ktor.server.application.Application
+import io.ktor.server.application.install
+import io.ktor.server.testing.testApplication
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.koin.core.component.KoinComponent
+import org.koin.core.qualifier.named
+import org.koin.ktor.plugin.Koin
+import java.util.UUID
+
+private const val DEFAULT_KS = "kandra_koin_mks_default"
+private const val OTHER_KS = "kandra_koin_mks_other"
+
+@ScyllaTable("koin_mks_customers")
+data class KoinMksCustomer(@PartitionKey val id: UUID, val name: String)
+
+@ScyllaTable("koin_mks_orders", keyspace = OTHER_KS)
+data class KoinMksOrder(@PartitionKey val id: UUID, val amount: Long)
+
+/** ISS-107: Koin bindings for registry entities that live in different keyspaces. */
+class KandraKoinMultiKeyspaceTest : KoinComponent {
+
+    @AfterEach
+    fun cleanup() {
+        SchemaRegistry.clear()
+        CqlSession.builder()
+            .addContactPoint(KandraTestcontainers.container.contactPoint)
+            .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
+            .build().use {
+                it.execute("DROP KEYSPACE IF EXISTS $DEFAULT_KS")
+                it.execute("DROP KEYSPACE IF EXISTS $OTHER_KS")
+            }
+    }
+
+    @Test
+    fun `same simple name in different keyspaces still throws and the message names both keyspaces`() {
+        SchemaRegistry.register(KsaInvoice::class)
+        SchemaRegistry.register(KsbInvoice::class)
+
+        testApplication {
+            application { kandraKoin() }
+            val thrown = assertThrows(Throwable::class.java) { startApplication() }
+            val ex = generateSequence(thrown) { it.cause }.filterIsInstance<KandraSchemaException>().firstOrNull()
+            assertNotNull(ex, "Expected KandraSchemaException, got: $thrown")
+            val msg = ex!!.message!!
+            assertTrue(msg.contains("io.kandra.koin.ksa.Invoice"), msg)
+            assertTrue(msg.contains("io.kandra.koin.ksb.Invoice"), msg)
+            assertTrue(msg.contains("billing_koin"), msg)
+            assertTrue(msg.contains("archive_koin"), msg)
+            assertTrue(msg.contains("different keyspaces"), msg)
+        }
+    }
+
+    @OptIn(ExperimentalKandraApi::class)
+    @Test
+    fun `entities in two keyspaces resolve and round-trip through Koin repositories`() {
+        val c = KandraTestcontainers.container
+        val cp = c.contactPoint
+        CqlSession.builder().addContactPoint(cp).withLocalDatacenter(c.localDatacenter).build().use { s ->
+            for (ks in listOf(DEFAULT_KS, OTHER_KS)) {
+                s.execute(
+                    "CREATE KEYSPACE IF NOT EXISTS $ks WITH replication = " +
+                        "{'class': 'SimpleStrategy', 'replication_factor': 1}"
+                )
+            }
+            s.execute("CREATE TABLE IF NOT EXISTS $DEFAULT_KS.koin_mks_customers (id uuid PRIMARY KEY, name text)")
+            s.execute("CREATE TABLE IF NOT EXISTS $OTHER_KS.koin_mks_orders (id uuid PRIMARY KEY, amount bigint)")
+        }
+
+        testApplication {
+            application {
+                install(Koin) {}
+                install(Kandra) {
+                    contactPoints = "${cp.hostString}:${cp.port}"
+                    localDatacenter = c.localDatacenter
+                    keyspace = DEFAULT_KS
+                    schemaMode = SchemaMode.NONE // tables were created above, one per keyspace
+                    register(KoinMksCustomer::class)
+                    register(KoinMksOrder::class)
+                    auth { provider = KandraAuth.static("", "") }
+                }
+                kandraKoin()
+            }
+            startApplication()
+
+            @Suppress("UNCHECKED_CAST")
+            val customers = getKoin().get<KandraSuspendRepository<*>>(named("KoinMksCustomerSuspendRepo")) as KandraSuspendRepository<KoinMksCustomer>
+            @Suppress("UNCHECKED_CAST")
+            val orders = getKoin().get<KandraSuspendRepository<*>>(named("KoinMksOrderSuspendRepo")) as KandraSuspendRepository<KoinMksOrder>
+
+            val customer = KoinMksCustomer(UUID.randomUUID(), "ada")
+            val order = KoinMksOrder(UUID.randomUUID(), 4200)
+            customers.save(customer)
+            orders.save(order)
+
+            assertEquals(customer, customers.findById(customer.id))
+            assertEquals(order, orders.findById(order.id))
+        }
+    }
+}

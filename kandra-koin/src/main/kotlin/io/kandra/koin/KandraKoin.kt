@@ -27,7 +27,9 @@ import org.koin.ktor.ext.getKoin
  * share a simple name (e.g. `billing.User` and `admin.User`) would otherwise collide and cause a
  * confusing `DefinitionOverrideException` from Koin itself. To surface a clear cause instead, this
  * checks for simple-name collisions across every registered entity *before* building any bindings
- * and throws [KandraSchemaException] naming the colliding classes. See GH-35.
+ * and throws [KandraSchemaException] naming the colliding classes and their keyspaces. See GH-35.
+ * Entities in different keyspaces are bound normally as long as their simple names differ; the
+ * keyspace is carried by each entity's schema (ISS-107), but it is not part of the binding name.
  */
 @Suppress("OPT_IN_USAGE")
 fun Application.kandraKoin() {
@@ -37,11 +39,20 @@ fun Application.kandraKoin() {
         .groupBy { it.entityClass.simpleName }
         .filterValues { it.size > 1 }
         .forEach { (simpleName, schemas) ->
-            val qualifiedNames = schemas.joinToString(", ") { it.entityClass.qualifiedName ?: it.entityClass.toString() }
+            val qualifiedNames = schemas.joinToString(", ") {
+                val fqn = it.entityClass.qualifiedName ?: it.entityClass.toString()
+                "$fqn [keyspace: ${it.keyspace ?: "<default>"}]"
+            }
+            val crossKeyspace = schemas.map { it.keyspace }.distinct().size > 1
+            val hint = if (crossKeyspace)
+                "These entities live in different keyspaces, but Koin bindings are keyed by simple class name only, " +
+                    "so the keyspace does not disambiguate them. "
+            else ""
             throw KandraSchemaException(
                 "Multiple @ScyllaTable entities share the simple name '$simpleName', which would " +
                     "produce colliding Koin qualifiers (\"${simpleName}Repo\" / \"${simpleName}SuspendRepo\"): " +
-                    "$qualifiedNames. Rename one of these classes so each entity has a unique simple name."
+                    "$qualifiedNames. $hint" +
+                    "Rename one of these classes so each entity has a unique simple name."
             )
         }
 
