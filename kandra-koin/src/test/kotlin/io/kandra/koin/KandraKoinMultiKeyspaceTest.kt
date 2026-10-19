@@ -93,6 +93,7 @@ class KandraKoinMultiKeyspaceTest : KoinComponent {
                     contactPoints = "${cp.hostString}:${cp.port}"
                     localDatacenter = c.localDatacenter
                     keyspace = DEFAULT_KS
+                    keyspace(OTHER_KS) { } // declare the second keyspace (created by hand above)
                     schemaMode = SchemaMode.NONE // tables were created above, one per keyspace
                     register(KoinMksCustomer::class)
                     register(KoinMksOrder::class)
