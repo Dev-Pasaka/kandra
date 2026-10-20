@@ -27,7 +27,7 @@ Kandra is a Kotlin ORM for ScyllaDB/Cassandra, shipped as a Ktor `ApplicationPlu
 | [`@SecondaryIndex`](#secondaryindex) | Annotation | CQL `CREATE INDEX` on a column |
 | [`@ReadConsistency` / `@WriteConsistency`](#readconsistency--writeconsistency) | Annotation | Per-entity default consistency override |
 | [Plugin installation](#plugin-installation) | Config | Connects to ScyllaDB via the Ktor plugin |
-| [Multiple keyspaces](#multiple-keyspaces) | Config | One install and one `CqlSession` serving several keyspaces (unreleased, 0.5.0) |
+| [Multiple keyspaces](#multiple-keyspaces) | Config | One install and one `CqlSession` serving several keyspaces (0.5.0) |
 | [Schema modes](#schema-modes) | Config | `AUTO_CREATE`, `AUTO_MIGRATE`, `VALIDATE`, `NONE` |
 | [Connection pool](#connection-pool) | Config | Timeouts, heartbeat, requests per connection |
 | [Authentication](#authentication) | Config | Plain text, env vars, credential rotation |
