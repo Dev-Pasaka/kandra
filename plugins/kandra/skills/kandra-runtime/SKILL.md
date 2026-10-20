@@ -616,11 +616,14 @@ class KandraCodec {
 ```kotlin
 internal class KandraCache<K : Any, V : Any>(config: CacheResultConfig?) {
     fun getIfPresent(key: K): V?
-    fun put(key: K, value: V)
+    fun readStamp(): Long                                       // monotonic stamp; capture BEFORE starting a read whose result will be put
+    fun put(key: K, value: V, readStartedAt: Long? = null)      // skipped if invalidate(key) ran at/after readStartedAt (ISS-087 race guard)
     fun invalidate(key: K)
     val isEnabled: Boolean
 }
 ```
+
+Keys are normalized identically on every method (an `Instant` is truncated to milliseconds, composite `List` keys element by element), so a caller-supplied microsecond `Instant` and the stored millisecond one hit the same entry (GH #178, on `main` after 0.5.0). `findById` captures `readStamp()` before its DB read and passes it to `put`, so a concurrent write's `invalidate` stops a stale read from being cached.
 
 Reflection-based thin wrapper — resolves `com.github.benmanes.caffeine.cache.Caffeine` by
 `Class.forName` at construction. If `config == null` (no `@CacheResult` on the entity), or the class
