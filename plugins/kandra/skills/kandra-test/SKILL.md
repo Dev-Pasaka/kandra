@@ -21,9 +21,9 @@ For those, use `KandraTestcontainers`.
 
 ## Test module setup (nothing here comes transitively)
 
-`kandra-test` exposes `kandra-core`/`kandra-runtime` as `api`, but JUnit and the DataStax driver are **not** on your test compile classpath. Add
-`org.junit.jupiter:junit-jupiter:5.10.x` + `tasks.test { useJUnitPlatform() }` and `com.datastax.oss:java-driver-core:4.17.0`. Calling
-`SchemaRegistry.clear()` (every example does) needs `@OptIn(io.kandra.core.InternalKandraApi::class)`. For `KandraTestcontainers` use Testcontainers
+`kandra-test` exposes `kandra-core`/`kandra-runtime` and (since 0.5.1) the DataStax driver as `api`, but JUnit is **not** on your test compile classpath. Add
+`org.junit.jupiter:junit-jupiter:5.10.x` + `tasks.test { useJUnitPlatform() }`. Reset the schema registry with `KandraTestUtils.reset()` (since 0.5.1, no opt-in); on 0.5.0
+add `com.datastax.oss:java-driver-core:4.17.0` yourself and wrap `SchemaRegistry.clear()` in `@OptIn(io.kandra.core.InternalKandraApi::class)`. For `KandraTestcontainers` use Testcontainers
 `1.21.4`+ — 1.20.x cannot connect to current Docker releases ("Could not find a valid Docker environment").
 
 ## FakeKandraSession (`io.kandra.test.FakeKandraSession`)

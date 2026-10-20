@@ -9,9 +9,9 @@ policy; nothing was lost, they're just not represented here.
 ## Open
 
 No ISS entry is open as of 2026-10-20, and no GitHub issue is open. GH #160 (Ktor 3.x compatibility and CI coverage, split out of
-[ISS-101](ISS-101-ktor-version-range-undocumented.md)) shipped in 0.5.0. Four later fixes are tracked on GitHub only and are on `main`, not yet
-released: GH #178 (`@CacheResult` key normalization) and GH #179–#181 (`kandra-test` usability) — see the
-[unreleased changelog](../changelog/unreleased.md).
+[ISS-101](ISS-101-ktor-version-range-undocumented.md)) shipped in 0.5.0. Four later fixes are tracked on GitHub only and shipped in 0.5.1:
+GH #178 (`@CacheResult` key normalization) and GH #179–#181 (`kandra-test` usability) — see the
+[0.5.1 changelog](../changelog/0.5.1.md).
 
 (The 2026-09-09 post-fix critical-audit batch, ISS-080–ISS-096, sat in this section listed as
 "Open" for over a month after every one of its GH issues had actually been closed — caught and

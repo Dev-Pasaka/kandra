@@ -101,7 +101,7 @@ against Ktor 3 in CI, and the Ktor-facing modules are also re-tested in a CI mat
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.0"))
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.1"))
     implementation("com.kandraorm.kandra:kandra-ktor")
     implementation("com.kandraorm.kandra:kandra-koin")   // or kandra-kodein
     ksp("com.kandraorm.kandra:kandra-codegen")           // optional — type-safe table objects
@@ -578,9 +578,8 @@ val users = userRepo.findAll { UserTable.userId isIn listOf(id1, id2) }
 ## Testing
 
 ```kotlin
-@OptIn(InternalKandraApi::class)   // io.kandra.core.InternalKandraApi -- SchemaRegistry is an internal API
 class UserRepositoryTest {
-@AfterEach fun cleanup() = SchemaRegistry.clear()
+@AfterEach fun cleanup() = KandraTestUtils.reset()   // 0.5.0: SchemaRegistry.clear() under @OptIn(InternalKandraApi::class)
 
 @Test
 fun `save captures batch statement`() {
@@ -595,12 +594,13 @@ fun `save captures batch statement`() {
 }
 ```
 
-`kandra-test` does not bring JUnit or the DataStax driver onto your test classpath: add `org.junit.jupiter:junit-jupiter` (with
-`tasks.test { useJUnitPlatform() }`) and `com.datastax.oss:java-driver-core` yourself. For `KandraTestcontainers`, use Testcontainers `1.21.4` or
-newer -- 1.20.x cannot talk to current Docker releases. The fake session records statements; it stores no data and returns no rows.
+`kandra-test` does not bring JUnit onto your test classpath: add `org.junit.jupiter:junit-jupiter` (with `tasks.test { useJUnitPlatform() }`) yourself. For
+`KandraTestcontainers`, use Testcontainers `1.21.4` or newer -- 1.20.x cannot talk to current Docker releases. The fake session records statements; it
+stores no data and returns no rows.
 
-> On `main` (next release, see [`docs/changelog/unreleased.md`](docs/changelog/unreleased.md)) the driver comes with `kandra-test` as an `api` dependency,
-> `KandraTestUtils.reset()` replaces `SchemaRegistry.clear()` (no opt-in), and `capturedBatchViews()` exposes each statement's CQL and bound values.
+> Since 0.5.1 ([changelog](docs/changelog/0.5.1.md)) the DataStax driver comes with `kandra-test` as an `api` dependency, `KandraTestUtils.reset()` replaces
+> `SchemaRegistry.clear()` (no opt-in), and `capturedBatchViews()` exposes each statement's CQL and bound values. On 0.5.0, add `java-driver-core` yourself and
+> wrap `SchemaRegistry.clear()` in `@OptIn(InternalKandraApi::class)`.
 
 ---
 
