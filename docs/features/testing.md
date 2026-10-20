@@ -8,6 +8,9 @@
   fixed. See
   [ISS-020](../issues/ISS-020-fake-session-lwt-semantics.md).
 - `KandraTestUtils` — schema assertion helpers.
+- Setup your test module needs (none of it comes transitively): `org.junit.jupiter:junit-jupiter` with `tasks.test { useJUnitPlatform() }`,
+  `com.datastax.oss:java-driver-core` (`CqlSession`/`BatchStatement` appear in test code), `@OptIn(InternalKandraApi::class)` wherever you call
+  `SchemaRegistry.clear()`, and Testcontainers `1.21.4`+ for `KandraTestcontainers` (1.20.x cannot connect to current Docker).
 - `KandraTestcontainers` — ready-to-use ScyllaDB/Cassandra Testcontainers setup.
   `KandraTestcontainers.freshKeyspace(User::class, ...)` creates an isolated, randomly-named
   keyspace per test class against one shared container per JVM; call `.close()` in `@AfterEach`.

@@ -1552,8 +1552,10 @@ Add the dependency:
 
 ```kotlin
 testImplementation("com.kandraorm.kandra:kandra-test")
-testImplementation("org.testcontainers:cassandra:1.19.8")
-testImplementation("org.testcontainers:junit-jupiter:1.19.8")
+// kandra-test does not bring JUnit or the DataStax driver: also add org.junit.jupiter:junit-jupiter (+ tasks.test { useJUnitPlatform() }),
+// com.datastax.oss:java-driver-core, and Testcontainers 1.21.4+ if you use KandraTestcontainers (1.20.x cannot connect to current Docker).
+testImplementation("org.testcontainers:cassandra:1.21.4")
+testImplementation("org.testcontainers:junit-jupiter:1.21.4")
 ```
 
 ---

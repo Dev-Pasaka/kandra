@@ -19,7 +19,7 @@ install(Kandra) {
     contactPoints       = "localhost:9042"
     keyspace            = "myapp"
     localDatacenter     = "datacenter1"
-    autoCreateKeyspace  = true
+    autoCreateKeyspace  = true   // on tablets-enabled ScyllaDB the default SimpleStrategy is rejected -- see replicationStrategy below
     schemaMode          = SchemaMode.AUTO_MIGRATE
     register(User::class)
 

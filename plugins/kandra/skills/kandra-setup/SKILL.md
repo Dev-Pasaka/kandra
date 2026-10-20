@@ -63,6 +63,17 @@ fun Application.module() {
 Startup fails fast on schema/permission errors. Use `schemaMode = SchemaMode.VALIDATE` or `NONE` in production and
 manage changes with `kandra-migrate`.
 
+## 3b. Local ScyllaDB gotchas
+
+- **Tablets:** `scylladb/scylla:latest` creates new keyspaces with tablets enabled, and a tablets keyspace rejects `SimpleStrategy`. With
+  `autoCreateKeyspace = true` the app then fails at startup with `SimpleStrategy doesn't support tablet replication`. For local dev set
+  `replicationStrategy = ReplicationStrategy.SimpleStrategy(replicationFactor = 1, disableTablets = true)` (ScyllaDB only; Cassandra rejects the option).
+  Real clusters: provision the keyspace ahead of time, or use `NetworkTopologyStrategy`.
+- **Auth:** `install(Kandra)` calls `KandraAuth.fromEnv()` unconditionally; for an unauthenticated local node set
+  `auth { provider = KandraAuth.static("cassandra", "cassandra") }` or export `SCYLLA_USERNAME`/`SCYLLA_PASSWORD`.
+- **Timestamps:** CQL `timestamp` is millisecond precision. If a caller-supplied `Instant` is a key (for example `Instant.now()` as a clustering key), truncate
+  it with `.truncatedTo(ChronoUnit.MILLIS)` before returning it to clients — with `@CacheResult` a microsecond `Instant` defeats cache invalidation.
+
 ## 4. Where to go next
 
 Load the module skill for the code you are writing: `kandra` (overview + annotations), `kandra-runtime` (repository

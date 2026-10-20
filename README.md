@@ -366,6 +366,8 @@ install(Kandra) {
 install(Kandra) {
     autoCreateKeyspace = true
     replicationStrategy = ReplicationStrategy.SimpleStrategy(replicationFactor = 1)
+    // current ScyllaDB images (e.g. scylladb/scylla:latest) create keyspaces with tablets enabled, which rejects
+    // SimpleStrategy -- for local dev against one, use SimpleStrategy(replicationFactor = 1, disableTablets = true)
     // or:
     replicationStrategy = ReplicationStrategy.NetworkTopologyStrategy(
         dcReplicationMap = mapOf("us-east" to 3, "eu-west" to 2)
@@ -576,6 +578,8 @@ val users = userRepo.findAll { UserTable.userId isIn listOf(id1, id2) }
 ## Testing
 
 ```kotlin
+@OptIn(InternalKandraApi::class)   // io.kandra.core.InternalKandraApi -- SchemaRegistry is an internal API
+class UserRepositoryTest {
 @AfterEach fun cleanup() = SchemaRegistry.clear()
 
 @Test
@@ -588,7 +592,12 @@ fun `save captures batch statement`() {
 
     assert(fakeSession.capturedBatches().isNotEmpty())
 }
+}
 ```
+
+`kandra-test` does not bring JUnit or the DataStax driver onto your test classpath: add `org.junit.jupiter:junit-jupiter` (with
+`tasks.test { useJUnitPlatform() }`) and `com.datastax.oss:java-driver-core` yourself. For `KandraTestcontainers`, use Testcontainers `1.21.4` or
+newer -- 1.20.x cannot talk to current Docker releases. The fake session records statements; it stores no data and returns no rows.
 
 ---
 
@@ -922,7 +931,7 @@ Use `@LookupIndex` instead for high-cardinality columns — it creates a proper 
 ```kotlin
 // Add to build.gradle.kts:
 // testImplementation("com.kandraorm.kandra:kandra-test")
-// testImplementation("org.testcontainers:cassandra:1.19.8")
+// testImplementation("org.testcontainers:cassandra:1.21.4")
 
 class UserRepositoryTest {
     private lateinit var db: KandraRuntimeHandle
