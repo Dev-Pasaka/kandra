@@ -2,6 +2,8 @@
 
 **Status:** Known limitation — by design, not fixed (test-infra, not a product bug)
 
+> **Update (0.4.7):** the `FakePreparedStatement.bind()` half of the problem described below was fixed separately in [ISS-040](ISS-040-fake-session-bind-unsupported.md) (GH #28) — repository calls now run to completion under the fake. What remains by design is the lack of real LWT/`wasApplied()` semantics and stored data. The text below is the original 2026-07-21 audit finding.
+
 ## Detail
 
 Found during a pre-real-database-testing audit (2026-07-21). `FakeKandraSession.execute()` always

@@ -1,7 +1,8 @@
 # ISS-101: No documented supported Ktor version range, and no test coverage against Ktor 3.x
 
-**Status:** Partially fixed — documentation half done (GH #155); CI/3.x-compatibility half split
-out to GH #160, open
+**Status:** Fixed — documentation half done in GH #155; the CI/3.x-compatibility half was split out to GH #160, which
+was closed 2026-10-20 by moving to Ktor 3.6 (Ktor 2.x dropped) and adding the `ktor-compat` CI matrix — see the
+[0.5.0 changelog](../changelog/0.5.0.md)
 
 ## Problem
 
@@ -31,4 +32,6 @@ is decided.
 
 **Files:** `README.md`, `kandra-ktor/.../Kandra.kt` (KDoc).
 
-See GH #155, [PR #161](https://github.com/Dev-Pasaka/kandra/pull/161); follow-up tracked as GH #160.
+See GH #155, [PR #161](https://github.com/Dev-Pasaka/kandra/pull/161); follow-up GH #160 (closed, shipped in 0.5.0: Ktor 3.6.0, CI also tests 3.5.2 and the latest 3.x).
+
+> The "built and tested against Ktor 2.3.x" wording described above is as of 0.4.7 and is superseded: 0.5.0 supports Ktor 3.x only.

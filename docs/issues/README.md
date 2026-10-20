@@ -8,8 +8,10 @@ policy; nothing was lost, they're just not represented here.
 
 ## Open
 
-No ISS entry is open as of 2026-10-20. The one open follow-up is tracked on GitHub only: GH #160 (Ktor 3.x
-compatibility and CI coverage), split out of [ISS-101](ISS-101-ktor-version-range-undocumented.md).
+No ISS entry is open as of 2026-10-20, and no GitHub issue is open. GH #160 (Ktor 3.x compatibility and CI coverage, split out of
+[ISS-101](ISS-101-ktor-version-range-undocumented.md)) shipped in 0.5.0. Four later fixes are tracked on GitHub only and are on `main`, not yet
+released: GH #178 (`@CacheResult` key normalization) and GH #179–#181 (`kandra-test` usability) — see the
+[unreleased changelog](../changelog/unreleased.md).
 
 (The 2026-09-09 post-fix critical-audit batch, ISS-080–ISS-096, sat in this section listed as
 "Open" for over a month after every one of its GH issues had actually been closed — caught and
@@ -38,7 +40,7 @@ below. Closing any of these needs a targeted test in `kandra-test`'s integration
 | [ISS-098](ISS-098-softdelete-non-nullable-decode-throws.md) | `@SoftDelete` reads threw once a deleted row's TTL expired if any property was non-nullable |
 | [ISS-099](ISS-099-codegen-default-package-empty-line.md) | `kandra-codegen` emitted an invalid empty `package` line for default-package entities |
 | [ISS-100](ISS-100-integration-modules-runtime-scope-deps.md) | Integration modules published `kandra-core`/`kandra-runtime` at runtime scope, breaking consumer compilation |
-| [ISS-101](ISS-101-ktor-version-range-undocumented.md) | No documented supported Ktor version range (partially fixed — see file for the CI/3.x follow-up) |
+| [ISS-101](ISS-101-ktor-version-range-undocumented.md) | No documented supported Ktor version range (docs fixed in GH #155; the CI/3.x half, GH #160, shipped in 0.5.0) |
 | [ISS-102](ISS-102-multi-keyspace-epic.md) | Multiple keyspaces over a single connection (epic) |
 | [ISS-103](ISS-103-core-keyspace-contract.md) | Entity-level keyspace in kandra-core |
 | [ISS-104](ISS-104-runtime-qualified-cql.md) | Runtime emits keyspace-qualified CQL |

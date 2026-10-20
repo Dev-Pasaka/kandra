@@ -1,6 +1,11 @@
 {
   "name": "kandra",
-  "owner": { "name": "Dev-Pasaka" },
+  "owner": {
+    "name": "Dev-Pasaka"
+  },
+  "metadata": {
+    "description": "Claude Code skills for Kandra, the ScyllaDB/Cassandra ORM for Ktor: setup, entities, repositories, config, DI, codegen, migrations, multi-DC, validation and testing."
+  },
   "plugins": [
     {
       "name": "kandra",
