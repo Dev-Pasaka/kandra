@@ -1,5 +1,5 @@
 plugins {
-    id("com.google.devtools.ksp") version "2.1.21-2.0.1"
+    id("com.google.devtools.ksp") version "2.3.12"
 }
 
 dependencies {
@@ -20,6 +20,6 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.junit.params)
     testImplementation("dev.zacsweers.kctfork:core:0.7.1")
-    testImplementation("dev.zacsweers.kctfork:ksp:0.7.1")
+    testImplementation("dev.zacsweers.kctfork:ksp:0.14.0")
     testRuntimeOnly(libs.junit.launcher)
 }
