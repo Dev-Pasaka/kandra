@@ -2,7 +2,7 @@
 
 Kandra is a Kotlin ORM for ScyllaDB/Cassandra, shipped as a Ktor `ApplicationPlugin`. It maps Kotlin data classes to ScyllaDB tables and provides type-safe repositories, automatic schema management, optimistic locking, soft delete, query caching, and more.
 
-> **Version:** 0.5.0 · **Kotlin:** 2.3.21 · **Ktor:** 3.6 · **Driver:** DataStax Java Driver 4.17.0
+> **Version:** 0.5.1 · **Kotlin:** 2.3.21 · **Ktor:** 3.6 · **Driver:** DataStax Java Driver 4.17.0
 
 ---
 
@@ -79,7 +79,7 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.0"))
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.1"))
     implementation("com.kandraorm.kandra:kandra-ktor")       // Ktor plugin (required)
     implementation("com.kandraorm.kandra:kandra-runtime")    // repositories and batch engine
     implementation("com.kandraorm.kandra:kandra-core")       // annotations and schema model
@@ -1552,8 +1552,8 @@ Add the dependency:
 
 ```kotlin
 testImplementation("com.kandraorm.kandra:kandra-test")
-// kandra-test does not bring JUnit or the DataStax driver: also add org.junit.jupiter:junit-jupiter (+ tasks.test { useJUnitPlatform() }),
-// com.datastax.oss:java-driver-core, and Testcontainers 1.21.4+ if you use KandraTestcontainers (1.20.x cannot connect to current Docker).
+// kandra-test does not bring JUnit: also add org.junit.jupiter:junit-jupiter (+ tasks.test { useJUnitPlatform() }), and Testcontainers 1.21.4+
+// if you use KandraTestcontainers (1.20.x cannot connect to current Docker). On 0.5.0 also add com.datastax.oss:java-driver-core.
 testImplementation("org.testcontainers:cassandra:1.21.4")
 testImplementation("org.testcontainers:junit-jupiter:1.21.4")
 ```
