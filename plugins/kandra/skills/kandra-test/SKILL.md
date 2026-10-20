@@ -19,6 +19,13 @@ repository surface end-to-end (an earlier version of `FakePreparedStatement.bind
 CQL semantics: no actual encoding/decoding, no real LWT applied/not-applied result, no real data round-trip.
 For those, use `KandraTestcontainers`.
 
+## Test module setup (nothing here comes transitively)
+
+`kandra-test` exposes `kandra-core`/`kandra-runtime` as `api`, but JUnit and the DataStax driver are **not** on your test compile classpath. Add
+`org.junit.jupiter:junit-jupiter:5.10.x` + `tasks.test { useJUnitPlatform() }` and `com.datastax.oss:java-driver-core:4.17.0`. Calling
+`SchemaRegistry.clear()` (every example does) needs `@OptIn(io.kandra.core.InternalKandraApi::class)`. For `KandraTestcontainers` use Testcontainers
+`1.21.4`+ — 1.20.x cannot connect to current Docker releases ("Could not find a valid Docker environment").
+
 ## FakeKandraSession (`io.kandra.test.FakeKandraSession`)
 
 `class FakeKandraSession : CqlSession` — in-process implementation of the DataStax driver's `CqlSession` interface. No network, no ScyllaDB process.
