@@ -1,6 +1,8 @@
 # Multi-keyspace baseline (ISS-109)
 
-Baseline of the existing test suite before multi-keyspace work (branch off `feature/multi-keyspace`).
+Baseline of the existing test suite before multi-keyspace work (branch off `feature/multi-keyspace`). Test counts
+below are a point-in-time snapshot taken then, not a maintained figure; they have changed since (see the later
+sections for the post-change runs).
 
 ## Docker-backed run (Testcontainers, local Docker Desktop)
 
@@ -19,11 +21,12 @@ Baseline of the existing test suite before multi-keyspace work (branch off `feat
 | kandra-runtime | 280 | 0 | 0 |
 | kandra-test | 41 | 2 (cloud smoke, env unset) | 0 |
 
-kandra-multidc has no tests of its own.
+`kandra-multidc` shows 0 because its only suite (`MultiDcFailoverTest`) is tagged `manual` and excluded from the
+default `test` task; run it with `./gradlew :kandra-multidc:multiDcTest` (needs Docker Compose).
 
 ## Cloud-backed results (shared Scylla Cloud cluster)
 
-Cluster facts: one DC `AWS_US_EAST_1`, 3 nodes, racks `use1-az4`/`use1-az4`/`use1-az2`. Plain auth on
+Cluster facts: one DC `AWS_US_EAST_1`, 3 nodes, spread over availability zones (multi-AZ, not multi-DC). Plain auth on
 9042 works; TLS works on 9142 with the supplied CA (`KANDRA_CLOUD_TLS=true`, `KANDRA_CLOUD_CA_PEM`).
 Tablets are on by default, so SimpleStrategy keyspaces need `AND tablets = {'enabled': false}`.
 
@@ -42,7 +45,7 @@ Tablets are on by default, so SimpleStrategy keyspaces need `AND tablets = {'ena
 | Tests | Cloud-capable? |
 |---|---|
 | kandra-test `KandraIntegrationTest`, `StrictModeRfIntegrationTest` (use `KandraTestcontainers.freshKeyspace`) | Yes, via `KANDRA_TEST_BACKEND=cloud` |
-| kandra-ktor (`KandraPluginTest`, `AutoCreateRedeployTest`, `DdlBootstrapClaimTest`, ...), kandra-kodein/koin DI tests, kandra-migrate, kandra-runtime live tests | No: they read `KandraTestcontainers.container.contactPoint/localDatacenter` directly and build their own unauthenticated sessions and keyspaces. Needs a shared "connection provider" (contact point, DC, auth, ssl) in kandra-test; recommended before Phase 3. New multi-keyspace tests should use `KandraCloud` directly |
+| kandra-ktor (`KandraPluginTest`, `AutoCreateRedeployTest`, `DdlBootstrapClaimTest`, ...), kandra-kodein/koin DI tests, kandra-migrate, kandra-runtime live tests | No: they read `KandraTestcontainers.container.contactPoint/localDatacenter` directly and build their own unauthenticated sessions and keyspaces. This was the state at baseline. The shared connection provider this row asked for was added afterwards (`KandraTestBackend`, see "Test backend switch" below) and the ktor/koin/kodein/migrate suites were moved onto it. |
 | `SslRoundTripIntegrationTest`, multi-DC compose tests | No: need their own containers (custom TLS / multi-DC) |
 
 ## Running
@@ -52,7 +55,7 @@ Tablets are on by default, so SimpleStrategy keyspaces need `AND tablets = {'ena
 ./gradlew test --continue
 
 # Cloud smoke / your own cloud tests (skipped when env unset)
-source /Users/pasaka/Developer/Kandra/.kandra-cloud.env
+# export the KANDRA_CLOUD_* variables first (contact points, username/password, local DC; never commit them)
 ./gradlew :kandra-test:test --tests '*KandraCloudSmokeTest*'
 KANDRA_CLOUD_TLS=true ./gradlew :kandra-test:test --tests '*KandraCloudSmokeTest*'   # TLS on 9142
 

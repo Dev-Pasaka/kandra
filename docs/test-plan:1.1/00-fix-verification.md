@@ -99,7 +99,7 @@ clustering key `bucketedAt`) — restore the full-key `findById(userId, bucketed
 alone was not sufficient — cache invalidation and `@LookupIndex` resolution both derived a *different*,
 narrower key shape than `findById`'s new full-key contract, so both silently broke for a
 clustering-keyed entity even after this fix shipped. See [§00.7](#007--cache-invalidation-key-shape-fix-iss-028)
-and [§00.8](#008--lookupindex-resolution-on-a-clustering-keyed-entity-iss-029) below — if you're
+and [§00.8](#008--lookupindex-resolution-on-a-clustering-keyed-entity-fix-iss-029) below — if you're
 verifying `0.4.4` (not `0.4.3`) for the first time, treat §00.4 through §00.8 as one connected story
 about the same underlying "full key, not partition key" contract change, not five independent bugs.
 

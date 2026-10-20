@@ -1,6 +1,6 @@
 # ISS-007: `findActive()` for `@SoftDelete` entities
 
-**Status:** Fixed — pending live-cluster verification (Testcontainers, see [ISS-013](ISS-013-no-integration-tests.md))
+**Status:** Fixed — verified against a live Testcontainers cluster (`KandraIntegrationTest`: `findActive` with and without `allowFullScan`, soft-delete marker; Docker regression run 2026-10-20 had 0 failures)
 
 ## Problem
 

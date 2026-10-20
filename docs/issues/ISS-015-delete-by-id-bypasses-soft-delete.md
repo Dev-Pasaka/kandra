@@ -1,6 +1,6 @@
 # ISS-015: `KandraRepository.deleteById` bypassed `@SoftDelete`
 
-**Status:** Fixed — pending live-cluster verification (Testcontainers, see [ISS-013](ISS-013-no-integration-tests.md))
+**Status:** Fixed — still lacks a dedicated live-cluster test (the live suite runs green on Docker, but no test pins this specific behaviour; see [ISS-013](ISS-013-no-integration-tests.md))
 
 ## Problem
 

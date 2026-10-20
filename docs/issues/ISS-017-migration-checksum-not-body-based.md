@@ -1,6 +1,6 @@
 # ISS-017: Migration checksum didn't hash the migration body
 
-**Status:** Fixed — pending live-cluster verification (Testcontainers, see [ISS-013](ISS-013-no-integration-tests.md))
+**Status:** Fixed — verified: `KandraMigrationRunnerTest` runs against a live Testcontainers cluster (checksum mismatch, claim and re-run paths; Docker regression 2026-10-20, 0 failures)
 
 ## Problem
 

@@ -4,7 +4,7 @@
 
 ## Problem
 
-Integration tests rely on Testcontainers; no Docker available, so nothing exercises a real cluster here.
+Integration tests rely on Testcontainers (a local Docker daemon). The multi-keyspace work also had to be proven against a real, tablets-enabled ScyllaDB (Scylla Cloud), which Testcontainers' Cassandra image cannot stand in for, so a second, env-driven backend was needed. (Written when Docker was believed to be unavailable; Docker is in fact used for the regression runs, see `docs/test-plan/multi-keyspace-baseline.md`.)
 
 ## Scope
 

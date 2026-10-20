@@ -9,7 +9,7 @@ Filed as GH #155, found while verifying the kandraorm.com quickstart against the
 artifacts.
 
 Kandra 0.4.7 was built and tested against Ktor 2.3.13 (`gradle/libs.versions.toml`'s
-`ktorVersion`). Ktor 3.x had been out for a while, and new Ktor projects default to it, but nothing
+`ktor` entry, mirrored by `gradle.properties`' `ktorVersion`). Ktor 3.x had been out for a while, and new Ktor projects default to it, but nothing
 in the repo stated which Ktor majors Kandra actually supported, or that 3.x hadn't been tried at
 all.
 

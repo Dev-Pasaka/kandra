@@ -1,6 +1,6 @@
 # ISS-014: `QueryExecutor` was entirely blocking, but is the sole read path for suspend repositories
 
-**Status:** Fixed — pending live-cluster verification (Testcontainers, see [ISS-013](ISS-013-no-integration-tests.md))
+**Status:** Fixed — still lacks a dedicated live-cluster test (the live suite runs green on Docker, but no test pins this specific behaviour; see [ISS-013](ISS-013-no-integration-tests.md))
 
 ## Problem
 
