@@ -599,6 +599,9 @@ fun `save captures batch statement`() {
 `tasks.test { useJUnitPlatform() }`) and `com.datastax.oss:java-driver-core` yourself. For `KandraTestcontainers`, use Testcontainers `1.21.4` or
 newer -- 1.20.x cannot talk to current Docker releases. The fake session records statements; it stores no data and returns no rows.
 
+> On `main` (next release, see [`docs/changelog/unreleased.md`](docs/changelog/unreleased.md)) the driver comes with `kandra-test` as an `api` dependency,
+> `KandraTestUtils.reset()` replaces `SchemaRegistry.clear()` (no opt-in), and `capturedBatchViews()` exposes each statement's CQL and bound values.
+
 ---
 
 ## Kotlin → CQL Type Mapping

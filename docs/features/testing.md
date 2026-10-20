@@ -9,6 +9,8 @@
   [ISS-020](../issues/ISS-020-fake-session-lwt-semantics.md).
 - `KandraTestUtils` — schema assertion helpers. `KandraTestUtils.reset()` (or `runtime.closeAndReset()`) clears the process-global schema registry between tests
   without an `@OptIn(InternalKandraApi::class)`. The DataStax driver is an `api` dependency of `kandra-test`, so `CqlSession`/`BatchStatement` resolve in test code.
+  *(`reset()`, `closeAndReset()`, the captured-statement views and the `api` driver dependency are on `main` but not in 0.5.0 — see the
+  [unreleased changelog](../changelog/unreleased.md). On 0.5.0, add `java-driver-core` yourself and use `@OptIn(InternalKandraApi::class)` around `SchemaRegistry.clear()`.)*
 - Setup your test module needs (JUnit does not come transitively): `org.junit.jupiter:junit-jupiter` with `tasks.test { useJUnitPlatform() }`, and Testcontainers
   `1.21.4`+ for `KandraTestcontainers` (1.20.x cannot connect to current Docker). Calling `SchemaRegistry.clear()` directly still needs
   `@OptIn(InternalKandraApi::class)` — prefer `KandraTestUtils.reset()`.
