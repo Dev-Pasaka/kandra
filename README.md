@@ -84,7 +84,7 @@ authoring a schema migration.
 **Built and tested against Ktor 3.6.x** (Kotlin 2.3.x; Koin 4.x / Kodein 7.33 for the DI modules). Ktor 2.x is
 no longer supported: Ktor 3.6 is compiled with Kotlin 2.3 metadata, so a single artifact cannot serve both
 majors (GH #160). The whole test suite, including the `testApplication` and Testcontainers tests, runs
-against Ktor 3 in CI.
+against Ktor 3 in CI, and the Ktor-facing modules are also re-tested in a CI matrix against Ktor 3.5.2 and the latest published 3.x release (`-PktorVersionOverride=<version>` reproduces it locally). Ktor 4.x is not covered.
 
 ### 1. Add dependencies (with BOM)
 

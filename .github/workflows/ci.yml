@@ -38,8 +38,59 @@ jobs:
           name: test-reports
           path: '**/build/reports/tests/'
 
+  # Ktor compatibility (GH #160). The `test` job runs the Ktor version pinned in
+  # gradle/libs.versions.toml (3.6.0); this one re-runs the Ktor-facing modules against the newest
+  # published Ktor 3.x and the previous minor line, so a Ktor-side change can't silently regress the claim.
+  ktor-compat:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ktor: [ '3.5.2', 'latest' ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', 'gradle.properties') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Resolve Ktor version
+        id: ktor
+        run: |
+          if [ "${{ matrix.ktor }}" = "latest" ]; then
+            v=$(curl -fsS https://repo1.maven.org/maven2/io/ktor/ktor-server-core/maven-metadata.xml \
+              | grep -oE '<version>3\.[0-9]+\.[0-9]+</version>' | sed -E 's/<[^>]+>//g' | sort -V | tail -1)
+          else
+            v="${{ matrix.ktor }}"
+          fi
+          echo "Testing against Ktor $v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Test Ktor-facing modules
+        run: >
+          ./gradlew :kandra-ktor:test :kandra-koin:test :kandra-kodein:test
+          -PktorVersionOverride=${{ steps.ktor.outputs.version }} --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ktor-compat-reports-${{ matrix.ktor }}
+          path: '**/build/reports/tests/'
+
   publish:
-    needs: test
+    needs: [test, ktor-compat]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
