@@ -1,6 +1,6 @@
 # ISS-018: No locking in `KandraMigrationRunner` — concurrent runners could double-apply
 
-**Status:** Fixed — pending live-cluster verification (Testcontainers, see [ISS-013](ISS-013-no-integration-tests.md))
+**Status:** Fixed — verified: `KandraMigrationClaimConcurrencyTest` races real concurrent runners against a live Testcontainers cluster and `KandraMigrationRunnerTest` covers claim/stale-claim paths (Docker regression 2026-10-20, 0 failures)
 
 ## Problem
 

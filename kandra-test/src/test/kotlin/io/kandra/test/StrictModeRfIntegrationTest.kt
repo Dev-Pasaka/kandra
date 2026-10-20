@@ -112,7 +112,14 @@ class StrictModeRfIntegrationTest {
             resolveWriteMethod().invoke(builder, schema(), null)
         }
 
-        assertFalse(output.contains("strictMode"), "expected no RF strict-mode WARN at RF=1, got: $output")
+        // The cloud backend bumps RF 1 -> 3 (see KandraTestBackend.effectiveRf), so assert against the RF
+        // actually created: no warning at RF=1 (docker), the RF=3 warning where the bump applies.
+        val createdRf = KandraTestBackend.effectiveRf(1)
+        if (createdRf == 1) {
+            assertFalse(output.contains("strictMode"), "expected no RF strict-mode WARN at RF=1, got: $output")
+        } else {
+            assertTrue(output.contains("replication factor $createdRf"), "expected WARN for RF=$createdRf, got: $output")
+        }
     }
 
     @Test
@@ -144,25 +151,17 @@ class StrictModeRfIntegrationTest {
 
     @Test
     fun `strict mode resolves RF correctly on a single-DC NetworkTopologyStrategy keyspace`() {
-        val keyspace = "kandra_test_nts_${UUID.randomUUID().toString().replace("-", "")}"
-        val container = KandraTestcontainers.container
-        val localDc = container.localDatacenter
+        val keyspace = KandraTestBackend.keyspaceName("nts")
+        val localDc = KandraTestBackend.localDatacenter
 
-        val bootstrapSession = CqlSession.builder()
-            .addContactPoint(container.contactPoint)
-            .withLocalDatacenter(localDc)
-            .build()
-        bootstrapSession.execute(
-            "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-            "{'class': 'NetworkTopologyStrategy', '$localDc': 3}"
-        )
-        bootstrapSession.close()
+        KandraTestBackend.newSession().use {
+            it.execute(
+                "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
+                "{'class': 'NetworkTopologyStrategy', '$localDc': 3}"
+            )
+        }
 
-        val session = CqlSession.builder()
-            .addContactPoint(container.contactPoint)
-            .withLocalDatacenter(localDc)
-            .withKeyspace(keyspace)
-            .build()
+        val session = KandraTestBackend.newSession(keyspace)
         try {
             val builder = StatementBuilder(
                 session = session,
@@ -180,8 +179,8 @@ class StrictModeRfIntegrationTest {
             assertTrue(output.contains("strictMode"), "expected RF strict-mode WARN, got: $output")
             assertTrue(output.contains("replication factor 3"), "expected WARN to mention RF=3, got: $output")
         } finally {
-            runCatching { session.execute("DROP KEYSPACE IF EXISTS $keyspace") }
             runCatching { session.close() }
+            KandraTestBackend.dropKeyspace(keyspace)
         }
     }
 }

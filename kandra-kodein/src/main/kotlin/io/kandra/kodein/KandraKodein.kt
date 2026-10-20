@@ -46,11 +46,20 @@ fun Application.kandraKodein() {
         .groupBy { it.entityClass.simpleName }
         .filterValues { it.size > 1 }
         .forEach { (simpleName, schemas) ->
-            val qualifiedNames = schemas.joinToString(", ") { it.entityClass.qualifiedName ?: it.entityClass.toString() }
+            val qualifiedNames = schemas.joinToString(", ") {
+                val fqn = it.entityClass.qualifiedName ?: it.entityClass.toString()
+                "$fqn [keyspace: ${it.keyspace ?: "<default>"}]"
+            }
+            val crossKeyspace = schemas.map { it.keyspace }.distinct().size > 1
+            val hint = if (crossKeyspace)
+                "These entities live in different keyspaces, but Kodein bindings are keyed by simple class name only, " +
+                    "so the keyspace does not disambiguate them. "
+            else ""
             throw KandraSchemaException(
                 "Multiple @ScyllaTable entities share the simple name '$simpleName', which would " +
                     "produce colliding Kodein tags (\"$simpleName\" / \"${simpleName}Suspend\"): " +
-                    "$qualifiedNames. Rename one of these classes so each entity has a unique simple name."
+                    "$qualifiedNames. $hint" +
+                    "Rename one of these classes so each entity has a unique simple name."
             )
         }
 

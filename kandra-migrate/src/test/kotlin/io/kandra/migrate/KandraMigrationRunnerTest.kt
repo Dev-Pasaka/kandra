@@ -2,7 +2,7 @@ package io.kandra.migrate
 
 import com.datastax.oss.driver.api.core.CqlSession
 import io.kandra.core.exception.KandraMigrationException
-import io.kandra.test.KandraTestcontainers
+import io.kandra.test.KandraTestBackend
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -36,25 +36,10 @@ class KandraMigrationRunnerTest {
         // "kandra_migr_" (12 chars) + a 32-char dash-stripped UUID = 44 chars, safely under
         // Cassandra's 48-character keyspace name limit (mirrors the pattern used elsewhere, e.g.
         // KandraPluginTest's "kandra_ktor_" prefix).
-        keyspace = "kandra_migr_${UUID.randomUUID().toString().replace("-", "")}"
-        val contactPoint = KandraTestcontainers.container.contactPoint
-        val localDc = KandraTestcontainers.container.localDatacenter
+        keyspace = KandraTestBackend.keyspaceName("migr")
+        KandraTestBackend.createKeyspace(keyspace)
 
-        CqlSession.builder()
-            .addContactPoint(contactPoint)
-            .withLocalDatacenter(localDc)
-            .build().use {
-                it.execute(
-                    "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-                    "{'class': 'SimpleStrategy', 'replication_factor': 1}"
-                )
-            }
-
-        session = CqlSession.builder()
-            .addContactPoint(contactPoint)
-            .withLocalDatacenter(localDc)
-            .withKeyspace(keyspace)
-            .build()
+        session = KandraTestBackend.newSession(keyspace)
         return session
     }
 

@@ -20,10 +20,13 @@ Everything below is read directly from:
 (`Kandra.kt` lines 60-271). Nothing below is async except the credential-rotation loop and the shutdown hooks,
 which are registered but fire later.
 
-1. **Validate `keyspace` is set.** Blank `keyspace` throws `KandraSchemaException` immediately — this is the
-   first thing checked, before any network call.
+1. **Validate keyspace configuration** (`resolveKeyspaceSpecs`, `KeyspacePlan.kt`). A blank `keyspace` throws
+   `KandraSchemaException("Kandra: 'keyspace' must be set in the plugin configuration.")` immediately — before any
+   network call — *unless* extra keyspaces were declared with `keyspace("x") { }`, in which case a blank default
+   is allowed provided every entity names its own keyspace (checked later by `validateEntityKeyspaces`). See
+   "Multi-keyspace" below.
 2. **Open the session.**
-   - If `autoCreateKeyspace = true`: build a *bootstrap* session with `withKeyspace = false` (no keyspace
+   - If `autoCreateKeyspace = true` (or any `keyspace("x") { autoCreate = true }`): build a *bootstrap* session with `withKeyspace = false` (no keyspace
      attached yet — see `CqlSessionBuilder.kt:18`), run `CREATE KEYSPACE IF NOT EXISTS ...` using
      `replicationStrategy`, then `USE <keyspace>` on that same session and keep it as the plugin's session
      (no reconnect). Logs `"Kandra: keyspace '<ks>' ensured."`
@@ -170,7 +173,8 @@ Notes on top-level fields:
 - `contactPoints` is a comma-separated `host:port` list (port optional, defaults to `9042` per entry — see
   `CqlSessionBuilder.kt:38-44`, which splits on `,` and parses the *last* `:` as the port separator so IPv6
   literals with embedded colons still resolve the trailing port correctly).
-- `keyspace` has no default — you must set it or install throws.
+- `keyspace` has no default — you must set it or install throws (the one exception: a blank default is accepted
+  when extra `keyspace("x") { }` blocks are declared and every entity names its keyspace).
 - `autoCreateKeyspace = false` by default: in most real deployments the keyspace already exists and is
   provisioned by ops, so DDL against `system_schema` requires elevated permissions you may not want the app
   role to have.
@@ -186,7 +190,10 @@ Notes on top-level fields:
 
 ```kotlin
 sealed class ReplicationStrategy {
-    data class SimpleStrategy(val replicationFactor: Int = 1) : ReplicationStrategy()
+    data class SimpleStrategy(
+        val replicationFactor: Int = 1,
+        val disableTablets: Boolean = false   // true => appends AND tablets = {'enabled': false} (ScyllaDB only)
+    ) : ReplicationStrategy()
     data class NetworkTopologyStrategy(val dcReplicationMap: Map<String, Int>) : ReplicationStrategy()
 }
 ```
@@ -529,12 +536,13 @@ Resolution order (highest priority first): per-call `consistency` argument on a 
 `ONE, TWO, THREE, QUORUM, ALL, LOCAL_ONE, LOCAL_QUORUM, EACH_QUORUM, LOCAL_SERIAL, SERIAL` (`isSerial` is
 `true` for `LOCAL_SERIAL`/`SERIAL`, used for LWT operations like `saveIfNotExists`).
 
-**Read-your-writes above RF 3**: the defaults (`LOCAL_ONE` read / `LOCAL_QUORUM` write) only satisfy
-`R + W ≥ RF` for `RF ≤ 3`. A keyspace with `RF = 5` (plausible for a larger multi-DC deployment) silently
-stops guaranteeing read-your-writes on these defaults — raise `defaultRead` accordingly. `strictMode` (opt-in,
-default `false`) only warns when a query resolves to `LOCAL_ONE`/`ONE` in a multi-DC topology
-(`loadBalancing.allowedRemoteDcs.isNotEmpty()`, auto-detected) — it does **not** check RF against R+W
-directly, so it won't catch the RF>3 case above. See
+**Read-your-writes above RF 2**: it needs the strict inequality `R + W > RF`. The defaults (`LOCAL_ONE` read /
+`LOCAL_QUORUM` write, `1 + quorum(RF)`) only satisfy it for `RF ≤ 2` (at `RF = 3`, `1 + 2 = 3` does not exceed 3),
+so a keyspace with `RF ≥ 3` silently stops guaranteeing read-your-writes on these defaults — raise `defaultRead`
+accordingly. `strictMode` (opt-in, default `false`, WARN-only) does two independent checks: it warns when a query
+resolves to `LOCAL_ONE`/`ONE` in a multi-DC topology (`loadBalancing.allowedRemoteDcs.isNotEmpty()`,
+auto-detected), and it checks the resolved R + W against the live replication factor of the entity's own keyspace
+(`StatementBuilder.warnIfRfConsistencyMismatch`, ISS-075). See
 `docs/issues/ISS-075-strict-mode-rf-consistency-math.md`.
 
 ## `codec: KandraCodec` (from `kandra-runtime.codec`)
@@ -621,7 +629,8 @@ routing {
 ## Gotchas worth double-checking in review
 
 - `keyspace` has no default and blank throws at install — this is the very first check, before any network
-  call, so a missing `keyspace` fails fast rather than surfacing as a confusing driver error.
+  call, so a missing `keyspace` fails fast rather than surfacing as a confusing driver error. (Blank is accepted
+  only when extra `keyspace("x") { }` blocks are declared and every entity names a declared keyspace.)
 - `autoCreateKeyspace = false` by default — if you rely on it in one environment (e.g. local dev) but not
   another (staging/prod), a missing keyspace in the non-auto-create environment throws from the driver
   connect call, not from a Kandra-specific check.
@@ -653,3 +662,27 @@ routing {
 - `contactPoints` port parsing splits on the *last* colon per comma-separated entry — safe for IPv6 literals
   with a trailing port, but malformed entries without a numeric suffix after the last colon will throw a
   `NumberFormatException` from `.toInt()`, not a Kandra-specific error.
+
+## Multi-keyspace (ISS-105)
+
+One `install(Kandra)`, one `CqlSession`, many keyspaces:
+
+```kotlin
+install(Kandra) {
+    keyspace = "core"                         // default keyspace (blank allowed only if extra keyspaces are declared AND every entity names its keyspace)
+    keyspace("billing") {                     // declare an extra keyspace; settings only
+        autoCreate = true
+        replicationStrategy = ReplicationStrategy.NetworkTopologyStrategy(mapOf("dc1" to 3)) // null = inherit plugin-level strategy
+    }
+    register(User::class, Invoice::class)     // Invoice is @ScyllaTable(keyspace = "billing")
+}
+```
+
+- Entity membership comes from the annotation only. An entity naming a keyspace that is neither the default nor declared → `KandraSchemaException` (names the entity and lists declared keyspaces), thrown before connecting.
+- Validation (before connecting): identifiers valid, unique, not equal to the default (case-insensitive); DC names checked for auto-created keyspaces.
+- Per keyspace: `CREATE KEYSPACE` (when `autoCreate`), permission check, `AUTO_CREATE`/`AUTO_MIGRATE`/`VALIDATE` over only that keyspace's entities, `system_schema` lookups by that keyspace. Each non-default keyspace has its own `kandra_ddl_locks` table; the default keeps the old lock name.
+- Tablets: `ReplicationStrategy.SimpleStrategy(replicationFactor = 1, disableTablets = false)`. On tablets-enabled ScyllaDB (e.g. Scylla Cloud) autoCreate with `SimpleStrategy` fails (`SimpleStrategy doesn't support tablet replication`) unless you pass `disableTablets = true`, which appends `AND tablets = {'enabled': false}` to `CREATE KEYSPACE`. Opt-in; default DDL unchanged; ScyllaDB only (Cassandra rejects the option); `NetworkTopologyStrategy` needs no flag. Inherited by `keyspace("x") { }` when it has no own strategy. Clusters configured with `tablets_mode_for_new_keyspaces: enforced` reject `SimpleStrategy` entirely, flag or not — use `NetworkTopologyStrategy` there.
+- Blank default keyspace: with no `keyspace = "..."` but at least one `keyspace("x") { }`, install proceeds; an entity with a blank `@ScyllaTable(keyspace)` then fails with `KandraSchemaException` ("has no keyspace ... and no default keyspace is configured"). Without any declared extra keyspace the original `'keyspace' must be set` error is unchanged.
+- Undeclared keyspace error text: `entity 'Invoice' declares @ScyllaTable(keyspace = "billing"), but keyspace 'billing' is neither the default keyspace nor declared via keyspace("billing") { }. Declared keyspaces: [...]`.
+- Extra-keyspace validation errors: not a valid CQL identifier, duplicates the default (case-insensitive), or declared more than once.
+- Lock naming: the default keyspace keeps the unqualified `kandra_ddl_locks` table and the old lock name; each non-default keyspace uses `<ks>.kandra_ddl_locks` and a lock name that includes the keyspace.

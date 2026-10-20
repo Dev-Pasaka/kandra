@@ -4,7 +4,12 @@ package io.kandra.core.annotations
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ScyllaTable(
     val name: String,
-    val gcGraceSeconds: Int = -1  // -1 means use ScyllaDB default
+    val gcGraceSeconds: Int = -1,  // -1 means use ScyllaDB default
+    /**
+     * Keyspace this entity lives in. Blank (default) = the plugin's default keyspace, and generated
+     * CQL stays unqualified; otherwise CQL uses `keyspace.table`. Must be a valid CQL identifier.
+     */
+    val keyspace: String = ""
 )
 
 /** Marks a partition key field. Use [index] for composite partition keys. */

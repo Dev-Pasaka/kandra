@@ -8,9 +8,10 @@ import io.kandra.ktor.LoadBalancingConfig
 import io.kandra.ktor.SpeculativeExecutionConfig
 
 /**
- * Multi-datacenter extension for Kandra.
+ * Multi-datacenter helper for Kandra.
  *
- * Include `kandra-multidc` in your dependencies for multi-DC features:
+ * This module only contributes [describe], a startup-logging helper. The multi-DC features themselves are
+ * implemented in `kandra-ktor` / `kandra-runtime` and work whether or not this module is on the classpath:
  * - Token-aware load balancing with DC failover
  * - Per-operation consistency level control
  * - Speculative execution for latency-sensitive reads
@@ -67,8 +68,8 @@ import io.kandra.ktor.SpeculativeExecutionConfig
 object KandraMultiDc {
 
     /**
-     * Validates a multi-DC configuration and returns a description of the active policies.
-     * Useful for logging at startup.
+     * Returns a description of the multi-DC-relevant settings. Pure string formatting: it does no validation
+     * (invalid combinations are rejected by `install(Kandra)`, not here). Useful for logging at startup.
      */
     fun describe(config: KandraConfig): String = buildString {
         appendLine("Kandra Multi-DC Configuration:")

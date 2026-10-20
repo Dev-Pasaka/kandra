@@ -151,6 +151,22 @@ class KandraProcessor(
         }
         generatedTableNames[collisionKey] = qualifiedName
 
+        // ISS-110: the generated *Table carries only column refs (no table or keyspace name), so a
+        // keyspaced entity emits byte-identical code to an unkeyspaced one. The keyspace is still
+        // validated here so an invalid identifier fails the build instead of at SchemaRegistry time.
+        val keyspace = classDecl.annotations
+            .find { it.annotationType.resolve().declaration.qualifiedName?.asString() == "io.kandra.core.annotations.ScyllaTable" }
+            ?.arguments?.find { it.name?.asString() == "keyspace" }?.value as? String
+        if (!keyspace.isNullOrBlank() && !CqlNaming.isValidIdentifier(keyspace)) {
+            logger.error(
+                "Kandra codegen: '$qualifiedName' has an invalid @ScyllaTable keyspace '$keyspace' — " +
+                    "keyspace names must start with a letter or underscore and contain only letters, " +
+                    "digits, and underscores. Use keyspace = \"\" for the default keyspace.",
+                classDecl
+            )
+            return
+        }
+
         val properties = classDecl.getAllProperties().toList()
 
         val columnRefs = properties

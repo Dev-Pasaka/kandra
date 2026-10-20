@@ -6,8 +6,11 @@ application against the **published** Kandra artifact (not this source tree) and
 cluster** (not a fake session), then exercise every documented feature and every known edge case,
 and report back a scored result.
 
-Nothing here has been executed yet. Treat every claim about "should" behavior as a hypothesis to be
-verified against the real database, not a known-good fact — that is the entire point of this plan.
+This is the original v1.0 plan, written for 0.4.2. It has since been executed once, partially (see
+`docs/report:1.0/SUMMARY.md`) and followed up by the v1.1 plan
+(`docs/test-plan:1.1/README.md`); the multi-keyspace live-cluster baseline is in
+[multi-keyspace-baseline.md](multi-keyspace-baseline.md). Treat every claim about "should" behavior as a hypothesis
+to be verified against the real database, not a known-good fact — that is the entire point of this plan.
 
 ## Background: what Kandra is, and the problem it solves
 
@@ -44,9 +47,9 @@ Kandra grew through four build phases (`docs/history/0.1.0-build-spec.md` throug
 starting from core annotations/DDL generation and repositories, then adding schema validation modes,
 pagination, counters, and collections (0.2.0), retry/idempotency/multi-DC/auth/SSL (0.3.0), and
 optimistic locking, soft delete, health checks, graceful shutdown, schema migrations, and query
-caching (0.4.0). It was built for and is used in production by CoinX, a crypto social-finance
-platform built on Ktor + ScyllaDB — the annotation set and repository API reflect patterns that
-came from a real application's day-to-day query needs, not a speculative feature list.
+caching (0.4.0). It was built for CoinX, a crypto social-finance platform built on Ktor +
+ScyllaDB, but is not yet in production use by anyone — the annotation set and repository API reflect patterns
+that came from that application's day-to-day query needs, not a speculative feature list.
 
 **This test plan's job** is to confirm that story holds up: that a fresh consumer, pulling only the
 published artifact (not this source tree) against a real cluster, gets an ORM that actually handles
@@ -57,12 +60,11 @@ application" acceptance test that the whole plan builds toward.
 
 ## Why this exists
 
-Kandra has 43 unit tests (all against `FakeKandraSession`, which cannot execute real prepared
-statements — see [ISS-020](../issues/ISS-020-fake-session-lwt-semantics.md)) plus a handful of
-Testcontainers integration tests added in 0.4.2 that cover a narrow slice of the surface (basic CRUD,
-one LWT conflict, one soft-delete case, one shutdown case). The vast majority of Kandra's real
-behavior — every annotation combination, every config knob, every documented gotcha in
-`.claude/skills/kandra-*/SKILL.md` — has **never been run against a live cluster**. This plan exists
+When this plan was written (0.4.2), Kandra's unit tests ran against `FakeKandraSession`, which cannot
+execute real prepared statements (see [ISS-020](../issues/ISS-020-fake-session-lwt-semantics.md)), plus a handful of
+Testcontainers integration tests covering a narrow slice of the surface. Many integration tests have been added
+since, but most annotation combinations, config knobs, and documented gotchas in
+`.claude/skills/kandra-*/SKILL.md` are still only checked at unit level. This plan exists
 to close that gap by building one deliberately adversarial sample application that touches
 everything, then hunting for where reality diverges from the docs.
 

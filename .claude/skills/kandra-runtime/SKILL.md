@@ -554,7 +554,10 @@ Builds every `BoundStatement`. Key behaviors:
   consistencyConfig.multiDcTopology` and `resolved` is `LOCAL_ONE` or `ONE`, logs a WARN naming the table
   and the resolved level. Unconditional on every matching call (no "warn once" tracking, matching the
   `QueryExecutor.findActive()` ALLOW FILTERING warning precedent) and never throws. `multiDcTopology` is
-  `@InternalKandraApi` and populated by `kandra-ktor`'s `Kandra.kt`, not user-set.
+  `@InternalKandraApi` and populated by `kandra-ktor`'s `Kandra.kt`, not user-set. A second, independent
+  strict-mode check, `warnIfRfConsistencyMismatch` (ISS-075), reads the replication of the *entity's* keyspace
+  (`schema.keyspace`, falling back to the session keyspace) from live driver metadata and WARNs when the
+  resolved read/write pair does not satisfy `R + W > RF`; it is skipped when metadata is unavailable.
 
 ## Codec (`io.kandra.runtime.codec.KandraCodec`)
 
@@ -629,11 +632,11 @@ package-private) — resolving via the interface keeps the `Method`'s declaring 
 
 ```kotlin
 class ConsistencyConfig {
-    // Read-your-writes requires R + W >= RF. These defaults (1 + 2 = 3) only satisfy that for RF <= 3 —
-    // a keyspace with RF = 5 (plausible in a larger multi-DC deployment) silently stops guaranteeing
-    // read-your-writes on these defaults, with no warning from Strict Mode (below), which only checks
-    // for LOCAL_ONE/ONE usage, not RF vs R+W directly. Raise defaultRead (e.g. to LOCAL_QUORUM) if your
-    // keyspace's RF exceeds 3. See docs/issues/ISS-075-strict-mode-rf-consistency-math.md.
+    // Read-your-writes requires the strict R + W > RF. These defaults (1 + quorum(RF)) only satisfy that
+    // for RF <= 2 (RF = 3: 1 + 2 = 3 does not exceed 3). With strictMode (below), Kandra also checks R + W
+    // against the live RF of the entity's keyspace and WARNs (warnIfRfConsistencyMismatch). Raise
+    // defaultRead (e.g. to LOCAL_QUORUM) if your keyspace's RF is 3 or more.
+    // See docs/issues/ISS-075-strict-mode-rf-consistency-math.md.
     var defaultRead: KandraConsistency = KandraConsistency.LOCAL_ONE
     var defaultWrite: KandraConsistency = KandraConsistency.LOCAL_QUORUM
     var defaultSerialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL   // not read anywhere in this module — saveIfNotExists takes serialConsistency as a direct param instead

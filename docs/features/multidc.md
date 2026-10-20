@@ -2,6 +2,12 @@
 
 Configures per-DC consistency levels and local-DC routing policies for multi-region deployments.
 
+The `kandra-multidc` module itself is thin: its only code is `KandraMultiDc.describe(config)`, a startup-logging
+string builder. The multi-DC config blocks (`loadBalancing { }`, `failover { }`, `speculativeExecution { }`,
+`consistency { }`) live in `kandra-ktor`'s `KandraConfig` and work without this dependency. Its test source set
+holds the real two-datacenter suite below, which is tagged `manual` and therefore excluded from the default
+`test` task: a plain `./gradlew :kandra-multidc:test` runs 0 tests.
+
 ## Strict Mode — warn on `LOCAL_ONE`/`ONE` in a multi-DC deployment (GH #5)
 
 `kandra-runtime` and `kandra-multidc` are separate modules with no dependency between them, and
@@ -35,6 +41,11 @@ Behavior:
   `@ReadConsistency`/`@WriteConsistency` → `consistency { defaultRead/defaultWrite }`) is `LOCAL_ONE` or
   `ONE`. `LOCAL_QUORUM` (the usual multi-DC default), `QUORUM`, `EACH_QUORUM`, `ALL`, and every other
   level never trigger it.
+
+Separately from the multi-DC warning above, `strictMode = true` also enables the replication-factor check
+(ISS-075): it WARNs when the resolved read and write consistency do not satisfy `R + W > RF`, using the live
+replication of the entity's own keyspace. That check does not depend on `allowedRemoteDcs` and also applies to
+single-DC clusters with RF 3 or more.
 
 See [`ConsistencyConfig`](../USER_GUIDE.md#strict-mode-multi-dc-local_oneone-warning) in the User Guide
 for the full consistency-resolution example.
@@ -97,3 +108,10 @@ multi-region infrastructure. Everything tested so far says the *config surface* 
 mechanics* work; real cross-region latency, clock skew, and genuine network partition behavior
 remain unvalidated. Closing this gap needs either a ScyllaDB Cloud tier that actually offers
 multi-region clusters, or a more deliberate self-hosted multi-region setup than any tried so far.
+
+## Multiple keyspaces and strict mode
+
+With several keyspaces on one install, the strict-mode replication-factor check resolves the
+replication of the *entity's own* keyspace rather than the session keyspace, so each keyspace may
+use a different `NetworkTopologyStrategy` map. (As noted above, none of this has been validated
+against a genuine multi-region topology.)

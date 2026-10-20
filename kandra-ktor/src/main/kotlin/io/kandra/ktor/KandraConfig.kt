@@ -26,7 +26,19 @@ enum class SchemaMode {
 }
 
 sealed class ReplicationStrategy {
-    data class SimpleStrategy(val replicationFactor: Int = 1) : ReplicationStrategy()
+    /**
+     * @param disableTablets Opt-in, default `false` (DDL unchanged). When `true`, `autoCreateKeyspace`
+     *   appends `AND tablets = {'enabled': false}` to `CREATE KEYSPACE`. Needed on ScyllaDB clusters
+     *   with tablets enabled by default, which reject `SimpleStrategy` with
+     *   "SimpleStrategy doesn't support tablet replication". ScyllaDB only: Apache Cassandra rejects
+     *   the unknown `tablets` option. Clusters configured with `tablets_mode_for_new_keyspaces: enforced`
+     *   reject `SimpleStrategy` entirely, even with this flag; use [NetworkTopologyStrategy] there (it works
+     *   with tablets, and is preferred wherever possible).
+     */
+    data class SimpleStrategy(
+        val replicationFactor: Int = 1,
+        val disableTablets: Boolean = false
+    ) : ReplicationStrategy()
     data class NetworkTopologyStrategy(val dcReplicationMap: Map<String, Int>) : ReplicationStrategy()
 }
 
@@ -301,6 +313,22 @@ class MetricsConfig {
 }
 
 /**
+ * Settings for an additional keyspace declared with [KandraConfig.keyspace] (ISS-105). Declares the
+ * keyspace and how to bootstrap it; which entities live in it is decided by each entity's
+ * `@ScyllaTable(keyspace = "...")`, not here.
+ */
+class KeyspaceConfig {
+    /** When true, `CREATE KEYSPACE IF NOT EXISTS` is run for this keyspace at startup. Default false. */
+    var autoCreate: Boolean = false
+
+    /**
+     * Replication used when [autoCreate] is true. `null` (default) inherits
+     * [KandraConfig.replicationStrategy], whatever its value is at install time.
+     */
+    var replicationStrategy: ReplicationStrategy? = null
+}
+
+/**
  * Configuration for the [Kandra] Ktor plugin.
  *
  * ```kotlin
@@ -386,6 +414,18 @@ class KandraConfig {
 
     internal val entities = mutableListOf<KClass<*>>()
     internal val validators = mutableMapOf<KClass<*>, KandraValidator<*>>()
+
+    internal val extraKeyspaces = mutableListOf<Pair<String, KeyspaceConfig>>()
+
+    /**
+     * Declares an additional keyspace (ISS-105). One `install(Kandra)` still opens one `CqlSession`;
+     * entities choose their keyspace with `@ScyllaTable(keyspace = name)`. An entity naming a keyspace
+     * that is neither [keyspace] nor declared here fails startup with `KandraSchemaException`.
+     * With no default [keyspace] set, every registered entity must name a declared keyspace.
+     */
+    fun keyspace(name: String, block: KeyspaceConfig.() -> Unit = {}) {
+        extraKeyspaces.add(name to KeyspaceConfig().apply(block))
+    }
 
     fun register(vararg classes: KClass<*>) { entities.addAll(classes) }
 

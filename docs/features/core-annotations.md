@@ -11,6 +11,18 @@ Maps a Kotlin data class to a ScyllaDB/Cassandra table.
 data class User(...)
 ```
 
+`keyspace` (default `""` = the plugin's default keyspace) places the entity in another keyspace:
+
+```kotlin
+@ScyllaTable(name = "invoices", keyspace = "billing")
+data class Invoice(...)
+```
+
+A non-blank keyspace must be a valid CQL identifier and must be the default or declared via
+`keyspace("billing") { }` in `install(Kandra)`; generated CQL then uses `billing.invoices`. Blank
+keeps today's unqualified CQL. Lookup tables inherit the parent's keyspace. See
+[ktor-plugin.md](ktor-plugin.md#multiple-keyspaces).
+
 ### `@PartitionKey` / `@ClusteringKey`
 Defines primary key components. Multiple `@PartitionKey` fields form a composite partition key.
 
@@ -70,7 +82,7 @@ for why this is intentional, not a bug.
 ```
 
 Optionally add `markerProperty` to enable `findActive()` — see
-[repositories.md](repositories.md#findactive-soft-delete-entities-only).
+[repositories.md](repositories.md#findactive-softdelete-entities-only).
 
 ```kotlin
 @SoftDelete(ttlSeconds = 86400, markerProperty = "isDeleted")

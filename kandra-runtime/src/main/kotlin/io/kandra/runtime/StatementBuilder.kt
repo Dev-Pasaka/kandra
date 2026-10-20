@@ -101,7 +101,7 @@ class StatementBuilder(
         // updates for serializable writes"), regardless of which of the three resolution sources
         // (per-call override, @WriteConsistency, or consistency { defaultWrite = ... }) produced it.
         if (!resolved.isValidForWrite) throw KandraQueryException(
-            "Write consistency $resolved is not valid for a write operation on '${schema.tableName}' -- " +
+            "Write consistency $resolved is not valid for a write operation on '${schema.qualifiedTableName}' -- " +
             "SERIAL/LOCAL_SERIAL are only valid as the serialConsistency parameter of a conditional " +
             "write (saveIfNotExists()/update()'s IF check), never as a table's regular write " +
             "consistency; Cassandra/Scylla reject it server-side. Check the per-call consistency " +
@@ -125,7 +125,7 @@ class StatementBuilder(
         // an equivalent per-call/@ReadConsistency override) silently breaks every read against a real
         // cluster with an opaque driver-level exception instead of a clear Kandra one.
         if (!resolved.isValidForRead) throw KandraQueryException(
-            "Read consistency $resolved is not valid for a read operation on '${schema.tableName}' -- " +
+            "Read consistency $resolved is not valid for a read operation on '${schema.qualifiedTableName}' -- " +
             "EACH_QUORUM is a write-only consistency level; Cassandra/Scylla reject it for reads " +
             "server-side. Check the per-call consistency override, @ReadConsistency on the entity " +
             "class, and consistency { defaultRead = ... }."
@@ -145,7 +145,7 @@ class StatementBuilder(
         if (!consistencyConfig.strictMode || !consistencyConfig.multiDcTopology) return
         if (resolved != KandraConsistency.LOCAL_ONE && resolved != KandraConsistency.ONE) return
         logger.warn {
-            "Kandra strictMode: query on '${schema.tableName}' resolved to $resolved consistency in a " +
+            "Kandra strictMode: query on '${schema.qualifiedTableName}' resolved to $resolved consistency in a " +
             "multi-DC deployment (loadBalancing.allowedRemoteDcs is non-empty). LOCAL_QUORUM is usually " +
             "the intended default for multi-DC deployments so writes/reads are acknowledged across " +
             "datacenters, not just one local replica. Set an explicit consistency level, a " +
@@ -161,9 +161,10 @@ class StatementBuilder(
      * multi-DC deployment). Reads the resolved table's actual replication factor from live driver
      * metadata (`session.getMetadata().getKeyspace(...)`) — not from any static config — and warns
      * when the resolved read/write consistency pair can no longer guarantee read-your-writes, i.e.
-     * when `R + W < RF`. Never throws; RF is looked up on a best-effort basis and the check is
-     * silently skipped (not "assumed safe") if the session has no current keyspace or the driver has
-     * no metadata for it yet (e.g. a bare CqlSession in a unit test).
+     * when `R + W` does not exceed `RF` (read-your-writes needs the strict `R + W > RF`). Never throws; RF is looked up on a best-effort basis and the check is
+     * silently skipped (not "assumed safe") if neither the entity nor the session names a keyspace or the
+     * driver has no metadata for it yet (e.g. a bare CqlSession in a unit test). The keyspace consulted is
+     * the entity's own (`@ScyllaTable(keyspace)`), falling back to the session's current keyspace.
      *
      * Each call only knows *one* side of the pair for certain (the value it just resolved); the other
      * side is taken from the currently configured default, since a per-call override on that other
@@ -179,8 +180,8 @@ class StatementBuilder(
      */
     private fun warnIfRfConsistencyMismatch(schema: TableSchema, readLevel: KandraConsistency, writeLevel: KandraConsistency) {
         if (!consistencyConfig.strictMode) return
-        val readRf = replicationFactorOrNull(readLevel) ?: return
-        val writeRf = replicationFactorOrNull(writeLevel) ?: return
+        val readRf = replicationFactorOrNull(schema, readLevel) ?: return
+        val writeRf = replicationFactorOrNull(schema, writeLevel) ?: return
         val readWeight = quorumWeight(readLevel, readRf)
         val writeWeight = quorumWeight(writeLevel, writeRf)
         // readRf and writeRf can differ when one level is LOCAL_* (confined to a single DC's
@@ -194,7 +195,7 @@ class StatementBuilder(
         // guarantees overlap by pigeonhole. See ISS-075 / GH #83.
         if (readWeight + writeWeight > rf) return
         logger.warn {
-            "Kandra strictMode: table '${schema.tableName}' has replication factor $rf, but the resolved " +
+            "Kandra strictMode: table '${schema.qualifiedTableName}' has replication factor $rf, but the resolved " +
             "read=$readLevel (effective $readWeight, RF=$readRf) + write=$writeLevel (effective $writeWeight, RF=$writeRf) = " +
             "${readWeight + writeWeight}, which does not exceed the relevant RF ($rf). Read-your-writes " +
             "requires R + W > RF (not just >=) -- with R + W == RF, an unlucky replica placement can still " +
@@ -206,8 +207,9 @@ class StatementBuilder(
 
     /**
      * Best-effort replication factor relevant to [level], read from live driver metadata for the
-     * session's current keyspace. Returns `null` (never throws) if the session has no current
-     * keyspace, the driver has no metadata for it, or the replication map can't be parsed — any of
+     * entity's keyspace (`TableSchema.keyspace`, else the session's current keyspace). Returns `null`
+     * (never throws) if neither names a keyspace, the driver has no metadata for it, or the
+     * replication map can't be parsed — any of
      * which simply skips the RF check above rather than treating it as "safe" or raising an error.
      *
      * For a non-`LOCAL_*` level (`QUORUM`, `EACH_QUORUM`, `ALL`, ...), sums every non-`class` entry
@@ -235,8 +237,10 @@ class StatementBuilder(
      * on a keyspace replication change (rare, but not impossible mid-process), so it's left uncached
      * here rather than adding that invalidation complexity speculatively.
      */
-    private fun replicationFactorOrNull(level: KandraConsistency): Int? {
-        val ksId = session.keyspace?.orElse(null) ?: return null
+    private fun replicationFactorOrNull(schema: TableSchema, level: KandraConsistency): Int? {
+        // Multi-keyspace: resolve the ENTITY's keyspace; fall back to the session's current one when null.
+        val ksId = schema.keyspace?.let { com.datastax.oss.driver.api.core.CqlIdentifier.fromCql(it) }
+            ?: session.keyspace?.orElse(null) ?: return null
         val ksMeta = session.metadata?.getKeyspace(ksId)?.orElse(null) ?: return null
         val perDc = ksMeta.replication.entries
             .filter { it.key != "class" }
@@ -291,7 +295,7 @@ class StatementBuilder(
     private fun requireFullKey(schema: TableSchema, keyCols: List<io.kandra.core.schema.ColumnSchema>, providedCount: Int, op: String) {
         if (providedCount != keyCols.size) {
             throw KandraSchemaException(
-                "$op on '${schema.tableName}' requires ${keyCols.size} key value(s) " +
+                "$op on '${schema.qualifiedTableName}' requires ${keyCols.size} key value(s) " +
                 "(${keyCols.joinToString(", ") { it.cqlName }}) but $providedCount were provided."
             )
         }
@@ -329,7 +333,7 @@ class StatementBuilder(
         val usingClause = if (modifiers.isNotEmpty()) " USING ${modifiers.joinToString(" AND ")}" else ""
         val ifClause = if (ifNotExists) " IF NOT EXISTS" else ""
 
-        val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
+        val cql = "INSERT INTO ${schema.qualifiedTableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
         val prepared = prepare(cql)
 
         val props = schema.reflection.propertiesByName
@@ -385,7 +389,7 @@ class StatementBuilder(
         val usingClause = if (modifiers.isNotEmpty()) " USING ${modifiers.joinToString(" AND ")}" else ""
         val ifClause = if (ifNotExists) " IF NOT EXISTS" else ""
 
-        val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
+        val cql = "INSERT INTO ${schema.qualifiedTableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
         val prepared = prepareSuspend(cql)
 
         val props = schema.reflection.propertiesByName
@@ -446,7 +450,7 @@ class StatementBuilder(
         }
         val usingClause = if (modifiers.isNotEmpty()) " USING ${modifiers.joinToString(" AND ")}" else ""
         val ifClause = if (ifNotExists) " IF NOT EXISTS" else ""
-        val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
+        val cql = "INSERT INTO ${schema.qualifiedTableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
         val prepared = prepare(cql)
 
         val props = schema.reflection.propertiesByName
@@ -493,7 +497,7 @@ class StatementBuilder(
         }
         val usingClause = if (modifiers.isNotEmpty()) " USING ${modifiers.joinToString(" AND ")}" else ""
         val ifClause = if (ifNotExists) " IF NOT EXISTS" else ""
-        val cql = "INSERT INTO ${schema.tableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
+        val cql = "INSERT INTO ${schema.qualifiedTableName} ($colNames) VALUES ($placeholders)$ifClause$usingClause"
         val prepared = prepareSuspend(cql)
 
         val props = schema.reflection.propertiesByName
@@ -523,7 +527,7 @@ class StatementBuilder(
         val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns + lookup.clusteringKeyColumns
         val colNames = cols.joinToString(", ") { it.cqlName }
         val placeholders = cols.joinToString(", ") { "?" }
-        val cql = "INSERT INTO ${lookup.tableName} ($colNames) VALUES ($placeholders)"
+        val cql = "INSERT INTO ${lookup.qualifiedTableName} ($colNames) VALUES ($placeholders)"
         val prepared = prepare(cql)
 
         val props = schema.reflection.propertiesByName
@@ -543,7 +547,7 @@ class StatementBuilder(
         val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns + lookup.clusteringKeyColumns
         val colNames = cols.joinToString(", ") { it.cqlName }
         val placeholders = cols.joinToString(", ") { "?" }
-        val cql = "INSERT INTO ${lookup.tableName} ($colNames) VALUES ($placeholders)"
+        val cql = "INSERT INTO ${lookup.qualifiedTableName} ($colNames) VALUES ($placeholders)"
         val prepared = prepareSuspend(cql)
 
         val props = schema.reflection.propertiesByName
@@ -559,7 +563,7 @@ class StatementBuilder(
     }
 
     fun deleteLookup(lookup: LookupTableSchema, indexValue: Any): BoundStatement {
-        val cql = "DELETE FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val cql = "DELETE FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlName} = ?"
         val prepared = prepare(cql)
         return prepared.bind(codec.encode(indexValue, lookup.indexColumn.type))
             .setIdempotent(true) // delete is idempotent
@@ -567,7 +571,7 @@ class StatementBuilder(
 
     /** Suspend counterpart of [deleteLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
     suspend fun deleteLookupSuspend(lookup: LookupTableSchema, indexValue: Any): BoundStatement {
-        val cql = "DELETE FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val cql = "DELETE FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlName} = ?"
         val prepared = prepareSuspend(cql)
         return prepared.bind(codec.encode(indexValue, lookup.indexColumn.type))
             .setIdempotent(true) // delete is idempotent
@@ -576,7 +580,7 @@ class StatementBuilder(
     fun selectById(schema: TableSchema, vararg idValues: Any, consistency: KandraConsistency? = null): BoundStatement {
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, idValues.size, "selectById")
-        val cql = "SELECT * FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "SELECT * FROM ${schema.qualifiedTableName} WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
         val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
             codec.encode(v, col.type)
@@ -590,7 +594,7 @@ class StatementBuilder(
     suspend fun selectByIdSuspend(schema: TableSchema, vararg idValues: Any, consistency: KandraConsistency? = null): BoundStatement {
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, idValues.size, "selectById")
-        val cql = "SELECT * FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "SELECT * FROM ${schema.qualifiedTableName} WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepareSuspend(cql)
         val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
             codec.encode(v, col.type)
@@ -605,7 +609,7 @@ class StatementBuilder(
         // be able to reconstruct the primary table's FULL key, not just its partition key, since
         // selectById requires the full key (see ISS-029).
         val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlName }
-        val cql = "SELECT $keyCols FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val cql = "SELECT $keyCols FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlName} = ?"
         val prepared = prepare(cql)
         return prepared.bind(codec.encode(value, lookup.indexColumn.type))
             .setIdempotent(true)
@@ -615,7 +619,7 @@ class StatementBuilder(
     /** Suspend counterpart of [selectByLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
     suspend fun selectByLookupSuspend(schema: TableSchema, lookup: LookupTableSchema, value: Any, consistency: KandraConsistency? = null): BoundStatement {
         val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlName }
-        val cql = "SELECT $keyCols FROM ${lookup.tableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val cql = "SELECT $keyCols FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlName} = ?"
         val prepared = prepareSuspend(cql)
         return prepared.bind(codec.encode(value, lookup.indexColumn.type))
             .setIdempotent(true)
@@ -625,10 +629,10 @@ class StatementBuilder(
     fun selectByPartitionKeyIn(schema: TableSchema, ids: List<Any>, consistency: KandraConsistency? = null): BoundStatement {
         if (schema.partitionKeys.size != 1) throw KandraSchemaException(
             "IN on partition key is only supported for single-column partition keys. " +
-            "Table '${schema.tableName}' has a composite partition key."
+            "Table '${schema.qualifiedTableName}' has a composite partition key."
         )
         val pkCol = schema.partitionKeys.first()
-        val cql = "SELECT * FROM ${schema.tableName} WHERE ${pkCol.cqlName} IN ?"
+        val cql = "SELECT * FROM ${schema.qualifiedTableName} WHERE ${pkCol.cqlName} IN ?"
         val prepared = prepare(cql)
         val encoded = ids.map { codec.encode(it, pkCol.type) }
         return prepared.bind(encoded)
@@ -640,10 +644,10 @@ class StatementBuilder(
     suspend fun selectByPartitionKeyInSuspend(schema: TableSchema, ids: List<Any>, consistency: KandraConsistency? = null): BoundStatement {
         if (schema.partitionKeys.size != 1) throw KandraSchemaException(
             "IN on partition key is only supported for single-column partition keys. " +
-            "Table '${schema.tableName}' has a composite partition key."
+            "Table '${schema.qualifiedTableName}' has a composite partition key."
         )
         val pkCol = schema.partitionKeys.first()
-        val cql = "SELECT * FROM ${schema.tableName} WHERE ${pkCol.cqlName} IN ?"
+        val cql = "SELECT * FROM ${schema.qualifiedTableName} WHERE ${pkCol.cqlName} IN ?"
         val prepared = prepareSuspend(cql)
         val encoded = ids.map { codec.encode(it, pkCol.type) }
         return prepared.bind(encoded)
@@ -654,7 +658,7 @@ class StatementBuilder(
     fun deleteById(schema: TableSchema, vararg idValues: Any): BoundStatement {
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, idValues.size, "deleteById")
-        val cql = "DELETE FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "DELETE FROM ${schema.qualifiedTableName} WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
         val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
             codec.encode(v, col.type)
@@ -667,7 +671,7 @@ class StatementBuilder(
     suspend fun deleteByIdSuspend(schema: TableSchema, vararg idValues: Any): BoundStatement {
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, idValues.size, "deleteById")
-        val cql = "DELETE FROM ${schema.tableName} WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "DELETE FROM ${schema.qualifiedTableName} WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepareSuspend(cql)
         val encodedValues = keyCols.zip(idValues.toList()).map { (col, v) ->
             codec.encode(v, col.type)
@@ -712,10 +716,10 @@ class StatementBuilder(
     ): BoundStatement {
         val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
             .find { it.cqlName == columnName || it.propertyName == columnName }
-            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.qualifiedTableName}'")
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, keyValues.size, "append")
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
@@ -735,10 +739,10 @@ class StatementBuilder(
     ): BoundStatement {
         val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
             .find { it.cqlName == columnName || it.propertyName == columnName }
-            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.qualifiedTableName}'")
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, keyValues.size, "append")
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepareSuspend(cql)
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
@@ -757,10 +761,10 @@ class StatementBuilder(
     ): BoundStatement {
         val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
             .find { it.cqlName == columnName || it.propertyName == columnName }
-            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.qualifiedTableName}'")
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, keyValues.size, "remove")
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
@@ -780,10 +784,10 @@ class StatementBuilder(
     ): BoundStatement {
         val col = (schema.columns + schema.lookupTables.map { it.indexColumn })
             .find { it.cqlName == columnName || it.propertyName == columnName }
-            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.qualifiedTableName}'")
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, keyValues.size, "remove")
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepareSuspend(cql)
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
@@ -803,7 +807,7 @@ class StatementBuilder(
     private fun safeAbsoluteDelta(delta: Long, schema: TableSchema, columnName: String): Long {
         if (delta == Long.MIN_VALUE) {
             throw KandraSchemaException(
-                "counterUpdate on '${schema.tableName}.$columnName' received delta = Long.MIN_VALUE " +
+                "counterUpdate on '${schema.qualifiedTableName}.$columnName' received delta = Long.MIN_VALUE " +
                 "(${Long.MIN_VALUE}), which cannot be negated/absolute-valued without overflowing back " +
                 "to itself (two's-complement has no positive counterpart for Long.MIN_VALUE). Use a " +
                 "delta in [Long.MIN_VALUE + 1, Long.MAX_VALUE]."
@@ -820,11 +824,11 @@ class StatementBuilder(
         consistency: KandraConsistency? = null
     ): BoundStatement {
         val col = schema.columns.find { it.propertyName == columnName || it.cqlName == columnName }
-            ?: throw KandraSchemaException("Counter column '$columnName' not found in '${schema.tableName}'")
+            ?: throw KandraSchemaException("Counter column '$columnName' not found in '${schema.qualifiedTableName}'")
         val absDelta = safeAbsoluteDelta(delta, schema, columnName)
         val keyCols = schema.primaryKeyColumns()
         val op = if (delta >= 0) "+" else "-"
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
         val keyValues = keyCols.map { key ->
             partitionKeys[key.propertyName] ?: partitionKeys[key.cqlName]
@@ -844,11 +848,11 @@ class StatementBuilder(
         consistency: KandraConsistency? = null
     ): BoundStatement {
         val col = schema.columns.find { it.propertyName == columnName || it.cqlName == columnName }
-            ?: throw KandraSchemaException("Counter column '$columnName' not found in '${schema.tableName}'")
+            ?: throw KandraSchemaException("Counter column '$columnName' not found in '${schema.qualifiedTableName}'")
         val absDelta = safeAbsoluteDelta(delta, schema, columnName)
         val keyCols = schema.primaryKeyColumns()
         val op = if (delta >= 0) "+" else "-"
-        val cql = "UPDATE ${schema.tableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepareSuspend(cql)
         val keyValues = keyCols.map { key ->
             partitionKeys[key.propertyName] ?: partitionKeys[key.cqlName]
@@ -890,7 +894,7 @@ class StatementBuilder(
     fun existsQuery(schema: TableSchema, whereCql: String, values: List<Any?>): BoundStatement {
         checkRawInjectionRisk(whereCql, "existsQuery")
         val pkCols = schema.partitionKeys.joinToString(", ") { it.cqlName }
-        val cql = "SELECT $pkCols FROM ${schema.tableName} WHERE $whereCql LIMIT 1"
+        val cql = "SELECT $pkCols FROM ${schema.qualifiedTableName} WHERE $whereCql LIMIT 1"
         val prepared = prepare(cql)
         return prepared.bind(*values.toTypedArray()).setIdempotent(true)
     }

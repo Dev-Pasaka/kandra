@@ -34,6 +34,16 @@ abstract class KandraMigration(
     abstract fun up(session: CqlSession)
 
     /**
+     * Entry point the runner actually calls (ISS-108). [keyspace] is the keyspace the
+     * [KandraMigrationRunner] targets, or `null` when it uses the session's current keyspace.
+     * Defaults to delegating to [up], so existing migrations are unaffected (and their checksums
+     * unchanged). Override this instead of [up] only if the body needs the target keyspace; when a
+     * runner targets a non-session keyspace, migration CQL must qualify its own table names
+     * (`CREATE TABLE ks.users ...`) because the shared session is not switched.
+     */
+    open fun up(session: CqlSession, keyspace: String?) = up(session)
+
+    /**
      * Checksum of this migration, used to detect edits to an already-applied migration.
      *
      * Hashes [version]/[name]/qualified class name plus a *normalized* copy of every compiled

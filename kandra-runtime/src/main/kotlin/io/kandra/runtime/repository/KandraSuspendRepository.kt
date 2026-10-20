@@ -249,19 +249,19 @@ class KandraSuspendRepository<T : Any>(
 
     suspend fun <V> append(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
-            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.qualifiedTableName}'")
         batchEngine.appendSuspend(schema, keyValuesOf(entity), col.cqlName, values, consistency)
     }
 
     suspend fun <V> remove(entity: T, field: KProperty1<T, Collection<V>?>, values: Collection<V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
-            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.qualifiedTableName}'")
         batchEngine.removeSuspend(schema, keyValuesOf(entity), col.cqlName, values, consistency)
     }
 
     suspend fun <K, V> put(entity: T, field: KProperty1<T, Map<K, V>?>, entries: Map<K, V>, consistency: KandraConsistency? = null) {
         val col = schema.columns.find { it.propertyName == field.name }
-            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.tableName}'")
+            ?: throw KandraSchemaException("Field '${field.name}' not found in schema '${schema.qualifiedTableName}'")
         batchEngine.putSuspend(schema, keyValuesOf(entity), col.cqlName, entries, consistency)
     }
 

@@ -71,7 +71,7 @@ object DdlGenerator {
 
         val withClause = if (options.isNotEmpty()) "\nWITH ${options.joinToString("\nAND ")}" else ""
 
-        return "CREATE TABLE IF NOT EXISTS ${schema.tableName} (\n    $columnDefs,\n    $primaryKey\n)$withClause;"
+        return "CREATE TABLE IF NOT EXISTS ${schema.qualifiedTableName} (\n    $columnDefs,\n    $primaryKey\n)$withClause;"
     }
 
     fun lookupTable(lookup: LookupTableSchema): String {
@@ -88,14 +88,14 @@ object DdlGenerator {
             }
         }
         val colDefs = cols.joinToString(",\n    ")
-        return "CREATE TABLE IF NOT EXISTS ${lookup.tableName} (\n    $colDefs,\n    PRIMARY KEY (${lookup.indexColumn.cqlName})\n);"
+        return "CREATE TABLE IF NOT EXISTS ${lookup.qualifiedTableName} (\n    $colDefs,\n    PRIMARY KEY (${lookup.indexColumn.cqlName})\n);"
     }
 
     fun secondaryIndex(schema: TableSchema, column: io.kandra.core.schema.ColumnSchema): String =
-        "CREATE INDEX IF NOT EXISTS ${schema.tableName}_${column.cqlName}_idx ON ${schema.tableName} (${column.cqlName});"
+        "CREATE INDEX IF NOT EXISTS ${schema.qualifiedTableName}_${column.cqlName}_idx ON ${schema.qualifiedTableName} (${column.cqlName});"
 
     fun alterTableAddColumn(schema: TableSchema, column: io.kandra.core.schema.ColumnSchema): String =
-        "ALTER TABLE ${schema.tableName} ADD ${column.cqlName} ${columnCqlType(column)};"
+        "ALTER TABLE ${schema.qualifiedTableName} ADD ${column.cqlName} ${columnCqlType(column)};"
 
     /** Returns the CQL type name for a column as it would appear in DDL (e.g. "UUID", "TEXT", "BIGINT"). */
     fun cqlTypeString(column: io.kandra.core.schema.ColumnSchema): String =

@@ -2,7 +2,7 @@
 
 Kandra is a Kotlin ORM for ScyllaDB/Cassandra, shipped as a Ktor `ApplicationPlugin`. It maps Kotlin data classes to ScyllaDB tables and provides type-safe repositories, automatic schema management, optimistic locking, soft delete, query caching, and more.
 
-> **Version:** 0.4.8 · **Kotlin:** 2.1.21 · **Driver:** DataStax Java Driver 4.17.0
+> **Version:** 0.4.8 (the Multiple Keyspaces and `disableTablets` sections describe the unreleased 0.5.0 work) · **Kotlin:** 2.1.21 · **Driver:** DataStax Java Driver 4.17.0
 
 ---
 
@@ -27,6 +27,7 @@ Kandra is a Kotlin ORM for ScyllaDB/Cassandra, shipped as a Ktor `ApplicationPlu
 | [`@SecondaryIndex`](#secondaryindex) | Annotation | CQL `CREATE INDEX` on a column |
 | [`@ReadConsistency` / `@WriteConsistency`](#readconsistency--writeconsistency) | Annotation | Per-entity default consistency override |
 | [Plugin installation](#plugin-installation) | Config | Connects to ScyllaDB via the Ktor plugin |
+| [Multiple keyspaces](#multiple-keyspaces) | Config | One install and one `CqlSession` serving several keyspaces (unreleased, 0.5.0) |
 | [Schema modes](#schema-modes) | Config | `AUTO_CREATE`, `AUTO_MIGRATE`, `VALIDATE`, `NONE` |
 | [Connection pool](#connection-pool) | Config | Timeouts, heartbeat, requests per connection |
 | [Authentication](#authentication) | Config | Plain text, env vars, credential rotation |
@@ -45,11 +46,11 @@ Kandra is a Kotlin ORM for ScyllaDB/Cassandra, shipped as a Ktor `ApplicationPlu
 | [`KandraSuspendRepository`](#kandrasuspendrepository) | Repository | Coroutine-based CRUD repository |
 | [Pagination](#pagination) | Repository | Cursor-based page queries |
 | [Collection operations](#collection-operations) | Repository | Append/remove from List/Set, put into Map |
-| [Counter operations](#counter-operations-1) | Repository | Increment/decrement counter columns |
+| [Counter operations](#counter-operations) | Repository | Increment/decrement counter columns |
 | [Raw queries](#raw-queries) | Repository | Escape hatch for arbitrary CQL |
 | [Batch scope](#batch-scope) | Advanced | Collect multiple writes into one LOGGED batch |
 | [UNSET vs NULL](#unset-vs-null) | Advanced | Avoid tombstones on nullable fields |
-| [`saveWithNulls`](#savingwith-explicit-nulls) | Advanced | Intentionally write NULL to a column |
+| [`saveWithNulls`](#saving-with-explicit-nulls) | Advanced | Intentionally write NULL to a column |
 | [`updateForce`](#updateforce) | Advanced | Bypass `@Version` check |
 | [`saveIfNotExists`](#saveifnotexists) | Advanced | Idempotent LWT insert |
 | [CQL injection guard](#cql-injection-guard) | Advanced | Safe parameterised raw queries |
@@ -151,6 +152,7 @@ CREATE TABLE IF NOT EXISTS users (
 |---|---|---|---|
 | `name` | `String` | **required** | CQL table name |
 | `gcGraceSeconds` | `Int` | `-1` (use ScyllaDB's own default) | Grace period before tombstones are purged |
+| `keyspace` | `String` | `""` (the plugin's default keyspace) | Keyspace this entity lives in. Must be a valid CQL identifier. When non-blank, all generated CQL uses `keyspace.table`; when blank, CQL is unqualified exactly as before. See [Multiple Keyspaces](#multiple-keyspaces) |
 
 ---
 
@@ -266,7 +268,7 @@ data class PostStats(
 )
 ```
 
-See [Counter operations](#counter-operations-1) for usage.
+See [Counter operations](#counter-operations) for usage.
 
 ---
 
@@ -460,7 +462,7 @@ After calling `repo.delete(order)`:
 
 To distinguish live vs soft-deleted rows, add `@SoftDelete(ttlSeconds = ..., markerProperty = "isDeleted")`
 with a `Boolean` field and call `repo.findActive()` — see
-[`docs/features/repositories.md`](features/repositories.md#findactive-soft-delete-entities-only) and
+[`docs/features/repositories.md`](features/repositories.md#findactive-softdelete-entities-only) and
 [ISS-007](issues/ISS-007-find-active-soft-delete.md). `findActive()` queries the marker column directly
 if it has `@SecondaryIndex`; otherwise it throws unless you pass `allowFullScan = true`, since answering
 without an index requires `ALLOW FILTERING` — an explicit opt-in, not a silent default (see
@@ -546,6 +548,92 @@ When `AUTO_MIGRATE` is set, Kandra:
 5. For every ScyllaDB column **not** in the entity: logs `WARN` (data preserved, not mapped).
 
 > **`AUTO_MIGRATE` does not support:** dropping columns, renaming columns, or changing types. Use the [schema migration runner](#schema-migration-runner) for those operations.
+
+---
+
+## Multiple Keyspaces
+
+One `install(Kandra)` and one `CqlSession` can serve many keyspaces, so feature modules of a
+multi-module app can each own entities in their own keyspace while sharing one connection pool.
+
+**1. Put the keyspace on the entity** (compile-time, the single source of truth for membership):
+
+```kotlin
+@ScyllaTable(name = "invoices", keyspace = "billing")
+data class Invoice(@PartitionKey val id: UUID, val total: Long)
+```
+
+**2. Declare extra keyspaces in the plugin** (settings only, nothing is populated by the DSL):
+
+```kotlin
+install(Kandra) {
+    keyspace = "core"                       // default keyspace (unchanged)
+    keyspace("billing") {                   // extra keyspace: settings only
+        autoCreate = true
+        replicationStrategy = ReplicationStrategy.SimpleStrategy(3)
+    }
+    register(User::class, Invoice::class)   // Invoice is @ScyllaTable(keyspace = "billing")
+}
+```
+
+**Tablets-enabled ScyllaDB (e.g. Scylla Cloud).** These clusters reject `SimpleStrategy` keyspaces unless tablets are
+disabled (`SimpleStrategy doesn't support tablet replication`). Opt in with
+`ReplicationStrategy.SimpleStrategy(3, disableTablets = true)`; Kandra then appends
+`AND tablets = {'enabled': false}` to `CREATE KEYSPACE`. Default is `false` (DDL unchanged). It works for the default
+keyspace and for `keyspace("x") { replicationStrategy = ... }`. ScyllaDB only: Apache Cassandra rejects the `tablets`
+option. `NetworkTopologyStrategy` works with tablets and needs no flag. Clusters configured with
+`tablets_mode_for_new_keyspaces: enforced` reject `SimpleStrategy` entirely, even with the flag, so
+`NetworkTopologyStrategy` is required there.
+
+**Precedence and errors.** `keyspace = "x"` on the plugin remains the default keyspace and is used by
+every entity whose annotation `keyspace` is blank. An entity naming a keyspace that is neither the
+default nor declared with `keyspace("x") { }` throws `KandraSchemaException` at startup with an
+actionable message (naming the entity, the keyspace, and the declared keyspaces), before any connection is
+attempted. A keyspace name that is not a valid CQL identifier is rejected (by the KSP
+processor at build time when `kandra-codegen` is used, and by `SchemaRegistry` at registration).
+
+**Blank default keyspace.** A blank `keyspace = ""` is still an error (`'keyspace' must be set in the
+plugin configuration`) unless at least one `keyspace("x") { }` is declared. With extra keyspaces declared the
+default may be left blank, but then every entity must name a declared keyspace; an entity with a blank
+`@ScyllaTable(keyspace)` fails startup. A `keyspace("x") { }` block with no `replicationStrategy` inherits the
+plugin-level one.
+
+**Declaration rules.** Each declared name must be a valid CQL identifier, declared only once, and different
+from the default keyspace (compared case-insensitively). `NetworkTopologyStrategy` datacenter names are validated
+for every auto-created keyspace.
+
+**Per-keyspace bootstrap.** Keyspace creation, permission validation, DDL for every
+[schema mode](#schema-modes), `system_schema` lookups and the `kandra_ddl_locks` table (lock names
+include the keyspace) are handled per keyspace. Lookup tables inherit the parent entity's keyspace. The default
+keyspace keeps the original unqualified `kandra_ddl_locks` table and lock name; each non-default keyspace gets its
+own `<keyspace>.kandra_ddl_locks` table and a lock name that includes the keyspace.
+
+**Runtime.** Entities with a keyspace emit keyspace-qualified CQL (`billing.invoices`) on every read and write
+path, and metrics and debug-log labels use the qualified table name. A `batch { }` mixing entities from different
+keyspaces works (one logged batch; covered by `MultiKeyspaceRuntimeIntegrationTest`) with the usual
+cross-partition logged-batch cost.
+
+**Dependency injection.** `kandraKoin()` / `kandraKodein()` bind one repository pair per entity regardless of
+keyspace. Qualifiers are built from the simple class name only, so two entities with the same simple name collide
+even if they live in different keyspaces; the guard throws `KandraSchemaException` listing each class with its
+`[keyspace: X]`.
+
+**Zero regression.** An entity with a blank `keyspace` produces byte-for-byte the same, unqualified
+CQL as before; existing single-keyspace applications need no change.
+
+**Strict mode.** The [strict-mode](#strict-mode-multi-dc-local_oneone-warning) replication-factor
+check resolves the replication of the *entity's* keyspace, not the session keyspace.
+
+**Migrations.** `KandraMigrationRunner` takes an optional keyspace and keeps `kandra_migrations`
+and its locks per keyspace; see [Schema Migration Runner](#schema-migration-runner).
+
+**Codegen.** `kandra-codegen` only validates the `keyspace` identifier at build time (a build error for an invalid
+name). Generated `*Table` objects contain only column references (no table or keyspace names), so they are
+identical for keyspaced and non-keyspaced entities; the keyspace is applied by the runtime.
+
+**Non-goals.** Runtime / per-call / per-tenant keyspace selection (the keyspace is fixed on the
+entity). Dedicated support for cross-keyspace batches is also out of scope, although a mixed-keyspace
+`batch { }` works today.
 
 ---
 
@@ -658,11 +746,12 @@ Available levels: `ANY`, `ONE`, `TWO`, `THREE`, `QUORUM`, `ALL`, `LOCAL_QUORUM`,
 > *regular write* consistency throws the same exception. Both are validated before the value ever
 > reaches the driver, regardless of which of the three resolution sources produced it (GH #140/#141).
 
-> **Read-your-writes above RF 3:** the defaults (`LOCAL_ONE` read / `LOCAL_QUORUM` write) only
-> guarantee read-your-writes when `R + W ≥ RF`, which holds for `RF ≤ 3` but not higher. If your
-> keyspace's replication factor is greater than 3 (common in larger multi-DC deployments), raise
-> `defaultRead` — e.g. to `LOCAL_QUORUM` — accordingly. Strict Mode below does not currently check
-> this for you ([ISS-075](issues/ISS-075-strict-mode-rf-consistency-math.md)).
+> **Read-your-writes above RF 2:** read-your-writes needs the strict inequality `R + W > RF`. The
+> defaults (`LOCAL_ONE` read = 1, `LOCAL_QUORUM` write = quorum(RF)) satisfy that only for `RF ≤ 2`; at `RF = 3`,
+> `1 + 2 = 3` does not exceed 3. If your keyspace's replication factor is 3 or higher, raise `defaultRead`
+> — e.g. to `LOCAL_QUORUM` — accordingly. With `strictMode = true` (below), Kandra checks this for you against
+> the entity's keyspace's live replication factor and logs a WARN
+> ([ISS-075](issues/ISS-075-strict-mode-rf-consistency-math.md)).
 
 #### Strict Mode (multi-DC `LOCAL_ONE`/`ONE` warning)
 
@@ -687,6 +776,12 @@ default precisely so reads/writes are acknowledged across datacenters. This neve
 query; it only warns, so enabling it cannot break an existing deployment. The multi-DC signal
 (`allowedRemoteDcs` non-empty) is picked up automatically — there's nothing else to configure beyond
 `strictMode` and whatever `loadBalancing.allowedRemoteDcs` you'd already set for multi-DC failover.
+
+Independently of the multi-DC signal, `strictMode = true` also enables the replication-factor check
+(ISS-075): Kandra reads the replication factor of the entity's own keyspace from live driver metadata and WARNs
+when the resolved read and write consistency do not satisfy `R + W > RF`. For a `LOCAL_*` level the local
+datacenter's replica count is used. With several keyspaces, each entity is checked against its own keyspace's
+replication. The check is skipped (never an error) when the driver has no metadata for the keyspace.
 
 ---
 
@@ -838,7 +933,10 @@ install(Kandra) {
 }
 ```
 
-`operation` values: `save`, `saveIfNotExists`, `update`, `delete`, `saveAll`, `query`.
+`table` is the table name, qualified as `keyspace.table` for entities that declare a `keyspace`. `operation` is a
+free-form string; the values the write paths emit today are `save`, `saveIfNotExists`, `saveWithNulls`, `update`,
+`updateForce`, `delete`, `deleteById`, `saveAll`, `batch`, `append`, `remove`, `put`, `increment`, `decrement` and
+`eventualLookupInsert`. Reads are not recorded as a separate operation name.
 
 ---
 
@@ -1262,6 +1360,21 @@ Kandra creates a `kandra_migrations` table to track applied migrations. On subse
 - `run()` requires LWT support on the cluster — each migration is claimed via `INSERT ... IF NOT
   EXISTS` before it runs, so two runner instances racing the same keyspace can't both execute the
   same migration concurrently.
+
+### Per-keyspace migrations
+
+With multiple keyspaces, give each runner the keyspace it owns. `kandra_migrations` and the
+migration locks then live in that keyspace, so two keyspaces keep independent version histories:
+
+```kotlin
+KandraMigrationRunner(session, keyspace = "billing").run(V1_CreateInvoices)
+KandraMigrationRunner(session).run(V1_CreateUsers)   // no keyspace: the session keyspace, as before
+```
+
+The constructor is `KandraMigrationRunner(session, staleClaimThreshold, keyspace: String? = null)`. The keyspace must already exist, and an invalid name throws `IllegalArgumentException`. A migration
+may override `KandraMigration.up(session, keyspace)` to learn which keyspace it is running for; the default
+implementation delegates to `up(session)`. The shared session is not switched to the target keyspace, so a
+migration's own CQL must qualify its table names (`CREATE TABLE billing.invoices ...`).
 
 ### Inspecting history
 

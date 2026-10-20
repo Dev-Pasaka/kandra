@@ -183,3 +183,7 @@ qualifier/tag disambiguation in the first place (already type-safe by constructi
   `install(Kandra) { shutdown { ... } }` applies to `bindKandraRepository<T>`-created repos — it doesn't.
 - `bindKandraRepository<T>`'s default `scope` is never auto-cancelled; if you don't pass your own
   lifecycle-bound scope, cancel it explicitly on shutdown to avoid leaking eventual writes.
+
+## Multi-keyspace (ISS-107)
+
+Bindings are per entity on the plugin's single session; the entity's `TableSchema` carries its keyspace, so no extra wiring is needed. Names are still the entity simple name, so two entities with the same simple name in different keyspaces (`billing.Invoice` vs `archive.Invoice`) still throw `KandraSchemaException`; the message lists each class with `[keyspace: X]` and says the keyspace does not disambiguate. Any non-default keyspace used by an entity must be declared with `keyspace("x") { }` in `install(Kandra)`.

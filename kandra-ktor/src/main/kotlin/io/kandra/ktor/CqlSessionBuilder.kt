@@ -41,6 +41,9 @@ private val logger = KotlinLogging.logger {}
  * provider returned a blank username at startup, e.g. against a cluster with `AllowAllAuthenticator`)
  * -- there is no live auth to rotate in that case.
  */
+/** Test hook (ISS-105): total number of [CqlSession]s successfully built by [buildCqlSession] in this JVM. */
+internal val cqlSessionsBuilt = java.util.concurrent.atomic.AtomicInteger(0)
+
 internal class CqlSessionHandle(
     val session: CqlSession,
     val liveAuthProvider: ProgrammaticPlainTextAuthProvider?
@@ -346,6 +349,7 @@ internal fun buildCqlSession(config: KandraConfig, withKeyspace: Boolean = true)
         throw KandraAuthException("ScyllaDB authentication failed: ${e.message}", e)
     }
 
+    cqlSessionsBuilt.incrementAndGet()
     return CqlSessionHandle(session, liveAuthProvider)
 }
 
@@ -486,7 +490,8 @@ internal fun keyspaceDdl(keyspace: String, strategy: ReplicationStrategy): Strin
     return when (strategy) {
         is ReplicationStrategy.SimpleStrategy ->
             "CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-                "{'class': 'SimpleStrategy', 'replication_factor': ${strategy.replicationFactor}}"
+                "{'class': 'SimpleStrategy', 'replication_factor': ${strategy.replicationFactor}}" +
+                (if (strategy.disableTablets) " AND tablets = {'enabled': false}" else "")
         is ReplicationStrategy.NetworkTopologyStrategy -> {
             strategy.dcReplicationMap.keys.forEach { dc ->
                 if (!CqlNaming.isValidIdentifier(dc)) {

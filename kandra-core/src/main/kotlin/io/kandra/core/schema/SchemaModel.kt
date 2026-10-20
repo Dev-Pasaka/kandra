@@ -61,8 +61,14 @@ data class TableSchema(
      * resolved once at registration time. `kandra-runtime` reads/writes entity fields through this
      * instead of re-resolving via `entity::class`/`entityClass` on every call. See ISS-034.
      */
-    val reflection: EntityReflection
-)
+    val reflection: EntityReflection,
+    /** Keyspace declared via `@ScyllaTable(keyspace)`; `null` = the plugin's default keyspace. */
+    val keyspace: String? = null
+) {
+    /** `tableName` when [keyspace] is null, else `"$keyspace.$tableName"`. */
+    val qualifiedTableName: String
+        get() = if (keyspace == null) tableName else "$keyspace.$tableName"
+}
 
 data class LookupTableSchema(
     val tableName: String,
@@ -78,7 +84,13 @@ data class LookupTableSchema(
      * `selectById` with the partition key, which stopped being sufficient once ISS-025 made
      * `selectById` require the full key on any clustering-keyed entity.
      */
-    val clusteringKeyColumns: List<ColumnSchema> = emptyList()
-)
+    val clusteringKeyColumns: List<ColumnSchema> = emptyList(),
+    /** Inherited from the parent entity; `null` = the plugin's default keyspace. */
+    val keyspace: String? = null
+) {
+    /** `tableName` when [keyspace] is null, else `"$keyspace.$tableName"`. */
+    val qualifiedTableName: String
+        get() = if (keyspace == null) tableName else "$keyspace.$tableName"
+}
 
 data class CacheResultConfig(val ttlSeconds: Int, val maxSize: Long)

@@ -8,7 +8,8 @@ policy; nothing was lost, they're just not represented here.
 
 ## Open
 
-Nothing currently open as of 2026-10-14.
+No ISS entry is open as of 2026-10-20. The one open follow-up is tracked on GitHub only: GH #160 (Ktor 3.x
+compatibility and CI coverage), split out of [ISS-101](ISS-101-ktor-version-range-undocumented.md).
 
 (The 2026-09-09 post-fix critical-audit batch, ISS-080–ISS-096, sat in this section listed as
 "Open" for over a month after every one of its GH issues had actually been closed — caught and
@@ -16,21 +17,18 @@ corrected in this pass; see the note at the top of the `Fixed` table below. Less
 this table needs to move an entry the moment its PR merges, not whenever someone happens to audit
 it again.)
 
-## Fixed — pending live-cluster verification
+## Fixed — no dedicated live-cluster test yet
 
-These compile and pass unit tests, but haven't yet been run against a real Testcontainers-backed
-cluster in this environment (no Docker daemon available). Run `./gradlew test` somewhere with
-Docker before relying on them.
+These are fixed and covered by unit tests, and the live (Testcontainers) suite as a whole runs green on Docker
+(`./gradlew test` regression, 2026-10-20: 0 failures, see
+[multi-keyspace-baseline](../test-plan/multi-keyspace-baseline.md)), but no live test pins the specific behaviour
+below. Closing any of these needs a targeted test in `kandra-test`'s integration suite.
 
 | ID | Title |
 |---|---|
-| [ISS-007](ISS-007-find-active-soft-delete.md) | `findActive()` for `@SoftDelete` entities |
-| [ISS-013](ISS-013-no-integration-tests.md) | No integration tests against a real cluster |
-| [ISS-014](ISS-014-blocking-query-executor.md) | `QueryExecutor` blocking calls in the suspend read path |
-| [ISS-015](ISS-015-delete-by-id-bypasses-soft-delete.md) | `KandraRepository.deleteById` bypassed `@SoftDelete` |
-| [ISS-017](ISS-017-migration-checksum-not-body-based.md) | Migration checksum didn't hash the migration body |
-| [ISS-018](ISS-018-migration-no-locking.md) | No locking in `KandraMigrationRunner` |
-| [ISS-019](ISS-019-collection-counter-consistency.md) | Collection/counter statements ignored consistency levels |
+| [ISS-014](ISS-014-blocking-query-executor.md) | `QueryExecutor` blocking calls in the suspend read path (a thread-blocking bug; not observable from a green functional test) |
+| [ISS-015](ISS-015-delete-by-id-bypasses-soft-delete.md) | `KandraRepository.deleteById` bypassed `@SoftDelete` (blocking-API path; the live soft-delete test uses the suspend `delete`) |
+| [ISS-019](ISS-019-collection-counter-consistency.md) | Collection/counter statements ignored consistency levels (no live consistency-level assertion) |
 
 ## Fixed
 
@@ -41,6 +39,19 @@ Docker before relying on them.
 | [ISS-099](ISS-099-codegen-default-package-empty-line.md) | `kandra-codegen` emitted an invalid empty `package` line for default-package entities |
 | [ISS-100](ISS-100-integration-modules-runtime-scope-deps.md) | Integration modules published `kandra-core`/`kandra-runtime` at runtime scope, breaking consumer compilation |
 | [ISS-101](ISS-101-ktor-version-range-undocumented.md) | No documented supported Ktor version range (partially fixed — see file for the CI/3.x follow-up) |
+| [ISS-102](ISS-102-multi-keyspace-epic.md) | Multiple keyspaces over a single connection (epic) |
+| [ISS-103](ISS-103-core-keyspace-contract.md) | Entity-level keyspace in kandra-core |
+| [ISS-104](ISS-104-runtime-qualified-cql.md) | Runtime emits keyspace-qualified CQL |
+| [ISS-105](ISS-105-ktor-multi-keyspace-config.md) | Plugin config and bootstrap for several keyspaces |
+| [ISS-107](ISS-107-di-multi-keyspace.md) | Koin/Kodein bindings with multiple keyspaces |
+| [ISS-108](ISS-108-migrate-per-keyspace.md) | Migrations tracked per keyspace |
+| [ISS-109](ISS-109-cloud-test-harness.md) | Live Scylla Cloud test harness |
+| [ISS-110](ISS-110-codegen-and-docs.md) | Codegen validation and docs for multi-keyspace |
+| [ISS-111](ISS-111-e2e-and-regression.md) | End-to-end multi-keyspace suite and full regression |
+| [ISS-007](ISS-007-find-active-soft-delete.md) | `findActive()` for `@SoftDelete` entities (verified live) |
+| [ISS-013](ISS-013-no-integration-tests.md) | No integration tests against a real cluster |
+| [ISS-017](ISS-017-migration-checksum-not-body-based.md) | Migration checksum didn't hash the migration body (verified live) |
+| [ISS-018](ISS-018-migration-no-locking.md) | No locking in `KandraMigrationRunner` (verified live, real concurrent runners) |
 | [ISS-011](ISS-011-jakarta-bean-validation.md) | Jakarta Bean Validation not auto-detected |
 | [ISS-021](ISS-021-allow-filtering-error-message.md) | Error message referenced a non-existent `allowFiltering()` |
 | [ISS-022](ISS-022-codegen-collection-raw-types.md) | `kandra-codegen` generated invalid Kotlin for any `Set`/`Map` column |
@@ -101,6 +112,9 @@ Docker before relying on them.
 | [ISS-077](ISS-077-ddl-bootstrap-claim-never-resets.md) | Schema DDL bootstrap claim never reset — AUTO_CREATE/AUTO_MIGRATE ran at most once ever per keyspace |
 | [ISS-078](ISS-078-ddl-claim-no-holder-fencing-clock-fallback.md) | DDL claim completion/release had no holder fencing; clock-skew check had a local-clock fallback bug |
 | [ISS-079](ISS-079-auto-migrate-key-column-add-corrupts-data.md) | AUTO_MIGRATE could silently ALTER TABLE ADD a missing key column as a plain column, causing row collisions |
+
+The multi-keyspace entries (ISS-102–ISS-111) belong to the unreleased 0.5.0 work (see the
+[0.5.0 changelog](../changelog/0.5.0.md)); there is no ISS-106 (a gap in the numbering, no file was ever created).
 
 ### 2026-09-09 post-fix critical audit (ISS-080–ISS-096 / GH #93–#109)
 

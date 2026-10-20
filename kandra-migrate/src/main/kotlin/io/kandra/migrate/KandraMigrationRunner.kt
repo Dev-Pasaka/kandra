@@ -2,6 +2,7 @@ package io.kandra.migrate
 
 import com.datastax.oss.driver.api.core.CqlSession
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.kandra.core.CqlNaming
 import io.kandra.core.exception.KandraMigrationException
 import io.kandra.core.exception.KandraSchemaException
 import java.time.Duration
@@ -85,6 +86,19 @@ private const val DDL_BOOTSTRAP_POLL_MS = 200L
  * "every application instance is NTP-synced with every other," and is already an existing
  * operational precondition for correct LWT/Paxos behavior in these systems.
  *
+ * ### Targeting a keyspace (ISS-108)
+ *
+ * By default the runner works in the session's current keyspace and behaves exactly as it always
+ * has. Pass [keyspace] to keep an independent migration history in a different keyspace using the
+ * same session: `kandra_migrations` and `kandra_ddl_locks` are then created/read/written
+ * qualified (`<keyspace>.kandra_migrations`), so two keyspaces can each have their own version 1,
+ * 2, ... applied independently with their own checksum validation. The keyspace must already
+ * exist and must be a valid CQL identifier (else [IllegalArgumentException]). Migration bodies run
+ * on the shared session, so they must qualify their own table names (`CREATE TABLE ks.users ...`)
+ * when targeting a non-session keyspace; the target is passed to
+ * [KandraMigration.up] (`up(session, keyspace)`) so a migration can opt in to reading it.
+ *
+ * @param keyspace target keyspace, or `null` (default) for the session's current keyspace.
  * @param staleClaimThreshold how long a [MigrationRowStatus.CLAIMED] row is given the benefit of
  *   the doubt (treated as possibly still in progress elsewhere) before `run()` refuses to
  *   proceed and throws instead. Compared against an age measured entirely by the database
@@ -105,15 +119,23 @@ private const val DDL_BOOTSTRAP_POLL_MS = 200L
  * the same design as this class's own per-migration claim above, just applied one level earlier,
  * to the bookkeeping table's own creation.
  */
-class KandraMigrationRunner(
+class KandraMigrationRunner @JvmOverloads constructor(
     private val session: CqlSession,
-    private val staleClaimThreshold: Duration = Duration.ofMinutes(10)
+    private val staleClaimThreshold: Duration = Duration.ofMinutes(10),
+    private val keyspace: String? = null
 ) {
 
+    /** `kandra_migrations`, qualified with [keyspace] when one was given (bare otherwise, as before). */
+    private val migrationsTable: String =
+        if (keyspace == null) "kandra_migrations" else "$keyspace.kandra_migrations"
+
     init {
-        claimAndRunDdlBootstrap(session, DDL_BOOTSTRAP_MIGRATIONS_TABLE_LOCK) {
+        if (keyspace != null && !CqlNaming.isValidIdentifier(keyspace)) {
+            throw IllegalArgumentException("Invalid keyspace name '$keyspace' for KandraMigrationRunner")
+        }
+        claimAndRunDdlBootstrap(session, DDL_BOOTSTRAP_MIGRATIONS_TABLE_LOCK, keyspace) {
             session.execute("""
-                CREATE TABLE IF NOT EXISTS kandra_migrations (
+                CREATE TABLE IF NOT EXISTS $migrationsTable (
                     version     INT,
                     name        TEXT,
                     status      TEXT,
@@ -134,15 +156,15 @@ class KandraMigrationRunner(
      * with `status = NULL`, which [history] and [claim] both treat as legacy-applied.
      */
     private fun migrateLegacySchema() {
-        val existingColumns = session.execute("SELECT * FROM kandra_migrations LIMIT 1")
+        val existingColumns = session.execute("SELECT * FROM $migrationsTable LIMIT 1")
             .columnDefinitions
             .map { it.name.toString() }
             .toSet()
         if ("status" !in existingColumns) {
-            session.execute("ALTER TABLE kandra_migrations ADD status TEXT")
+            session.execute("ALTER TABLE $migrationsTable ADD status TEXT")
         }
         if ("claimed_at" !in existingColumns) {
-            session.execute("ALTER TABLE kandra_migrations ADD claimed_at TIMESTAMP")
+            session.execute("ALTER TABLE $migrationsTable ADD claimed_at TIMESTAMP")
         }
     }
 
@@ -183,7 +205,7 @@ class KandraMigrationRunner(
 
             logger.info { "Applying migration v${migration.version}: ${migration.name}" }
             try {
-                migration.up(session)
+                migration.up(session, keyspace)
             } catch (e: Exception) {
                 // A synchronous, in-process failure -- we know for certain nothing else is
                 // running this migration, so it's safe to release the claim for a later retry.
@@ -191,7 +213,7 @@ class KandraMigrationRunner(
                 // that's exactly the case handleUnresolvedClaim exists to surface loudly instead
                 // of silently trusting or silently retrying.)
                 session.execute(
-                    session.prepare("DELETE FROM kandra_migrations WHERE version = ?").bind(migration.version)
+                    session.prepare("DELETE FROM $migrationsTable WHERE version = ?").bind(migration.version)
                 )
                 throw KandraMigrationException("Migration v${migration.version} ('${migration.name}') failed: ${e.message}", e)
             }
@@ -280,7 +302,7 @@ class KandraMigrationRunner(
      */
     private fun serverNow(version: Int): Instant {
         val prepared = session.prepare(
-            "SELECT toTimestamp(now()) AS server_now FROM kandra_migrations WHERE version = ?"
+            "SELECT toTimestamp(now()) AS server_now FROM $migrationsTable WHERE version = ?"
         )
         val row = session.execute(prepared.bind(version)).one()
         return row?.getInstant("server_now") ?: Instant.now()
@@ -288,7 +310,7 @@ class KandraMigrationRunner(
 
     /** Returns the full history of applied migrations. */
     fun history(): List<MigrationHistory> {
-        return session.execute("SELECT version, name, status, claimed_at, applied_at, checksum FROM kandra_migrations")
+        return session.execute("SELECT version, name, status, claimed_at, applied_at, checksum FROM $migrationsTable")
             .all()
             .map { row ->
                 MigrationHistory(
@@ -320,7 +342,7 @@ class KandraMigrationRunner(
      */
     private fun claim(migration: KandraMigration): MigrationHistory? {
         val prepared = session.prepare(
-            "INSERT INTO kandra_migrations (version, name, status, claimed_at, checksum) " +
+            "INSERT INTO $migrationsTable (version, name, status, claimed_at, checksum) " +
             "VALUES (?, ?, ?, toTimestamp(now()), ?) IF NOT EXISTS"
         )
         val rs = session.execute(
@@ -348,7 +370,7 @@ class KandraMigrationRunner(
     /** Marks a claimed migration as confirmed complete. Only called after `up()` returns successfully. */
     private fun markApplied(migration: KandraMigration) {
         session.execute(
-            session.prepare("UPDATE kandra_migrations SET status = ?, applied_at = ? WHERE version = ?")
+            session.prepare("UPDATE $migrationsTable SET status = ?, applied_at = ? WHERE version = ?")
                 .bind(MigrationRowStatus.APPLIED.name, Instant.now(), migration.version)
         )
     }
@@ -395,13 +417,19 @@ class KandraMigrationRunner(
  * the table shape is identical so both can coexist safely against the same keyspace if a
  * deployment somehow uses both.
  */
-internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, action: () -> Unit) {
-    ensureDdlLockTable(session)
+internal fun claimAndRunDdlBootstrap(
+    session: CqlSession,
+    lockName: String,
+    keyspace: String? = null,
+    action: () -> Unit
+) {
+    val locks = ddlLocksTable(keyspace)
+    ensureDdlLockTable(session, locks)
     val holder = UUID.randomUUID().toString()
 
-    if (tryClaimDdlLock(session, lockName, holder)) {
+    if (tryClaimDdlLock(session, locks, lockName, holder)) {
         logger.info { "Kandra: claimed DDL bootstrap lock '$lockName' -- running schema DDL." }
-        runClaimedDdlAction(session, lockName, holder, action)
+        runClaimedDdlAction(session, locks, lockName, holder, action)
         return
     }
 
@@ -411,15 +439,15 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
     }
     while (true) {
         val row = session.execute(
-            session.prepare("SELECT holder, status, claimed_at FROM kandra_ddl_locks WHERE lock_name = ?")
+            session.prepare("SELECT holder, status, claimed_at FROM $locks WHERE lock_name = ?")
                 .bind(lockName)
         ).one()
 
         if (row == null) {
             // The row vanished between our failed claim and this read (shouldn't normally happen
             // outside of a manual operator intervention) -- treat it like nobody has claimed it.
-            if (tryClaimDdlLock(session, lockName, holder)) {
-                runClaimedDdlAction(session, lockName, holder, action)
+            if (tryClaimDdlLock(session, locks, lockName, holder)) {
+                runClaimedDdlAction(session, locks, lockName, holder, action)
                 return
             }
             continue
@@ -438,8 +466,8 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
                 "exceeding the staleness threshold of ${DDL_BOOTSTRAP_STALE_THRESHOLD.seconds}s -- " +
                 "the previous claimant is presumed crashed. Reclaiming and running the DDL here."
             }
-            if (reclaimStaleDdlLock(session, lockName, holder, claimedAt)) {
-                runClaimedDdlAction(session, lockName, holder, action)
+            if (reclaimStaleDdlLock(session, locks, lockName, holder, claimedAt)) {
+                runClaimedDdlAction(session, locks, lockName, holder, action)
                 return
             }
             // Someone else reclaimed (or finished) it between our staleness check and the reclaim
@@ -463,11 +491,11 @@ internal fun claimAndRunDdlBootstrap(session: CqlSession, lockName: String, acti
  * instance's ownership of [lockName] was taken over mid-run -- exactly the schema-disagreement
  * risk #79 exists to prevent -- so it's surfaced loudly rather than silently no-oping.
  */
-private fun runClaimedDdlAction(session: CqlSession, lockName: String, holder: String, action: () -> Unit) {
+private fun runClaimedDdlAction(session: CqlSession, locks: String, lockName: String, holder: String, action: () -> Unit) {
     try {
         action()
     } catch (e: Exception) {
-        if (!releaseDdlLock(session, lockName, holder)) {
+        if (!releaseDdlLock(session, locks, lockName, holder)) {
             logger.warn {
                 "Kandra: DDL bootstrap lock '$lockName' could not be released by holder '$holder' " +
                 "after its action() failed -- the lock was already reclaimed by another instance " +
@@ -478,7 +506,7 @@ private fun runClaimedDdlAction(session: CqlSession, lockName: String, holder: S
         }
         throw e
     }
-    if (!markDdlLockDone(session, lockName, holder)) {
+    if (!markDdlLockDone(session, locks, lockName, holder)) {
         throw KandraSchemaException(
             "Kandra: DDL bootstrap lock '$lockName' was reclaimed by another instance while holder " +
             "'$holder' was still running its DDL action. The action completed successfully here, but " +
@@ -493,15 +521,19 @@ private fun runClaimedDdlAction(session: CqlSession, lockName: String, holder: S
     logger.info { "Kandra: DDL bootstrap lock '$lockName' released (done)." }
 }
 
+/** `kandra_ddl_locks`, qualified with [keyspace] when targeting a specific keyspace (ISS-108). */
+private fun ddlLocksTable(keyspace: String?): String =
+    if (keyspace == null) "kandra_ddl_locks" else "$keyspace.kandra_ddl_locks"
+
 /**
  * Coordination table backing [claimAndRunDdlBootstrap]. Deliberately minimal and schema-stable
  * (no column is ever added after creation) to keep its own bootstrap -- the one race this
  * mechanism cannot itself guard, see [claimAndRunDdlBootstrap]'s KDoc -- as narrow as possible.
  */
-private fun ensureDdlLockTable(session: CqlSession) {
+private fun ensureDdlLockTable(session: CqlSession, locks: String) {
     session.execute(
         """
-        CREATE TABLE IF NOT EXISTS kandra_ddl_locks (
+        CREATE TABLE IF NOT EXISTS $locks (
             lock_name   TEXT PRIMARY KEY,
             holder      TEXT,
             status      TEXT,
@@ -512,9 +544,9 @@ private fun ensureDdlLockTable(session: CqlSession) {
 }
 
 /** Returns `true` if this call won the claim on [lockName]. */
-private fun tryClaimDdlLock(session: CqlSession, lockName: String, holder: String): Boolean {
+private fun tryClaimDdlLock(session: CqlSession, locks: String, lockName: String, holder: String): Boolean {
     val prepared = session.prepare(
-        "INSERT INTO kandra_ddl_locks (lock_name, holder, status, claimed_at) " +
+        "INSERT INTO $locks (lock_name, holder, status, claimed_at) " +
         "VALUES (?, ?, 'CLAIMED', toTimestamp(now())) IF NOT EXISTS"
     )
     return session.execute(prepared.bind(lockName, holder)).wasApplied()
@@ -524,9 +556,9 @@ private fun tryClaimDdlLock(session: CqlSession, lockName: String, holder: Strin
  * Reclaims a stale claim via compare-and-set on its previously-observed `claimed_at`, so that if
  * several waiters independently decide the same claim is stale, only one of them wins.
  */
-private fun reclaimStaleDdlLock(session: CqlSession, lockName: String, holder: String, previousClaimedAt: Instant): Boolean {
+private fun reclaimStaleDdlLock(session: CqlSession, locks: String, lockName: String, holder: String, previousClaimedAt: Instant): Boolean {
     val prepared = session.prepare(
-        "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) " +
+        "UPDATE $locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) " +
         "WHERE lock_name = ? IF claimed_at = ?"
     )
     return session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
@@ -539,9 +571,9 @@ private fun reclaimStaleDdlLock(session: CqlSession, lockName: String, holder: S
  * claimant) can't have its completion silently overwrite the new holder's active claim. Returns
  * `false` if the CAS lost -- see [runClaimedDdlAction] for how that's handled.
  */
-private fun markDdlLockDone(session: CqlSession, lockName: String, holder: String): Boolean {
+private fun markDdlLockDone(session: CqlSession, locks: String, lockName: String, holder: String): Boolean {
     val prepared = session.prepare(
-        "UPDATE kandra_ddl_locks SET status = 'DONE' WHERE lock_name = ? IF holder = ?"
+        "UPDATE $locks SET status = 'DONE' WHERE lock_name = ? IF holder = ?"
     )
     return session.execute(prepared.bind(lockName, holder)).wasApplied()
 }
@@ -553,8 +585,8 @@ private fun markDdlLockDone(session: CqlSession, lockName: String, holder: Strin
  * claim out from under it, after this holder's claim was itself reclaimed as stale while it was
  * still (unbeknownst to the reclaimer) alive and running. Returns `false` if the CAS lost.
  */
-private fun releaseDdlLock(session: CqlSession, lockName: String, holder: String): Boolean {
-    val prepared = session.prepare("DELETE FROM kandra_ddl_locks WHERE lock_name = ? IF holder = ?")
+private fun releaseDdlLock(session: CqlSession, locks: String, lockName: String, holder: String): Boolean {
+    val prepared = session.prepare("DELETE FROM $locks WHERE lock_name = ? IF holder = ?")
     return session.execute(prepared.bind(lockName, holder)).wasApplied()
 }
 

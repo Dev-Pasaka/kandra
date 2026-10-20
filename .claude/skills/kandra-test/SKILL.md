@@ -1,6 +1,6 @@
 ---
 name: kandra-test
-description: Exhaustive API reference for kandra-test — FakeKandraSession for unit tests, KandraTestUtils, KandraTestcontainers for real-ScyllaDB/Cassandra integration tests. Load when writing tests for code that uses Kandra repositories.
+description: Exhaustive API reference for kandra-test — FakeKandraSession for unit tests, KandraTestUtils, KandraTestcontainers and KandraTestBackend/KandraCloud for real-ScyllaDB/Cassandra integration tests. Load when writing tests for code that uses Kandra repositories.
 ---
 
 # kandra-test
@@ -10,7 +10,7 @@ Test support module for Kandra, `io.kandra.test.*` (module `kandra-test`). Two t
 | Style | Entry point | Backing | Speed | What it actually exercises |
 |---|---|---|---|---|
 | Fake-session unit test | `KandraTestUtils.inMemory(...)` | `FakeKandraSession` (in-process, no network) | instant | The full `KandraRepository`/`KandraSuspendRepository` CRUD surface, **structurally** — real statement-building/binding logic, no real CQL semantics (see below). |
-| Testcontainers integration test | `KandraTestcontainers.freshKeyspace(...)` | real `cassandra:4.1` container via Testcontainers | slow (container start + real CQL) | The full, real `KandraRepository`/`KandraSuspendRepository` API against real DDL/DML |
+| Testcontainers integration test | `KandraTestcontainers.freshKeyspace(...)` | real `cassandra:4.1` container via Testcontainers (or, with `KANDRA_TEST_BACKEND=cloud`, the `KANDRA_CLOUD_*` cluster; see `KandraTestBackend`) | slow (container start + real CQL) | The full, real `KandraRepository`/`KandraSuspendRepository` API against real DDL/DML |
 
 Read this whole file before picking a style. As of GH #28 / ISS-040, the fake-session path runs the entire
 repository surface end-to-end (an earlier version of `FakePreparedStatement.bind()` unconditionally threw
@@ -113,21 +113,27 @@ Internally, the class builds its own `BatchEngine(session, StatementBuilder(sess
 ```kotlin
 object KandraTestcontainers {
     val container: CassandraContainer<*>
-    fun freshKeyspace(vararg classes: KClass<*>): KandraRuntimeHandle
+    fun freshKeyspace(
+        vararg classes: KClass<*>,
+        replicationFactor: Int = 1,
+        statementBuilderConsistencyConfig: ConsistencyConfig = ConsistencyConfig()
+    ): KandraRuntimeHandle
 }
 ```
 
 | Member | Details |
 |---|---|
-| `container` | `by lazy { CassandraContainer("cassandra:4.1").withExposedPorts(9042).also { it.start() } }`. Kotlin's default `by lazy` mode is `SYNCHRONIZED`, so this **is** a thread-safe lazy singleton, shared across every test class in the same JVM — verified from the source, not assumed. `.start()` is called **inside** the lazy initializer itself, so the very first access (from any test class, in any order) blocks synchronously while Testcontainers pulls/starts the container (can take tens of seconds on a cold Docker cache). Note the image is real Apache **Cassandra** `4.1`, not an actual ScyllaDB image — Kandra targets ScyllaDB in production but tests run against Cassandra-protocol compatibility. There is no shutdown code anywhere in this file — the container is left running until the JVM exits and Testcontainers' Ryuk reaper cleans it up. |
-| `freshKeyspace(vararg classes)` | See call sequence below. |
+| `container` | `by lazy { CassandraContainer("cassandra:4.1").withExposedPorts(9042).also { it.start(); awaitReady(it) } }`. Kotlin's default `by lazy` mode is `SYNCHRONIZED`, so this **is** a thread-safe lazy singleton, shared across every test class in the same JVM — verified from the source, not assumed. `.start()` is called **inside** the lazy initializer itself, so the very first access (from any test class, in any order) blocks synchronously while Testcontainers pulls/starts the container (can take tens of seconds on a cold Docker cache). Note the image is real Apache **Cassandra** `4.1`, not an actual ScyllaDB image — Kandra targets ScyllaDB in production but tests run against Cassandra-protocol compatibility. There is no shutdown code anywhere in this file — the container is left running until the JVM exits and Testcontainers' Ryuk reaper cleans it up. |
+| `freshKeyspace(vararg classes, replicationFactor, statementBuilderConsistencyConfig)` | See call sequence below. `replicationFactor` (default `1`) is the `SimpleStrategy` RF; on the cloud backend RF 1 is bumped to 3. `statementBuilderConsistencyConfig` is passed to the `StatementBuilder` (e.g. `strictMode = true`). |
+
+Readiness: after `start()` the lazy initializer polls (query plus a create/drop-keyspace DDL probe, 3 minute deadline, throws `IllegalStateException("Cassandra container not ready after 3 minutes")`) until CQL is really serving, so the first test does not pay for the cold start.
 
 `freshKeyspace` call sequence, read straight from the implementation:
 
-1. `keyspace = "kandra_test_${UUID.randomUUID().toString().replace("-", "")}"` — a fresh, dash-stripped random UUID per call, so concurrent/parallel test classes never collide.
-2. Opens a throwaway **bootstrap** `CqlSession` (contact point + local DC from `container`, no keyspace set).
-3. Executes `CREATE KEYSPACE IF NOT EXISTS <ks> WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}` on it, then closes it.
-4. Opens a second, real `CqlSession` with `.withKeyspace(keyspace)` — this is the session everything below actually uses.
+1. Docker backend: `keyspace = "kandra_test_${UUID.randomUUID().toString().replace("-", "")}"` — a fresh, dash-stripped random UUID per call, so concurrent/parallel test classes never collide. Cloud backend (`KANDRA_TEST_BACKEND=cloud`): `KandraTestBackend.keyspaceName("it")` = `kt_it_<8 hex>`.
+2. Opens a throwaway **bootstrap** `CqlSession` via `KandraTestBackend.newSession()` (30 s timeouts, no keyspace set).
+3. Executes `KandraTestBackend.createKeyspaceCql(keyspace, replicationFactor)` on it (`CREATE KEYSPACE IF NOT EXISTS <ks> WITH replication = {'class': 'SimpleStrategy', 'replication_factor': <rf>}`; the cloud backend applies the RF bump and adds `AND tablets = {'enabled': false}`), then closes it.
+4. Opens a second, real `CqlSession` with `KandraTestBackend.newSession(keyspace)` — this is the session everything below actually uses.
 5. For each class in `classes`: `SchemaRegistry.register(klass)` (same process-global registry as the fake-session path, additive) then executes every statement from `DdlGenerator.allStatements(schema)` on the session — this really issues `CREATE TABLE` (and any `@LookupIndex` lookup-table DDL) against the container.
 6. Builds `KandraCodec.default`, `StatementBuilder(session, codec)`, a fresh `CoroutineScope(SupervisorJob() + Dispatchers.IO)`, and `BatchEngine(session, statementBuilder, scope)`.
 7. Constructs the **production** `io.kandra.runtime.KandraRuntime(session, batchEngine, codec)` — same class Ktor wires up in real apps, not a test double.
@@ -149,6 +155,29 @@ class KandraRuntimeHandle(
 | `repository<T>()` | `inline fun <reified T: Any> repository(): KandraRepository<T>` | Delegates to `runtime.repository<T>()` — **reified, no `KClass` argument**: call as `db.repository<User>()`. Different calling convention than `io.kandra.test.KandraRuntime.repository(User::class)` above — easy to transcribe wrong when switching between the two test styles. |
 | `suspendRepository<T>()` | `inline fun <reified T: Any> suspendRepository(): KandraSuspendRepository<T>` | Same, suspend variant. |
 | `close()` | `fun close()` | `runCatching { session.execute("DROP KEYSPACE IF EXISTS $keyspace") }`, then `runCatching { session.close() }` — **both wrapped in `runCatching`, so failures are silently swallowed**, not surfaced to the test — then `scope.cancel("KandraRuntimeHandle closed")`. Does **not** stop or close the shared `container` (it keeps running for the rest of the JVM) and does **not** call `SchemaRegistry.clear()`. |
+
+## KandraTestBackend (`io.kandra.test.KandraTestBackend`)
+
+Shared connection provider for live tests. `KANDRA_TEST_BACKEND` unset or `docker` = the Testcontainers container (behaviour unchanged); `cloud` = the `KANDRA_CLOUD_*` cluster (fails fast with `KANDRA_TEST_BACKEND=cloud but KANDRA_CLOUD_CONTACT_POINTS is unset`).
+
+| Member | Details |
+|---|---|
+| `isCloud: Boolean` | True when `KANDRA_TEST_BACKEND=cloud`. |
+| `contactPointsCsv: String` | `host:port` CSV for Kandra's `contactPoints` config string. |
+| `localDatacenter: String` | Container DC, or `KANDRA_CLOUD_LOCAL_DC`. |
+| `username` / `password: String` | Cloud credentials; blank on Docker (AllowAllAuthenticator). Never log. |
+| `tlsEnabled: Boolean`, `truststore: KandraCloud.TempTruststore?` | Cloud + TLS only; the truststore is built once per JVM from `KANDRA_CLOUD_CA_PEM` and deleted on exit. |
+| `effectiveRf(requested: Int): Int` | Cloud: RF 1 becomes 3. Docker: unchanged. Assert replication metadata against this. |
+| `keyspaceName(tag: String): String` | Docker `kandra_<tag>_<32 hex>`; cloud `kt_<tag>_<8 hex>`. |
+| `sessionBuilder(): CqlSessionBuilder`, `newSession(keyspace: String? = null): CqlSession` | 30 s request/schema timeouts; caller closes. |
+| `createKeyspace(name, rf = 1)`, `createKeyspaceCql(name, rf = 1)`, `dropKeyspace(name)` | SimpleStrategy; cloud also disables tablets. `dropKeyspace` swallows failures. |
+| `freshKeyspace(tag, rf = 1): FreshKeyspace` | `AutoCloseable` with `name`, `session` (bound) and `admin` (unbound); `close()` always drops the keyspace. |
+
+## KandraCloud (`io.kandra.test.KandraCloud`)
+
+Env-driven harness for a live (e.g. Scylla Cloud) cluster; no credentials or hostnames live in the repo. `isConfigured` is true when `KANDRA_CLOUD_CONTACT_POINTS` is set; `assumeConfigured()` is a JUnit assumption (skips, not fails). Variables: `KANDRA_CLOUD_CONTACT_POINTS` (CSV `host[:port]`, default port 9042), `KANDRA_CLOUD_USERNAME` / `KANDRA_CLOUD_PASSWORD`, `KANDRA_CLOUD_LOCAL_DC` (default `AWS_US_EAST_1`), `KANDRA_CLOUD_TLS=true` (rewrites port 9042 to 9142; `KANDRA_CLOUD_SSL=true` is the legacy spelling with JVM trust), `KANDRA_CLOUD_CA_PEM` (in-memory trust store from the PEM), `KANDRA_CLOUD_TRUSTSTORE` + `KANDRA_CLOUD_TRUSTSTORE_PASSWORD`. Members: `localDc`, `tlsEnabled`, `contactPointsCsv()`, `username`, `password`, `tempTruststore()`, `sessionBuilder()`, `newSession(keyspace?)`, `freshKeyspace(prefix, rf = 1)` (`prefix` must match `[a-z0-9]{1,20}`; creates `kt_<prefix>_<random8>` with `AND tablets = {'enabled': false}`; `close()` always drops it). Unlike `KandraTestBackend.freshKeyspace`, `KandraCloud.freshKeyspace` does not bump RF.
+
+`KandraMultiDcTestcontainers` (same package) is a separate, Docker-only two-datacenter (`dc1`/`dc2`) Compose fixture with `pause`/`unpause`/`unpauseAll`; see `docs/features/multidc.md`.
 
 ## Example: FakeKandraSession-based unit test
 

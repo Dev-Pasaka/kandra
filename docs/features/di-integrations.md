@@ -32,3 +32,16 @@ build for that module — a typo or an entity rename now fails to *compile* inst
 `NoDefinitionFoundException`/`DI.NotFoundException` at first resolution, and no unchecked cast is needed at
 the call site (the generated function does it once, internally). See
 [ISS-038](../issues/ISS-038-typed-di-codegen-accessors.md).
+
+## Multiple keyspaces
+
+Bindings are per entity, not per keyspace: `kandraKoin()` / `kandraKodein()` bind one repository
+pair for every registered entity, whichever keyspace it lives in, and the qualifiers
+(`"${Entity}Repo"`, `"${Entity}"`) are unchanged. There is no per-keyspace repository factory
+(runtime keyspace selection is a non-goal).
+
+Because qualifiers are built from the entity's simple class name only, two entities with the same simple name
+collide even when they live in different keyspaces. `kandraKoin()` / `kandraKodein()` fail fast with a
+`KandraSchemaException` that lists each colliding class with its keyspace (`com.a.Invoice [keyspace: billing]`,
+`com.b.Invoice [keyspace: <default>]`) and notes that the keyspace does not disambiguate; rename one class. Entities
+in different keyspaces with different simple names bind normally.
