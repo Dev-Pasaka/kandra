@@ -1,0 +1,288 @@
+<!doctype html>
+<html class="no-js">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <title>KandraCloud</title>
+<link href="../../../images/logo-icon.svg" rel="icon" type="image/svg">    <script>var pathToRoot = "../../../";</script>
+    <script>document.documentElement.classList.replace("no-js","js");</script>
+    <script>const storage = localStorage.getItem("dokka-dark-mode")
+    if (storage == null) {
+        const osDarkSchemePreferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (osDarkSchemePreferred === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    } else {
+        const savedDarkMode = JSON.parse(storage)
+        if(savedDarkMode === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    }
+    </script>
+<script type="text/javascript" src="https://unpkg.com/kotlin-playground@1/dist/playground.min.js" async></script>
+<script type="text/javascript" src="../../../scripts/sourceset_dependencies.js" async></script>
+<link href="../../../styles/style.css" rel="Stylesheet">
+<link href="../../../styles/main.css" rel="Stylesheet">
+<link href="../../../styles/prism.css" rel="Stylesheet">
+<link href="../../../styles/logo-styles.css" rel="Stylesheet">
+<link href="../../../styles/font-jb-sans-auto.css" rel="Stylesheet">
+<script type="text/javascript" src="../../../scripts/clipboard.js" async></script>
+<script type="text/javascript" src="../../../scripts/navigation-loader.js" async></script>
+<script type="text/javascript" src="../../../scripts/platform-content-handler.js" async></script>
+<script type="text/javascript" src="../../../scripts/main.js" defer></script>
+<script type="text/javascript" src="../../../scripts/prism.js" async></script>
+<script type="text/javascript" src="../../../scripts/symbol-parameters-wrapper_deferred.js" defer></script></head>
+<body>
+    <div class="root">
+<nav class="navigation" id="navigation-wrapper">
+    <div class="navigation--inner">
+        <div class="navigation-title">
+            <button class="menu-toggle" id="menu-toggle" type="button">toggle menu</button>
+            <div class="library-name">
+<a class="library-name--link" href="../../../index.html">
+                            kandra
+                    </a>            </div>
+            <div class="library-version">0.5.1
+            </div>
+        </div>
+        <div class="filter-section" id="filter-section">
+                <button class="platform-tag platform-selector jvm-like" data-active="" data-filter=":kandra-test:dokkaHtmlPartial/main">jvm</button>
+        </div>
+    </div>
+    <div class="navigation-controls">
+        <button class="navigation-controls--btn navigation-controls--theme" id="theme-toggle-button" type="button">switch theme</button>
+        <div class="navigation-controls--btn navigation-controls--search" id="searchBar" role="button">search in API</div>
+    </div>
+</nav>
+        <div id="container">
+            <div class="sidebar" id="leftColumn">
+                <div class="sidebar--inner" id="sideMenu"></div>
+            </div>
+            <div id="main">
+<div class="main-content" data-page-type="classlike" id="content" pageids="kandra-test::io.kandra.test/KandraCloud///PointingToDeclaration//1710684214">
+  <div class="breadcrumbs"><a href="../../index.html">kandra-test</a><span class="delimiter">/</span><a href="../index.html">io.kandra.test</a><span class="delimiter">/</span><span class="current">KandraCloud</span></div>
+  <div class="cover ">
+    <h1 class="cover"><span>Kandra</span><wbr><span><span>Cloud</span></span></h1>
+    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">object </span><a href="index.html">KandraCloud</a></div><p class="paragraph">Live-cluster (e.g. Scylla Cloud) test harness. Env-driven, so no credentials ever live in the repo.</p><p class="paragraph">Environment:</p><ul><li><p class="paragraph"><code class="lang-kotlin">KANDRA_CLOUD_CONTACT_POINTS</code> comma-separated <code class="lang-kotlin">host[:port]</code> (port defaults to 9042). Unset =&gt; unconfigured.</p></li><li><p class="paragraph"><code class="lang-kotlin">KANDRA_CLOUD_USERNAME</code> / <code class="lang-kotlin">KANDRA_CLOUD_PASSWORD</code> plain auth credentials (optional pair).</p></li><li><p class="paragraph"><code class="lang-kotlin">KANDRA_CLOUD_LOCAL_DC</code> local datacenter (required by the driver; the verified value for the shared cluster is documented in docs/features/multi-keyspace-plan.md).</p></li><li><p class="paragraph">TLS (optional, off by default: the shared cluster accepts plain auth on 9042 and TLS on 9142): <code class="lang-kotlin">KANDRA_CLOUD_TLS=true</code> enables it (contact-point port 9042 is rewritten to 9142). Trust comes from <code class="lang-kotlin">KANDRA_CLOUD_CA_PEM=/path/ca.pem</code> (in-memory trust store built from the PEM; never committed), else <code class="lang-kotlin">KANDRA_CLOUD_TRUSTSTORE</code>, else the JVM default trust store. Legacy: <code class="lang-kotlin">KANDRA_CLOUD_SSL=true</code> == TLS with JVM trust; <code class="lang-kotlin">KANDRA_CLOUD_TRUSTSTORE=/path/to/truststore.jks</code> (+ <code class="lang-kotlin">KANDRA_CLOUD_TRUSTSTORE_PASSWORD</code>) uses a custom one.</p></li></ul><p class="paragraph">Usage in a JUnit 5 test (skipped, not failed, when unconfigured):</p><div class="sample-container"><pre><code class="block lang-kotlin" theme="idea">@BeforeAll @JvmStatic fun gate() = KandraCloud.assumeConfigured()<br><br>@Test fun works() = KandraCloud.freshKeyspace("smoke").use { ks -&gt;<br>    ks.session.execute("CREATE TABLE t (id int PRIMARY KEY)")   // session is bound to ks.name<br>}</code></pre><span class="top-right-position"><span class="copy-icon"></span><div class="copy-popup-wrapper popup-to-left"><span class="copy-popup-icon"></span><span>Content copied to clipboard</span></div></span></div><p class="paragraph">Keyspaces are named <code class="lang-kotlin">kt_&lt;prefix&gt;_&lt;random8&gt;</code>; <code class="lang-kotlin">close()</code> always drops them.</p></div></div>
+  </div>
+  <div class="tabbedcontent">
+    <div class="tabs-section" tabs-section="tabs-section"><button class="section-tab" data-active="" data-togglable="CONSTRUCTOR,TYPE,PROPERTY,FUNCTION">Members</button></div>
+    <div class="tabs-section-body">
+      <div data-togglable="TYPE">
+        <h2 class="">Types</h2>
+        <div class="table"><a data-name="1593579298%2FClasslikes%2F1710684214" anchor-label="FreshKeyspace" id="1593579298%2FClasslikes%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-fresh-keyspace/index.html"><span>Fresh</span><wbr><span><span>Keyspace</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1593579298%2FClasslikes%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">class </span><a href="-fresh-keyspace/index.html">FreshKeyspace</a> : <a href="https://docs.oracle.com/javase/8/docs/api/java/lang/AutoCloseable.html">AutoCloseable</a></div><div class="brief "><p class="paragraph">A temporary keyspace plus sessions. <a href="-fresh-keyspace/session.html">session</a> is bound to it; <a href="-fresh-keyspace/admin.html">admin</a> is unbound.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-46916498%2FClasslikes%2F1710684214" anchor-label="TempTruststore" id="-46916498%2FClasslikes%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-temp-truststore/index.html"><span>Temp</span><wbr><span><span>Truststore</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-46916498%2FClasslikes%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">class </span><a href="-temp-truststore/index.html">TempTruststore</a> : <a href="https://docs.oracle.com/javase/8/docs/api/java/lang/AutoCloseable.html">AutoCloseable</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="PROPERTY">
+        <h2 class="">Properties</h2>
+        <div class="table"><a data-name="-1372456690%2FProperties%2F1710684214" anchor-label="isConfigured" id="-1372456690%2FProperties%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="is-configured.html"><span>is</span><wbr><span><span>Configured</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1372456690%2FProperties%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="is-configured.html">isConfigured</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="126339770%2FProperties%2F1710684214" anchor-label="localDc" id="126339770%2FProperties%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="local-dc.html"><span>local</span><wbr><span><span>Dc</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="126339770%2FProperties%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="local-dc.html">localDc</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1614289573%2FProperties%2F1710684214" anchor-label="password" id="-1614289573%2FProperties%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="password.html"><span><span>password</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1614289573%2FProperties%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="password.html">password</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token operator">?</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="698122832%2FProperties%2F1710684214" anchor-label="tlsEnabled" id="698122832%2FProperties%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="tls-enabled.html"><span>tls</span><wbr><span><span>Enabled</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="698122832%2FProperties%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="tls-enabled.html">tlsEnabled</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-956170368%2FProperties%2F1710684214" anchor-label="username" id="-956170368%2FProperties%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="username.html"><span><span>username</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-956170368%2FProperties%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="username.html">username</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token operator">?</span></div><div class="brief "><p class="paragraph">Username / password from the env (null when unset). Never log these.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="FUNCTION">
+        <h2 class="">Functions</h2>
+        <div class="table"><a data-name="1249182668%2FFunctions%2F1710684214" anchor-label="assumeConfigured" id="1249182668%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="assume-configured.html"><span>assume</span><wbr><span><span>Configured</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1249182668%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="assume-configured.html"><span class="token function">assumeConfigured</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">JUnit assumption: aborts (skips) the test or class when the cloud env is not configured.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1872591379%2FFunctions%2F1710684214" anchor-label="contactPointsCsv" id="1872591379%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="contact-points-csv.html"><span>contact</span><wbr><span>Points</span><wbr><span><span>Csv</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1872591379%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="contact-points-csv.html"><span class="token function">contactPointsCsv</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></div><div class="brief "><p class="paragraph">Contact points as a <code class="lang-kotlin">host:port</code> CSV (TLS port 9142 substituted when TLS is on), for config DSLs taking a string.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1148302504%2FFunctions%2F1710684214" anchor-label="freshKeyspace" id="1148302504%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="fresh-keyspace.html"><span>fresh</span><wbr><span><span>Keyspace</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1148302504%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="fresh-keyspace.html"><span class="token function">freshKeyspace</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">prefix<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">rf<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator"> = </span><span class="token constant">1</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="-fresh-keyspace/index.html">KandraCloud.FreshKeyspace</a></div><div class="brief "><p class="paragraph">Creates <code class="lang-kotlin">kt_&lt;prefix&gt;_&lt;random8&gt;</code> (SimpleStrategy, <a href="fresh-keyspace.html">rf</a>) and returns a handle holding a session bound to it. Use with <code class="lang-kotlin">use {}</code>; <a href="-fresh-keyspace/close.html">FreshKeyspace.close</a> drops the keyspace even if the test fails.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-380760161%2FFunctions%2F1710684214" anchor-label="newSession" id="-380760161%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="new-session.html"><span>new</span><wbr><span><span>Session</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-380760161%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="new-session.html"><span class="token function">newSession</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">keyspace<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core/CqlSession///PointingToDeclaration/">CqlSession</span></div><div class="brief "><p class="paragraph">Opens a new session, optionally bound to <a href="new-session.html">keyspace</a>. Caller must close it.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="2112550993%2FFunctions%2F1710684214" anchor-label="sessionBuilder" id="2112550993%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="session-builder.html"><span>session</span><wbr><span><span>Builder</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="2112550993%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="session-builder.html"><span class="token function">sessionBuilder</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core/CqlSessionBuilder///PointingToDeclaration/">CqlSessionBuilder</span></div><div class="brief "><p class="paragraph">A configured (not yet built) session builder. Caller owns the built session.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1537326343%2FFunctions%2F1710684214" anchor-label="tempTruststore" id="-1537326343%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="temp-truststore.html"><span>temp</span><wbr><span><span>Truststore</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1537326343%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="temp-truststore.html"><span class="token function">tempTruststore</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">: </span><a href="-temp-truststore/index.html">KandraCloud.TempTruststore</a><span class="token operator">?</span></div><div class="brief "><p class="paragraph">A temporary PKCS12 truststore built from <code class="lang-kotlin">KANDRA_CLOUD_CA_PEM</code>, for APIs that want a truststore file (e.g. Kandra's <code class="lang-kotlin">ssl { trustStorePath = ... }</code>). Deleted on close. Null when TLS is off or no PEM is set.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      <div class="footer">
+        <span class="go-to-top-icon"><a href="#content" id="go-to-top-link"></a></span><span>© 2026 Copyright</span><span class="pull-right"><span>Generated by </span><a href="https://github.com/Kotlin/dokka"><span>dokka</span><span class="padded-icon"></span></a></span>
+      </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
