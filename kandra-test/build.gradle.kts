@@ -15,7 +15,7 @@ dependencies {
     // implementation (GH #152).
     api(project(":kandra-core"))
     api(project(":kandra-runtime"))
-    implementation(libs.datastax.driver)
+    api(libs.datastax.driver)
     implementation(libs.kotlin.reflect)
     implementation(libs.coroutines.core)
     implementation(libs.kotlin.logging)

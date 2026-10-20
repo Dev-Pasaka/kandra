@@ -1,16 +1,17 @@
 # Testing (`kandra-test`)
 
 - `FakeKandraSession` — in-memory CQL session for unit tests. The full repository stack runs against it (the real
-  `StatementBuilder`/`BatchEngine`), and `capturedStatements()`/`capturedBatches()` expose what was built, so it verifies *structural*
+  `StatementBuilder`/`BatchEngine`), and `capturedStatements()`/`capturedBatches()` expose what was built (`capturedStatementViews()`/`capturedBatchViews()` add a public `CapturedStatement(cql, values)` view with the unset-vs-`null` distinction), so it verifies *structural*
   behaviour (batch composition, save/delete ordering) — not real data round-trips, real LWT semantics, or real codec/parameter binding
   (`execute()` always returns an empty, `wasApplied() == true` result). `KandraTestUtils.inMemory(...)` wires its own instance; read it back
   from `runtime.session as FakeKandraSession`. Until 0.4.7 `bind()` threw and repository calls failed under the fake (GH #28 / ISS-040); that is
   fixed. See
   [ISS-020](../issues/ISS-020-fake-session-lwt-semantics.md).
-- `KandraTestUtils` — schema assertion helpers.
-- Setup your test module needs (none of it comes transitively): `org.junit.jupiter:junit-jupiter` with `tasks.test { useJUnitPlatform() }`,
-  `com.datastax.oss:java-driver-core` (`CqlSession`/`BatchStatement` appear in test code), `@OptIn(InternalKandraApi::class)` wherever you call
-  `SchemaRegistry.clear()`, and Testcontainers `1.21.4`+ for `KandraTestcontainers` (1.20.x cannot connect to current Docker).
+- `KandraTestUtils` — schema assertion helpers. `KandraTestUtils.reset()` (or `runtime.closeAndReset()`) clears the process-global schema registry between tests
+  without an `@OptIn(InternalKandraApi::class)`. The DataStax driver is an `api` dependency of `kandra-test`, so `CqlSession`/`BatchStatement` resolve in test code.
+- Setup your test module needs (JUnit does not come transitively): `org.junit.jupiter:junit-jupiter` with `tasks.test { useJUnitPlatform() }`, and Testcontainers
+  `1.21.4`+ for `KandraTestcontainers` (1.20.x cannot connect to current Docker). Calling `SchemaRegistry.clear()` directly still needs
+  `@OptIn(InternalKandraApi::class)` — prefer `KandraTestUtils.reset()`.
 - `KandraTestcontainers` — ready-to-use ScyllaDB/Cassandra Testcontainers setup.
   `KandraTestcontainers.freshKeyspace(User::class, ...)` creates an isolated, randomly-named
   keyspace per test class against one shared container per JVM; call `.close()` in `@AfterEach`.

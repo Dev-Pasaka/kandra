@@ -31,3 +31,23 @@ subprojects {
 
     apply(plugin = "publish")
 }
+
+// GH #179: these modules expose DataStax driver types (CqlSession, BatchStatement, ...) in their public
+// API, so the driver must be an `api` dependency or consumers fail to compile against them. This guard
+// fails `check` if someone flips it back to `implementation`.
+val driverApiModules = setOf("kandra-runtime", "kandra-ktor", "kandra-test")
+subprojects {
+    if (name in driverApiModules) {
+        val verifyDriverIsApi = tasks.register("verifyDriverIsApi") {
+            val apiDeps = provider {
+                configurations.getByName("apiElements").allDependencies.map { "${it.group}:${it.name}" }
+            }
+            doLast {
+                check("com.datastax.oss:java-driver-core" in apiDeps.get()) {
+                    "$path must declare the DataStax driver as `api` (it appears in the module's public API); found: ${apiDeps.get()}"
+                }
+            }
+        }
+        tasks.named("check") { dependsOn(verifyDriverIsApi) }
+    }
+}

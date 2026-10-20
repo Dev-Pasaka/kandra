@@ -10,7 +10,7 @@ dependencies {
     // (TableSchema, repositories' constructor params, etc.) -- api, not implementation,
     // so a consumer depending on kandra-runtime alone can compile against them (GH #152).
     api(project(":kandra-core"))
-    implementation(libs.datastax.driver)
+    api(libs.datastax.driver)
     implementation(libs.kotlin.reflect)
     implementation(libs.coroutines.core)
     implementation(libs.coroutines.jdk8)
