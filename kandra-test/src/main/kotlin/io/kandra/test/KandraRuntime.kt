@@ -40,12 +40,29 @@ class KandraRuntime internal constructor(val session: CqlSession) : AutoCloseabl
     override fun close() {
         scope.cancel("KandraRuntime test instance closed")
     }
+
+    /**
+     * [close], then [KandraTestUtils.reset] — for an `@AfterEach` that wants both, since schema
+     * registration is process-global and [close] deliberately leaves it alone.
+     */
+    fun closeAndReset() {
+        close()
+        KandraTestUtils.reset()
+    }
 }
 
 /**
  * Factory object for creating in-memory Kandra runtimes suitable for unit tests.
  */
 object KandraTestUtils {
+
+    /**
+     * Clears Kandra's process-global schema registry so the next test starts clean. Call from `@AfterEach`.
+     * This is the public, stable way to do what `SchemaRegistry.clear()` does — `SchemaRegistry` itself is an
+     * internal API and needs an `@OptIn(InternalKandraApi::class)` to call directly.
+     */
+    @OptIn(InternalKandraApi::class)
+    fun reset() = SchemaRegistry.clear()
 
     /**
      * Registers [classes] in [SchemaRegistry] and returns a [KandraRuntime] backed

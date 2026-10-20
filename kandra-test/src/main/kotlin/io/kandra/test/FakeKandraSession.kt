@@ -45,6 +45,30 @@ class FakeKandraSession : CqlSession {
     /** Returns all [BatchStatement] instances that were executed via [execute]. */
     fun capturedBatches(): List<BatchStatement> = capturedStatementsList.filterIsInstance<BatchStatement>()
 
+    /**
+     * Public read view of every statement executed synchronously via [execute], in call order, with its
+     * CQL text and positionally bound values. A `BatchStatement` is flattened into its child statements
+     * (in batch order); use [capturedBatchViews] to keep batch boundaries.
+     *
+     * In [CapturedStatement.values], a value that was bound as CQL `null` (e.g. `saveWithNulls`, which
+     * writes a tombstone) reads back as Kotlin `null`, while a position that was never bound or was
+     * explicitly unset (a plain `save()` of a `null` field, which writes no tombstone) reads back as
+     * [FakeUnset] — those are different CQL writes, see [CapturedStatement.isUnset].
+     */
+    fun capturedStatementViews(): List<CapturedStatement> =
+        capturedStatementsList.flatMap { describe(it) }
+
+    /** One entry per captured [BatchStatement], each holding that batch's child statements in order. */
+    fun capturedBatchViews(): List<List<CapturedStatement>> =
+        capturedBatches().map { describe(it) }
+
+    private fun describe(statement: Statement<*>): List<CapturedStatement> = when (statement) {
+        is BatchStatement -> statement.flatMap { describe(it) }
+        is FakeBoundStatement -> listOf(CapturedStatement(statement.query, statement.boundValues()))
+        is SimpleStatement -> listOf(CapturedStatement(statement.query, statement.positionalValues))
+        else -> listOf(CapturedStatement(statement.toString(), emptyList()))
+    }
+
     /** Clears all captured statements/batches. */
     fun reset() = capturedStatementsList.clear()
 
@@ -99,4 +123,16 @@ class FakeKandraSession : CqlSession {
     override fun forceCloseAsync(): CompletionStage<Void> = CompletableFuture.completedFuture(null)
 
     override fun isClosed(): Boolean = false
+}
+
+/**
+ * A captured statement as seen by a test: the CQL text and the positional values bound to it.
+ *
+ * Returned by [FakeKandraSession.capturedStatementViews] / [FakeKandraSession.capturedBatchViews]. [values] holds
+ * the bound value verbatim at each position (no CQL type encoding happens in the fake); [FakeUnset] marks a position
+ * that was never bound or was explicitly unset, as opposed to Kotlin `null`, which is a real CQL `null` bind.
+ */
+data class CapturedStatement(val cql: String, val values: List<Any?>) {
+    /** True if position [index] was never bound or was explicitly unset (no tombstone), as opposed to bound to `null`. */
+    fun isUnset(index: Int): Boolean = values.getOrNull(index) === FakeUnset
 }

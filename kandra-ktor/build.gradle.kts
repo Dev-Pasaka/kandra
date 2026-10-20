@@ -13,7 +13,7 @@ dependencies {
     api(project(":kandra-core"))
     api(project(":kandra-runtime"))
     api(libs.ktor.server.core)
-    implementation(libs.datastax.driver)
+    api(libs.datastax.driver)
     implementation(libs.ktor.server.host.common)
     implementation(libs.coroutines.core)
     implementation(libs.kotlin.logging)
