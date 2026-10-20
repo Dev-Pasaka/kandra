@@ -13,3 +13,5 @@ No way for an entity to declare its keyspace.
 ## Acceptance
 
 Null keyspace => DDL identical to today. Unit tests for annotation parsing, validation errors and DDL.
+
+See GH #164, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).

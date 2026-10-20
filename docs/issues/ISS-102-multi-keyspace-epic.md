@@ -13,3 +13,5 @@ Tracks ISS-103..ISS-111. Design decisions are fixed in the plan doc.
 ## Acceptance
 
 All plan-doc Definition-of-done items verified on the live Scylla Cloud cluster.
+
+See GH #163, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).

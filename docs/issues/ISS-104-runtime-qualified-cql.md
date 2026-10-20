@@ -17,3 +17,5 @@ Use `qualifiedTableName` in StatementBuilder, BatchEngine, QueryExecutor, query 
 ## Acceptance
 
 Null-keyspace CQL byte-identical (existing tests unchanged); cloud tests across two keyspaces.
+
+See GH #165, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).

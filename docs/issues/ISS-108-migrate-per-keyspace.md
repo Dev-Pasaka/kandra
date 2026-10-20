@@ -15,3 +15,5 @@ Runner takes a target keyspace (default = session keyspace); bookkeeping tables 
 ## Acceptance
 
 Cloud test: independent migration histories in two keyspaces.
+
+See GH #168, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).

@@ -15,3 +15,5 @@ Codegen emits qualified names for keyspaced entities; USER_GUIDE, README, featur
 ## Acceptance
 
 Codegen tests; docs describe config, annotation, precedence, non-goals.
+
+See GH #170, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).

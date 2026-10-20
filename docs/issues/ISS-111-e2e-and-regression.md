@@ -13,3 +13,5 @@ Full `./gradlew build` plus two-keyspace E2E on the cloud cluster; cleanup check
 ## Acceptance
 
 Definition of done in the plan doc.
+
+See GH #171, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).

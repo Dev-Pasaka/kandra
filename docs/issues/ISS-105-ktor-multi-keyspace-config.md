@@ -16,3 +16,5 @@
 ## Acceptance
 
 Existing config unchanged; cloud tests for AUTO_CREATE/AUTO_MIGRATE/VALIDATE across keyspaces; one `CqlSession` only.
+
+See GH #166, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).

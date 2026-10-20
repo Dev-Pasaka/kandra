@@ -13,3 +13,5 @@ Integration tests rely on Testcontainers (a local Docker daemon). The multi-keys
 ## Acceptance
 
 Harness usable by all agents; no credentials in repo; baseline report committed under docs/.
+
+See GH #169, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).

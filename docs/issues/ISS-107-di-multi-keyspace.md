@@ -19,3 +19,5 @@ Koin + Kodein: correct bindings, duplicate-name guard retained.
 ## Acceptance
 
 Tests resolving repositories for entities in two keyspaces.
+
+See GH #167, [PR #172](https://github.com/Dev-Pasaka/kandra/pull/172).
