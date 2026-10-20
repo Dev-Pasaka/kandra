@@ -1,5 +1,5 @@
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-    kotlinOptions.freeCompilerArgs += listOf(
+    compilerOptions.freeCompilerArgs.addAll(
         "-opt-in=io.kandra.core.InternalKandraApi",
         "-opt-in=io.kandra.core.ExperimentalKandraApi"
     )

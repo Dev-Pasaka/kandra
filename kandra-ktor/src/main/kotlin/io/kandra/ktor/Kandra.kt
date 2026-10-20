@@ -62,9 +62,8 @@ private const val DDL_CLAIM_POLL_MS = 200L
 /**
  * Ktor plugin that wires ScyllaDB/Cassandra via the DataStax Java driver.
  *
- * Built and tested against Ktor 2.3.x (`ktor-server-core` 2.3.13, see `gradle.properties`'
- * `ktorVersion`). Ktor 3.x is untested — it restructured parts of the plugin-installation API, so
- * compatibility isn't assumed; see GH #155 (documentation) and GH #160 (the real 3.x compatibility pass).
+ * Built and tested against Ktor 3.6.x (`ktor-server-core` 3.6.0, see `gradle.properties`'
+ * `ktorVersion`). Ktor 2.x is not supported; see GH #160.
  *
  * ```kotlin
  * install(Kandra) {
@@ -326,7 +325,7 @@ val Kandra: ApplicationPlugin<KandraConfig> =
         // shutdown-triggering thread. Because of that contract, this hook must still occupy the
         // calling thread until the drain finishes or times out — ApplicationStopped (which closes
         // the session) must not run until this returns, and there's no suspend-aware variant of
-        // this hook in Ktor 2.3.13's monitor API to restructure onto instead.
+        // this hook in Ktor 3.6.0's monitor API to restructure onto instead.
         //
         // What we control is *how* we occupy the thread while waiting: rather than a raw
         // `Thread.sleep(50)` busy-wait loop with a manually computed deadline, poll with suspending

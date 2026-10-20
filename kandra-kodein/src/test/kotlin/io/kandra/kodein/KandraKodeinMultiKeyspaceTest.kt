@@ -15,6 +15,7 @@ import io.kandra.runtime.repository.KandraSuspendRepository
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import kotlinx.coroutines.runBlocking
 import io.ktor.server.testing.testApplication
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -62,7 +63,7 @@ class KandraKodeinMultiKeyspaceTest {
 
         testApplication {
             application { kandraKodein() }
-            val thrown = assertThrows(Throwable::class.java) { startApplication() }
+            val thrown = assertThrows(Throwable::class.java) { runBlocking { startApplication() } }
             val ex = generateSequence(thrown) { it.cause }.filterIsInstance<KandraSchemaException>().firstOrNull()
             assertNotNull(ex, "Expected KandraSchemaException, got: $thrown")
             val msg = ex!!.message!!

@@ -16,3 +16,15 @@ include(
     "kandra-migrate",
     "kandra-jakarta"
 )
+
+// CI compatibility matrix: `-PktorVersionOverride=<version>` builds and tests against a different
+// Ktor 3.x than the one pinned in gradle/libs.versions.toml (GH #160). Unset for normal builds.
+providers.gradleProperty("ktorVersionOverride").orNull?.let { override ->
+    dependencyResolutionManagement {
+        versionCatalogs {
+            create("libs") {
+                version("ktor", override)
+            }
+        }
+    }
+}

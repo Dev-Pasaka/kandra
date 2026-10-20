@@ -16,6 +16,7 @@ import io.kandra.runtime.repository.KandraRepository
 import io.kandra.runtime.repository.KandraSuspendRepository
 import io.kandra.test.FakeKandraSession
 import io.ktor.server.application.Application
+import kotlinx.coroutines.runBlocking
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +60,7 @@ class KandraKodeinQualifierCollisionTest {
             }
 
             val thrown = assertThrows(Throwable::class.java) {
-                startApplication()
+                runBlocking { startApplication() }
             }
 
             val schemaException = generateSequence(thrown) { it.cause }
