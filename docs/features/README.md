@@ -1,7 +1,7 @@
 # Kandra — Feature Reference
 
 One file per feature area. Start here, follow the links. Describes the current branch: the released version
-is 0.4.8; multi-keyspace support (see [changelog 0.5.0](../changelog/0.5.0.md)) is proposed and not yet released.
+is 0.5.0 (see [changelog 0.5.0](../changelog/0.5.0.md)).
 
 | Area | File |
 |---|---|

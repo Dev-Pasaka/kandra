@@ -93,7 +93,7 @@ against Ktor 3 in CI, and the Ktor-facing modules are also re-tested in a CI mat
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("com.kandraorm.kandra:kandra-bom:0.4.8"))
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.0"))
     implementation("com.kandraorm.kandra:kandra-ktor")
     implementation("com.kandraorm.kandra:kandra-koin")   // or kandra-kodein
     ksp("com.kandraorm.kandra:kandra-codegen")           // optional — type-safe table objects
@@ -369,7 +369,7 @@ install(Kandra) {
 
 ## Multiple Keyspaces
 
-*Unreleased: proposed for 0.5.0 (the published artifact is 0.4.8).*
+*Added in 0.5.0.*
 
 One `install(Kandra)`, one `CqlSession` (one connection pool), many keyspaces. The keyspace is a
 property of the **entity**, set at compile time:

@@ -2,7 +2,7 @@
 
 Kandra is a Kotlin ORM for ScyllaDB/Cassandra, shipped as a Ktor `ApplicationPlugin`. It maps Kotlin data classes to ScyllaDB tables and provides type-safe repositories, automatic schema management, optimistic locking, soft delete, query caching, and more.
 
-> **Version:** 0.4.8 (the Multiple Keyspaces and `disableTablets` sections describe the unreleased 0.5.0 work) · **Kotlin:** 2.1.21 · **Driver:** DataStax Java Driver 4.17.0
+> **Version:** 0.5.0 · **Kotlin:** 2.3.21 · **Ktor:** 3.6 · **Driver:** DataStax Java Driver 4.17.0
 
 ---
 
@@ -79,7 +79,7 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("com.kandraorm.kandra:kandra-bom:0.4.8"))
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.0"))
     implementation("com.kandraorm.kandra:kandra-ktor")       // Ktor plugin (required)
     implementation("com.kandraorm.kandra:kandra-runtime")    // repositories and batch engine
     implementation("com.kandraorm.kandra:kandra-core")       // annotations and schema model
