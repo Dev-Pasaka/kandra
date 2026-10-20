@@ -21,7 +21,7 @@ All are `RUNTIME` retention, read via `kotlin.reflect.full.findAnnotation` in `S
 
 | Annotation | Target | Signature | Notes |
 |---|---|---|---|
-| `@ScyllaTable` | Class | `(name: String, gcGraceSeconds: Int = -1)` | Required — `SchemaRegistry.register` throws `KandraSchemaException` if absent. `gcGraceSeconds = -1` (the default) means "omit `WITH gc_grace_seconds`, use ScyllaDB's default"; any value `>= 0` is emitted verbatim in DDL. |
+| `@ScyllaTable` | Class | `(name: String, gcGraceSeconds: Int = -1, keyspace: String = "")` | Required — `SchemaRegistry.register` throws `KandraSchemaException` if absent. `gcGraceSeconds = -1` (the default) means "omit `WITH gc_grace_seconds`, use ScyllaDB's default"; any value `>= 0` is emitted verbatim in DDL. |
 | `@PartitionKey` | Property | `(index: Int = 0)` | At least one required per class. Use distinct `index` values for composite partition keys — columns are sorted by `index` ascending. Two properties sharing the same `index` throws `KandraSchemaException("Duplicate @PartitionKey index $idx on ...")` at registration time. |
 | `@ClusteringKey` | Property | `(order: ClusteringOrder = ASC, index: Int = 0)` | Sorted by `index` ascending. Each key's `order` is emitted per-column in `CLUSTERING ORDER BY (col1 ASC, col2 DESC, ...)`. No duplicate-index validation exists for clustering keys (unlike partition keys) — collisions silently produce whatever `sortedBy` yields. |
 | `@LookupIndex` | Property | `(tableSuffix: String, consistency: LookupConsistency = BATCH)` | Generates schema for a `{tableName}_{tableSuffix}` denormalized lookup table. Two properties on the same class with the same `tableSuffix` throws `KandraSchemaException` mentioning "duplicate" at registration. |
@@ -90,16 +90,27 @@ data class TableSchema(
     val versionColumn: ColumnSchema? = null,
     val isSoftDelete: Boolean = false,
     val softDeleteTtlSeconds: Int? = null,
+    val softDeleteMarkerColumn: ColumnSchema? = null,   // @SoftDelete.markerProperty column; enables findActive()
+    val softDeleteMarkerTtlSeconds: Int? = null,        // > softDeleteTtlSeconds; null iff no marker column
     val gcGraceSeconds: Int? = null,             // null unless @ScyllaTable.gcGraceSeconds >= 0
-    val cacheConfig: CacheResultConfig? = null
-)
+    val cacheConfig: CacheResultConfig? = null,
+    val generatedUuidColumns: List<ColumnSchema> = emptyList(),  // @GeneratedUuid columns
+    val reflection: EntityReflection,            // resolved once at registration (ISS-034)
+    val keyspace: String? = null                 // @ScyllaTable.keyspace; null = the plugin's default keyspace
+) {
+    val qualifiedTableName: String               // tableName, or "$keyspace.$tableName" when keyspace != null
+}
 
 data class LookupTableSchema(
     val tableName: String,
     val indexColumn: ColumnSchema,                    // the @LookupIndex-annotated column itself
     val partitionKeyColumns: List<ColumnSchema>,       // primary table's partition keys, for reconstructing the PK
-    val consistency: LookupConsistency
-)
+    val consistency: LookupConsistency,
+    val clusteringKeyColumns: List<ColumnSchema> = emptyList(),  // primary table's clustering keys (ISS-029)
+    val keyspace: String? = null                                  // inherited from the parent entity
+) {
+    val qualifiedTableName: String
+}
 
 data class CacheResultConfig(val ttlSeconds: Int, val maxSize: Long)
 ```
@@ -358,8 +369,10 @@ fun interface KandraMetrics {
 
 SAM interface, no `@ExperimentalKandraApi` gate (unlike `KandraAuthProvider`/`KandraEventListener`). Called
 after every query execution on both blocking and suspend paths. `operation` is a free-form string —
-per the KDoc, the values actually emitted are one of: `"save"`, `"update"`, `"delete"`, `"saveAll"`,
-`"deleteAll"`, `"batch"` (that's documentation of caller behavior, not an enforced closed set — `kandra-core`
+per the KDoc, the values documented are `"save"`, `"update"`, `"delete"`, `"saveAll"`,
+`"deleteAll"`, `"batch"`; the runtime also emits `saveIfNotExists`, `saveWithNulls`, `updateForce`, `deleteById`,
+`append`, `remove`, `put`, `increment`, `decrement` and `eventualLookupInsert`, and `table` is `keyspace.table` for
+entities with a keyspace (that's documentation of caller behavior, not an enforced closed set — `kandra-core`
 itself places no constraint on the string).
 
 ```kotlin

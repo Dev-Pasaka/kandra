@@ -33,7 +33,7 @@ names — when in doubt, they say so explicitly rather than guessing.
 
 | Annotation | Target | Notes |
 |---|---|---|
-| `@ScyllaTable(name, gcGraceSeconds = -1)` | Class | Maps to a CQL table. `gcGraceSeconds` controls tombstone survival time. |
+| `@ScyllaTable(name, gcGraceSeconds = -1, keyspace = "")` | Class | Maps to a CQL table. `gcGraceSeconds` controls tombstone survival time. `keyspace` (blank = the plugin's default keyspace) places the entity in another keyspace served by the same `install(Kandra)`; it must be the default or declared with `keyspace("x") { }`. |
 | `@PartitionKey(index = 0)` | Property | Use `index` for composite partition keys — multiple fields share the same tuple. |
 | `@ClusteringKey(order = ASC, index = 0)` | Property | Clustering column. |
 | `@LookupIndex(tableSuffix, consistency = BATCH)` | Property | Generates a denormalized `{table}_{suffix}` lookup table. `BATCH` = atomic with the primary write; `EVENTUAL` = fire-and-forget after commit. High-cardinality query fields (email, phone) should use this, not `@SecondaryIndex`. |
