@@ -1,0 +1,209 @@
+<!doctype html>
+<html class="no-js">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <title>KandraMultiDcTestcontainers</title>
+<link href="../../../images/logo-icon.svg" rel="icon" type="image/svg">    <script>var pathToRoot = "../../../";</script>
+    <script>document.documentElement.classList.replace("no-js","js");</script>
+    <script>const storage = localStorage.getItem("dokka-dark-mode")
+    if (storage == null) {
+        const osDarkSchemePreferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (osDarkSchemePreferred === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    } else {
+        const savedDarkMode = JSON.parse(storage)
+        if(savedDarkMode === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    }
+    </script>
+<script type="text/javascript" src="https://unpkg.com/kotlin-playground@1/dist/playground.min.js" async></script>
+<script type="text/javascript" src="../../../scripts/sourceset_dependencies.js" async></script>
+<link href="../../../styles/style.css" rel="Stylesheet">
+<link href="../../../styles/main.css" rel="Stylesheet">
+<link href="../../../styles/prism.css" rel="Stylesheet">
+<link href="../../../styles/logo-styles.css" rel="Stylesheet">
+<link href="../../../styles/font-jb-sans-auto.css" rel="Stylesheet">
+<script type="text/javascript" src="../../../scripts/clipboard.js" async></script>
+<script type="text/javascript" src="../../../scripts/navigation-loader.js" async></script>
+<script type="text/javascript" src="../../../scripts/platform-content-handler.js" async></script>
+<script type="text/javascript" src="../../../scripts/main.js" defer></script>
+<script type="text/javascript" src="../../../scripts/prism.js" async></script>
+<script type="text/javascript" src="../../../scripts/symbol-parameters-wrapper_deferred.js" defer></script></head>
+<body>
+    <div class="root">
+<nav class="navigation" id="navigation-wrapper">
+    <div class="navigation--inner">
+        <div class="navigation-title">
+            <button class="menu-toggle" id="menu-toggle" type="button">toggle menu</button>
+            <div class="library-name">
+<a class="library-name--link" href="../../../index.html">
+                            kandra
+                    </a>            </div>
+            <div class="library-version">0.5.0
+            </div>
+        </div>
+        <div class="filter-section" id="filter-section">
+                <button class="platform-tag platform-selector jvm-like" data-active="" data-filter=":kandra-test:dokkaHtmlPartial/main">jvm</button>
+        </div>
+    </div>
+    <div class="navigation-controls">
+        <button class="navigation-controls--btn navigation-controls--theme" id="theme-toggle-button" type="button">switch theme</button>
+        <div class="navigation-controls--btn navigation-controls--search" id="searchBar" role="button">search in API</div>
+    </div>
+</nav>
+        <div id="container">
+            <div class="sidebar" id="leftColumn">
+                <div class="sidebar--inner" id="sideMenu"></div>
+            </div>
+            <div id="main">
+<div class="main-content" data-page-type="classlike" id="content" pageids="kandra-test::io.kandra.test/KandraMultiDcTestcontainers///PointingToDeclaration//1710684214">
+  <div class="breadcrumbs"><a href="../../index.html">kandra-test</a><span class="delimiter">/</span><a href="../index.html">io.kandra.test</a><span class="delimiter">/</span><span class="current">KandraMultiDcTestcontainers</span></div>
+  <div class="cover ">
+    <h1 class="cover"><span>Kandra</span><wbr><span>Multi</span><wbr><span>Dc</span><wbr><span><span>Testcontainers</span></span></h1>
+    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">object </span><a href="index.html">KandraMultiDcTestcontainers</a></div><p class="paragraph">A real two-datacenter, one-node-per-DC Cassandra topology for DC-aware load-balancing/failover tests (GH #84 / ISS-076), backed by <code class="lang-kotlin">multidc-docker-compose.yml</code> (this module's <code class="lang-kotlin">src/main/resources</code>) via Testcontainers' <span data-unresolved-link="org.testcontainers.containers/ComposeContainer///PointingToDeclaration/">ComposeContainer</span>. Mirrors <a href="../-kandra-testcontainers/index.html">KandraTestcontainers</a>'s lazy-singleton, JVM-shared style -- one topology per JVM, reused across every test class that touches it, rather than a fresh cluster per test.</p><h3 class="">Why one node per DC (2 containers total), not 2+ nodes per DC</h3><p class="paragraph">A single node per DC is the minimum topology that has the property this fixture exists to test: two <i>distinct</i> datacenters a client can genuinely fail over between, with <code class="lang-kotlin">NetworkTopologyStrategy</code> replication that means something (as opposed to a single-DC cluster where every "DC" in config is cosmetic). Adding a second node per DC would let within-DC token-aware routing be exercised too, but that's not what this issue is about -- it's about cross-DC failover/load-balancing -- and real multi-node gossip convergence is significantly slower and flakier under Testcontainers than a two-single-node topology (observed directly while building this fixture: a <i>single</i> node with no custom config already takes ~15-20s to reach <code class="lang-kotlin">Startup complete</code>; two nodes gossiping into one cluster took closer to a minute). Doubling the node count per DC would roughly double that again, for coverage this issue doesn't ask for. If a future issue specifically needs multi-node-per-DC behavior (e.g. real token-range replica placement within a DC), scale <code class="lang-kotlin">multidc-docker-compose.yml</code> up rather than replacing this fixture.</p><h3 class="">Topology</h3><ul><li><p class="paragraph"><code class="lang-kotlin">cassandra-dc1</code> / <code class="lang-kotlin">cassandra-dc2</code>, both plain <code class="lang-kotlin">cassandra:4.1</code> (matching <a href="../-kandra-testcontainers/index.html">KandraTestcontainers</a>'s single-node convention -- no custom <code class="lang-kotlin">cassandra.yaml</code>).</p></li><li><p class="paragraph"><code class="lang-kotlin">GossipingPropertyFileSnitch</code> via <code class="lang-kotlin">CASSANDRA_ENDPOINT_SNITCH</code>, DC/rack via <code class="lang-kotlin">CASSANDRA_DC</code>/ <code class="lang-kotlin">CASSANDRA_RACK</code>, both nodes seeded from <code class="lang-kotlin">cassandra-dc1</code> via <code class="lang-kotlin">CASSANDRA_SEEDS</code> -- so they gossip into one cluster rather than forming two independent single-node clusters that happen to share a Docker network. <code class="lang-kotlin">cassandra-dc2</code> waits for <code class="lang-kotlin">cassandra-dc1</code> to report <code class="lang-kotlin">service_healthy</code> before its own container even starts, since racing dc2's bootstrap against dc1's gossip start-up is a likely source of flakiness in a from-scratch two-node cluster.</p></li><li><p class="paragraph">See <code class="lang-kotlin">multidc-docker-compose.yml</code> itself for the exact environment/healthcheck configuration.</p></li></ul><h3 class="">Usage</h3><div class="sample-container"><pre><code class="block lang-kotlin" theme="idea">class DcFailoverTest {<br>    private val db = KandraMultiDcTestcontainers.freshNetworkTopologyKeyspace(User::class)<br>    @AfterEach fun cleanup() { db.close(); KandraMultiDcTestcontainers.unpauseAll() }<br><br>    @Test fun `fails over to dc2 when dc1 is unreachable`() {<br>        KandraMultiDcTestcontainers.pause(KandraMultiDcTestcontainers.DC1)<br>        // ... exercise install(Kandra) with loadBalancing.dcAwareFailover / failover.onLocalDcUnavailable ...<br>    }<br>}</code></pre><span class="top-right-position"><span class="copy-icon"></span><div class="copy-popup-wrapper popup-to-left"><span class="copy-popup-icon"></span><span>Content copied to clipboard</span></div></span></div></div></div>
+  </div>
+  <div class="tabbedcontent">
+    <div class="tabs-section" tabs-section="tabs-section"><button class="section-tab" data-active="" data-togglable="CONSTRUCTOR,TYPE,PROPERTY,FUNCTION">Members</button></div>
+    <div class="tabs-section-body">
+      <div data-togglable="PROPERTY">
+        <h2 class="">Properties</h2>
+        <div class="table"><a data-name="809523371%2FProperties%2F1710684214" anchor-label="compose" id="809523371%2FProperties%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="compose.html"><span><span>compose</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="809523371%2FProperties%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="compose.html">compose</a><span class="token operator">: </span><span data-unresolved-link="org.testcontainers.containers/ComposeContainer///PointingToDeclaration/">ComposeContainer</span></div><div class="brief "><p class="paragraph">The compose-managed topology -- started once per JVM, on first access, exactly like <a href="../-kandra-testcontainers/container.html">KandraTestcontainers.container</a>'s <code class="lang-kotlin">by lazy { ... start() }</code> pattern. Startup timeouts are generous (see class doc: two-node gossip convergence from cold is meaningfully slower than the single-node case).</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-943414613%2FProperties%2F1710684214" anchor-label="DC1" id="-943414613%2FProperties%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-d-c1.html"><span><span>DC1</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-943414613%2FProperties%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">const </span><span class="token keyword">val </span><a href="-d-c1.html">DC1</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-912394806%2FProperties%2F1710684214" anchor-label="DC2" id="-912394806%2FProperties%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-d-c2.html"><span><span>DC2</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-912394806%2FProperties%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">const </span><span class="token keyword">val </span><a href="-d-c2.html">DC2</a><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="FUNCTION">
+        <h2 class="">Functions</h2>
+        <div class="table"><a data-name="-543617033%2FFunctions%2F1710684214" anchor-label="contactPoint" id="-543617033%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="contact-point.html"><span>contact</span><wbr><span><span>Point</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-543617033%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="contact-point.html"><span class="token function">contactPoint</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">dc<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/net/InetSocketAddress.html">InetSocketAddress</a></div><div class="brief "><p class="paragraph">The real CQL contact point for <a href="contact-point.html">dc</a> (<code class="lang-kotlin">DC1</code>/<code class="lang-kotlin">DC2</code>) once <a href="compose.html">compose</a> has started.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-457538304%2FFunctions%2F1710684214" anchor-label="freshNetworkTopologyKeyspace" id="-457538304%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="fresh-network-topology-keyspace.html"><span>fresh</span><wbr><span>Network</span><wbr><span>Topology</span><wbr><span><span>Keyspace</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-457538304%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="fresh-network-topology-keyspace.html"><span class="token function">freshNetworkTopologyKeyspace</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter "><span class="token keyword">vararg </span>classes<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.reflect/-k-class/index.html">KClass</a><span class="token operator">&lt;</span><span class="token operator">*</span><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">localDatacenter<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token operator"> = </span>DC1<span class="token punctuation">, </span></span><span class="parameter ">dcReplicationMap<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-map/index.html">Map</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">&gt;</span><span class="token operator"> = </span>mapOf(DC1 to 1, DC2 to 1)<span class="token punctuation">, </span></span><span class="parameter ">statementBuilderConsistencyConfig<span class="token operator">: </span><a href="../../../kandra-runtime/io.kandra.runtime/-consistency-config/index.html">ConsistencyConfig</a><span class="token operator"> = </span>ConsistencyConfig()</span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="../-kandra-runtime-handle/index.html">KandraRuntimeHandle</a></div><div class="brief "><p class="paragraph">Creates a fresh keyspace with genuine <code class="lang-kotlin">NetworkTopologyStrategy</code> replication across both DCs (default <code class="lang-kotlin">{'dc1': 1, 'dc2': 1}</code> -- one real replica per DC, the most RF a one-node-per-DC topology can actually serve reads/writes at; pass a higher factor only for metadata-only assertions, mirroring <a href="../-kandra-testcontainers/fresh-keyspace.html">KandraTestcontainers.freshKeyspace</a>'s identical caveat), registers <a href="fresh-network-topology-keyspace.html">classes</a>, and creates their tables against the DC named by <a href="fresh-network-topology-keyspace.html">localDatacenter</a>.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="647110557%2FFunctions%2F1710684214" anchor-label="pause" id="647110557%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="pause.html"><span><span>pause</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="647110557%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="pause.html"><span class="token function">pause</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">dc<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Pauses the container backing <a href="pause.html">dc</a> via the Docker API (<code class="lang-kotlin">docker pause</code>), simulating "this datacenter is unreachable" for failover tests without tearing down and losing the ability to bring it back.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1807164572%2FFunctions%2F1710684214" anchor-label="unpause" id="-1807164572%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="unpause.html"><span><span>unpause</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1807164572%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="unpause.html"><span class="token function">unpause</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">dc<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Reverses <a href="pause.html">pause</a> for <a href="unpause.html">dc</a>. Safe to call even if <a href="unpause.html">dc</a> isn't currently paused.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-2115403623%2FFunctions%2F1710684214" anchor-label="unpauseAll" id="-2115403623%2FFunctions%2F1710684214" data-filterable-set=":kandra-test:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-test:dokkaHtmlPartial/main" data-filterable-set=":kandra-test:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="unpause-all.html"><span>unpause</span><wbr><span><span>All</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-2115403623%2FFunctions%2F1710684214"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="unpause-all.html"><span class="token function">unpauseAll</span></a><span class="token punctuation">(</span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Unpauses both DCs -- a safe, idempotent reset to call from <code class="lang-kotlin">@AfterEach</code> regardless of what a test paused.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      <div class="footer">
+        <span class="go-to-top-icon"><a href="#content" id="go-to-top-link"></a></span><span>© 2026 Copyright</span><span class="pull-right"><span>Generated by </span><a href="https://github.com/Kotlin/dokka"><span>dokka</span><span class="padded-icon"></span></a></span>
+      </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
