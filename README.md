@@ -28,7 +28,7 @@ First-class support for denormalized lookup tables, composite partition keys, TT
 | `kandra-kodein` | Kodein DI auto-binding |
 | `kandra-koin` | Koin DI auto-binding |
 | `kandra-codegen` | KSP processor — generates type-safe `*Table` objects |
-| `kandra-test` | `FakeKandraSession` + Testcontainers integration helpers |
+| `kandra-test` | `FakeKandraSession`, Testcontainers integration helpers, and `KandraTestBackend` / `KandraCloud` (switch live tests between Docker and a live cluster) |
 | `kandra-multidc` | Multi-datacenter utilities and documentation — **experimental: not yet validated against a real multi-region cluster** (see [Multi-Datacenter](#multi-datacenter-030) below) |
 | `kandra-migrate` | Versioned, checksum-validated schema migration runner |
 | `kandra-jakarta` | Jakarta Bean Validation adapter (`JakartaKandraValidator`) |
@@ -82,7 +82,7 @@ authoring a schema migration.
 ## Quick Start
 
 **Built and tested against Ktor 2.3.x.** Ktor 3.x is untested — it restructured parts of the
-plugin-installation API, so compatibility with `kandra-ktor` isn't assumed yet (GH #155).
+plugin-installation API, so compatibility with `kandra-ktor` isn't assumed yet (GH #155; the 3.x compatibility pass is tracked in GH #160).
 
 ### 1. Add dependencies (with BOM)
 
@@ -365,6 +365,8 @@ install(Kandra) {
 
 ## Multiple Keyspaces
 
+*Unreleased: proposed for 0.5.0 (the published artifact is 0.4.8).*
+
 One `install(Kandra)`, one `CqlSession` (one connection pool), many keyspaces. The keyspace is a
 property of the **entity**, set at compile time:
 
@@ -389,11 +391,22 @@ install(Kandra) {
 
 - An entity whose `keyspace` is neither the default nor declared with `keyspace("x") { }` fails
   startup with a `KandraSchemaException` that names the entity and the missing declaration.
+- A blank default `keyspace` is still an error unless at least one `keyspace("x") { }` is declared; then
+  every entity must name a declared keyspace. Declared names must be valid CQL identifiers, unique, and
+  different from the default.
 - Creation, permission checks, DDL (`AUTO_CREATE` / `AUTO_MIGRATE` / `VALIDATE`), `system_schema`
-  lookups and DDL locks all run per keyspace. Lookup tables live in their parent entity's keyspace.
+  lookups and DDL locks all run per keyspace (the default keyspace keeps its original lock name; other
+  keyspaces get their own `<keyspace>.kandra_ddl_locks`). Lookup tables live in their parent entity's keyspace.
+- Generated CQL, metrics labels and log lines use the qualified `keyspace.table` name. Koin/Kodein bindings are
+  per entity (not per keyspace); two entities with the same simple name collide even across keyspaces.
+- On tablets-enabled ScyllaDB (e.g. Scylla Cloud) `SimpleStrategy` keyspaces are rejected unless you opt in with
+  `SimpleStrategy(rf, disableTablets = true)` (ScyllaDB only); clusters with
+  `tablets_mode_for_new_keyspaces: enforced` reject `SimpleStrategy` entirely, so use `NetworkTopologyStrategy`.
+- `KandraMigrationRunner(session, keyspace = "billing")` keeps `kandra_migrations` per keyspace.
 - **Zero regression:** entities without `keyspace` generate exactly the same unqualified CQL as before.
 - Not supported: choosing a keyspace per call or per tenant at runtime (the keyspace is fixed on the
-  entity), and logged batches spanning keyspaces. See [`docs/features/ktor-plugin.md`](docs/features/ktor-plugin.md#multiple-keyspaces).
+  entity). A `batch { }` that mixes entities from different keyspaces works (covered by
+  `MultiKeyspaceRuntimeIntegrationTest`), with the usual cross-partition logged-batch cost. See [`docs/features/ktor-plugin.md`](docs/features/ktor-plugin.md#multiple-keyspaces).
 
 ---
 
@@ -922,6 +935,16 @@ class UserRepositoryTest {
 
 Each test class gets an isolated `kandra_test_{uuid}` keyspace. The shared `CassandraContainer` starts once per JVM (lazy singleton).
 
+**Choosing the backend.** `KANDRA_TEST_BACKEND=docker` (the default when unset) uses the Testcontainers
+container; `KANDRA_TEST_BACKEND=cloud` points `KandraTestcontainers.freshKeyspace` and anything built on
+`KandraTestBackend` at a live cluster described by the `KANDRA_CLOUD_*` environment variables
+(`KANDRA_CLOUD_CONTACT_POINTS`, `KANDRA_CLOUD_USERNAME`, `KANDRA_CLOUD_PASSWORD`, `KANDRA_CLOUD_LOCAL_DC`,
+and for TLS on port 9142 `KANDRA_CLOUD_TLS`, `KANDRA_CLOUD_CA_PEM` or `KANDRA_CLOUD_TRUSTSTORE`). Credentials
+only ever come from the environment. Tests that use `KandraCloud.assumeConfigured()` are skipped when
+`KANDRA_CLOUD_CONTACT_POINTS` is unset, so contributors without a cluster stay green. In cloud mode the
+keyspaces are named `kt_<tag>_<8 hex>` and are always dropped on close. See
+[`docs/features/testing.md`](docs/features/testing.md).
+
 ---
 
 ## Optimistic Locking (0.4.2)
@@ -993,7 +1016,7 @@ sessionRepo.delete(session)
 > a non-nullable property with no default has no legal value to decode into, and would throw on any
 > read that reaches the row. See [ISS-098](docs/issues/ISS-098-softdelete-non-nullable-decode-throws.md).
 
-`gcGraceSeconds` on `@ScyllaTable` controls how long the tombstoned row's primary key survives before ScyllaDB's compaction reclaims it. For a `findActive()` that filters out soft-deleted rows, add `@SoftDelete(ttlSeconds = ..., markerProperty = "isDeleted")` with a `Boolean` field — see [`docs/features/repositories.md`](docs/features/repositories.md#findactive-soft-delete-entities-only) and [ISS-007](docs/issues/ISS-007-find-active-soft-delete.md). `@LookupIndex` rows on a soft-deleted entity are deliberately kept alive until the entity's own TTL expires, not hard-deleted — see [ISS-030](docs/issues/ISS-030-soft-delete-removes-lookup-rows.md) and [ISS-035](docs/issues/ISS-035-lookupindex-softdelete-storage-growth.md) for the storage-growth implication on high-churn tables combining both annotations.
+`gcGraceSeconds` on `@ScyllaTable` controls how long the tombstoned row's primary key survives before ScyllaDB's compaction reclaims it. For a `findActive()` that filters out soft-deleted rows, add `@SoftDelete(ttlSeconds = ..., markerProperty = "isDeleted")` with a `Boolean` field — see [`docs/features/repositories.md`](docs/features/repositories.md#findactive-softdelete-entities-only) and [ISS-007](docs/issues/ISS-007-find-active-soft-delete.md). `@LookupIndex` rows on a soft-deleted entity are deliberately kept alive until the entity's own TTL expires, not hard-deleted — see [ISS-030](docs/issues/ISS-030-soft-delete-removes-lookup-rows.md) and [ISS-035](docs/issues/ISS-035-lookupindex-softdelete-storage-growth.md) for the storage-growth implication on high-churn tables combining both annotations.
 
 > **The marker column itself also has a TTL now** (`@SoftDelete(markerTtlSeconds = ...)`, defaulting
 > to `ttlSeconds + gcGraceSeconds`) — so a soft-deleted row eventually disappears completely instead
@@ -1129,7 +1152,7 @@ install(Kandra) {
 }
 ```
 
-`recorder` fires after every query (blocking and suspend paths) with the table name, operation (`save`, `update`, `delete`, `saveAll`, `deleteAll`, `batch`), and duration — bridge it into Micrometer, Dropwizard, or any metrics backend you use.
+`recorder` fires after every query (blocking and suspend paths) with the table name (`keyspace.table` for entities that declare a `keyspace`), the operation (`save`, `saveIfNotExists`, `update`, `delete`, `deleteById`, `saveAll`, `batch`, `append`, `increment`, ...; see the User Guide for the full list), and duration — bridge it into Micrometer, Dropwizard, or any metrics backend you use.
 
 ---
 

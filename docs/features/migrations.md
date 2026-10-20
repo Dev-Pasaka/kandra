@@ -85,4 +85,8 @@ KandraMigrationRunner(session, keyspace = "billing").run(V1_CreateInvoices)
 KandraMigrationRunner(session).run(V1_CreateUsers)   // unchanged: the session keyspace
 ```
 
-Without a keyspace, behaviour is identical to before.
+Without a keyspace, behaviour is identical to before. The keyspace must already exist, and an invalid name throws `IllegalArgumentException`. The constructor is
+`KandraMigrationRunner(session, staleClaimThreshold = Duration.ofMinutes(10), keyspace: String? = null)`. A
+migration may override `KandraMigration.up(session, keyspace)` to learn the target keyspace (the default
+delegates to `up(session)`, so existing migrations and their checksums are unchanged). The shared session is not
+switched to that keyspace: migration CQL must qualify its own table names (`CREATE TABLE billing.invoices ...`).

@@ -12,3 +12,54 @@
   covering CRUD, `saveAll` auto-chunking, `@Version` optimistic locking, `@SoftDelete` +
   `findActive()`, and graceful shutdown — added in
   [ISS-013](../issues/ISS-013-no-integration-tests.md).
+
+## Choosing a backend: `KandraTestBackend` (docker | cloud)
+
+`KandraTestBackend` is the shared connection provider for live-cluster tests. It exposes the contact
+points (`contactPointsCsv`), `localDatacenter`, credentials, TLS truststore, `newSession(keyspace)`,
+`keyspaceName(tag)`, `createKeyspace` / `dropKeyspace` / `freshKeyspace(tag, rf)` and `effectiveRf(rf)`, so a
+test never reads `KandraTestcontainers.container` directly. Every session it builds uses 30 s request and
+schema timeouts (the driver's 2 s default is too tight for DDL against a cold container or over a WAN).
+
+`KANDRA_TEST_BACKEND` selects the backend:
+
+- unset or `docker` (default): the shared Testcontainers Cassandra, exactly as before.
+- `cloud`: the cluster described by the `KANDRA_CLOUD_*` environment. Fails fast if
+  `KANDRA_CLOUD_CONTACT_POINTS` is unset. Keyspaces are named `kt_<tag>_<8 hex>`, RF 1 is bumped to 3
+  (`effectiveRf`), and `SimpleStrategy` keyspaces get `AND tablets = {'enabled': false}`.
+
+`KandraTestcontainers.freshKeyspace(...)` honours the switch. After starting the container,
+`KandraTestcontainers.container` waits until CQL is actually serving (query plus DDL probe, 3 minute deadline).
+
+### `KandraCloud` environment
+
+| Variable | Meaning |
+|---|---|
+| `KANDRA_CLOUD_CONTACT_POINTS` | Comma-separated `host[:port]` (port defaults to 9042). Unset means unconfigured. |
+| `KANDRA_CLOUD_USERNAME` / `KANDRA_CLOUD_PASSWORD` | Plain auth credentials (used when both are set). |
+| `KANDRA_CLOUD_LOCAL_DC` | Local datacenter; defaults to `AWS_US_EAST_1` when unset. |
+| `KANDRA_CLOUD_TLS` | `true` enables TLS; contact-point port 9042 is rewritten to 9142. (`KANDRA_CLOUD_SSL=true` is the legacy spelling: TLS with the JVM trust store.) |
+| `KANDRA_CLOUD_CA_PEM` | Path to a CA PEM; an in-memory trust store is built from it at runtime. |
+| `KANDRA_CLOUD_TRUSTSTORE` / `KANDRA_CLOUD_TRUSTSTORE_PASSWORD` | Alternative custom trust store. Without either, the JVM default trust store is used. |
+
+Never commit values for these variables (or the cluster's hostnames) to the repository; export them in your shell
+or a gitignored env file. Tests call `KandraCloud.assumeConfigured()` in `@BeforeAll`, so they are skipped, not
+failed, when the cluster is not configured.
+
+```kotlin
+@BeforeAll @JvmStatic fun gate() = KandraCloud.assumeConfigured()
+
+@Test fun works() = KandraCloud.freshKeyspace("smoke").use { ks ->
+    ks.session.execute("CREATE TABLE t (id int PRIMARY KEY)")   // session is bound to ks.name
+}
+```
+
+Rules when pointing tests at a shared cluster: only create keyspaces through these helpers (`kt_` prefix), always
+close the handle so the keyspace is dropped, and never touch keyspaces you did not create. In `install(Kandra)`
+test blocks, the ktor, koin and kodein test source sets use a small `useTestBackend()` helper (a
+`TestBackendConfig.kt` per module, test sources only) that fills in contact points, DC, credentials, TLS and a
+30 s request timeout from `KandraTestBackend`.
+
+Not every suite can run against the cloud: `SslRoundTripIntegrationTest` and the multi-DC suite need their own
+containers, and a few credential-rotation tests skip themselves on cloud. See
+[`docs/test-plan/multi-keyspace-baseline.md`](../test-plan/multi-keyspace-baseline.md) for what has been run where.

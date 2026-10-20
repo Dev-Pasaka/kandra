@@ -1,6 +1,10 @@
 # Multi-keyspace support — implementation plan
 
-**Status:** Planned (branch `feature/multi-keyspace`) · **Epic:** ISS-102
+**Status:** Implemented on branch `feature/multi-keyspace`, not yet released (changelog: [0.5.0](../changelog/0.5.0.md)) · **Epic:** ISS-102
+
+This is the original design record. Where it differs from the current behaviour (notably the *Live-cluster testing*
+section and the codegen row of the phase table), the text below has been corrected; the user-facing reference is
+[ktor-plugin.md](ktor-plugin.md#multiple-keyspaces) and the User Guide.
 
 ## Goal
 
@@ -45,31 +49,30 @@ connection.
 
 ## Live-cluster testing (Scylla Cloud)
 
-No Docker in this environment, so integration tests run against the shared Scylla Cloud cluster.
-Credentials live in the gitignored `/Users/pasaka/Developer/Kandra/.kandra-cloud.env`
-(`source` it; never copy values into code, docs, commits or logs).
+Integration tests run on Docker (Testcontainers) by default. Because the ORM must also be proven against a real
+tablets-enabled ScyllaDB, a second backend targets a shared Scylla Cloud cluster described entirely by
+environment variables (`KANDRA_CLOUD_*`, see [testing.md](testing.md)). Credentials, hostnames and CA files are
+never committed: export them in your shell or a gitignored env file.
 
-Rules for every agent, because the cluster is **shared by parallel agents**:
+Rules for everyone using a shared cluster:
 
 - Create keyspaces named `kt_<task>_<random8>` (lowercase), **always drop them in `finally`/teardown**.
   Never touch any keyspace that doesn't start with `kt_`. Never touch `system*`.
-- Use `SimpleStrategy` RF=1 or 3 only (the cluster is multi-AZ in one DC, not multi-DC).
-  The cluster enables **tablets by default**, and `SimpleStrategy` rejects tablets, so
+- Use `SimpleStrategy` RF=1 or 3 only unless you are testing `NetworkTopologyStrategy` (the cluster is multi-AZ in
+  one DC, not multi-DC). The cluster enables **tablets by default**, and `SimpleStrategy` rejects tablets, so
   `CREATE KEYSPACE ... SimpleStrategy` must end with `AND tablets = {'enabled': false}`
-  (`KandraCloud.freshKeyspace` does this for you).
-- Verified (ISS-109): a single datacenter `AWS_US_EAST_1` (so `KANDRA_CLOUD_LOCAL_DC=AWS_US_EAST_1`
-  is correct), 3 nodes, racks `use1-az4`/`use1-az4`/`use1-az2` (2 distinct AZs), `system.local.release_version`
-  reports 3.0.8 (Scylla's Cassandra-compat version string). Plain username/password on port 9042 works (TLS not required); TLS is also available on 9142
-  (`KANDRA_CLOUD_TLS=true` + `KANDRA_CLOUD_CA_PEM`, harness builds the trust store from the PEM at runtime).
-  RF=1 keyspaces can hit `Unavailable` on this cluster; prefer RF=3.
-- Use the `KandraCloud` harness (kandra-test): `KandraCloud.assumeConfigured()` in `@BeforeAll`
-  (skips when unset), `KandraCloud.freshKeyspace("prefix", rf).use { ks -> ks.session ... }`
-  (creates `kt_<prefix>_<random8>`, always drops it), `KandraCloud.newSession(keyspace?)`.
-  The default driver timeout (2s) is too short for DDL over the WAN; the harness sets 30s.
-  Run: `source /Users/pasaka/Developer/Kandra/.kandra-cloud.env && ./gradlew :<module>:test --tests '<Class>'`.
-- Don't run the whole suite concurrently with others; run only your module's tests plus the
-  cloud tests you add. The full regression run is done once, at integration time (Phase 3).
-- Cloud tests must be skipped (not failed) when `KANDRA_CLOUD_CONTACT_POINTS` is unset, so CI and
+  (`KandraCloud.freshKeyspace` and `SimpleStrategy(rf, disableTablets = true)` do this). Clusters with
+  `tablets_mode_for_new_keyspaces: enforced` reject `SimpleStrategy` entirely; use `NetworkTopologyStrategy`.
+- Verified (ISS-109): a single datacenter (`AWS_US_EAST_1`, the default `KANDRA_CLOUD_LOCAL_DC`), 3 nodes.
+  Plain username/password on port 9042 works; TLS is also available on 9142
+  (`KANDRA_CLOUD_TLS=true` + `KANDRA_CLOUD_CA_PEM`, the harness builds the trust store from the PEM at runtime).
+  RF=1 keyspaces can hit `Unavailable` on this cluster; prefer RF=3 (`KandraTestBackend.effectiveRf` bumps it).
+- Use the harness (kandra-test): `KandraCloud.assumeConfigured()` in `@BeforeAll` (skips when unset),
+  `KandraCloud.freshKeyspace("prefix", rf).use { ks -> ks.session ... }` (creates `kt_<prefix>_<random8>`, always
+  drops it), `KandraCloud.newSession(keyspace?)`, or `KANDRA_TEST_BACKEND=cloud` for tests written against
+  `KandraTestBackend`. The default driver timeout (2s) is too short for DDL over the WAN; the harness sets 30s.
+- Don't run the whole suite concurrently with others; run your module's tests plus the cloud tests you add.
+- Cloud tests are skipped (not failed) when `KANDRA_CLOUD_CONTACT_POINTS` is unset, so CI and
   contributors without access stay green.
 
 ## Phases and parallelism
@@ -101,7 +104,7 @@ once Phase 0 is merged; they meet at integration (Phase 3).
 | 1 | ISS-105 | kandra-ktor | `keyspace(name){}` DSL, per-keyspace create/permissions/DDL/locks/system_schema lookups, validation errors; cloud tests |
 | 1 | ISS-107 | kandra-koin, kandra-kodein | Bindings correct for entities in several keyspaces; tests |
 | 1 | ISS-108 | kandra-migrate | Migrations/`kandra_migrations`/locks per keyspace; tests |
-| 1 | ISS-110 | kandra-codegen, docs | Generated `*Table` objects emit qualified names; USER_GUIDE/README/features docs |
+| 1 | ISS-110 | kandra-codegen, docs | Codegen validates the keyspace identifier (generated `*Table` objects contain no table names, so they are unchanged); USER_GUIDE/README/features docs |
 | 3 | ISS-111 | all | Full regression + two-keyspace end-to-end suite |
 
 ## Definition of done

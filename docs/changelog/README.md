@@ -4,7 +4,7 @@ All notable changes to Kandra, one file per version — newest first.
 
 | Version | Highlights |
 |---|---|
-| [0.5.0 (proposed)](0.5.0.md) | Multi-keyspace support: one `install(Kandra)` and one `CqlSession` serving many keyspaces via `@ScyllaTable(keyspace = ...)` and a `keyspace("x") { }` config block; backward compatible |
+| [0.5.0 (proposed)](0.5.0.md) | Multi-keyspace support: one `install(Kandra)` and one `CqlSession` serving many keyspaces via `@ScyllaTable(keyspace = ...)` and a `keyspace("x") { }` config block; backward compatible. Also: opt-in `SimpleStrategy(disableTablets = true)`, per-keyspace migrations, codegen keyspace validation, and the `KandraTestBackend`/`KandraCloud` test backend. Unreleased: build files still say 0.4.8 |
 | [0.4.8](0.4.8.md) | 5 real bugs found verifying the published 0.4.7 artifacts against the kandraorm.com quickstart — `implementation`→`api` dependency scopes, `@SoftDelete` marker TTL (including a row-marker gap only a real-cluster test caught), the matching non-nullable-column guard, a codegen default-package fix, and the documented Ktor version range |
 | [0.4.7](0.4.7.md) | Consolidates 66 PRs (GH #5–#151) merged with no version bump since 0.4.6: three adversarial review rounds, `saveAndGet`/`saveIfNotExistsAndGet`/`updateAndGet`, `KandraThrottledException`/`throttle { }`, consistency-level validation, and the multi-DC "not yet validated against a genuine multi-region topology" disclosure |
 | [0.4.6](0.4.6.md) | `@GeneratedUuid` — UUIDv7/v4 auto-populated key columns, fixing a silent same-millisecond clustering-key collision risk |

@@ -82,7 +82,7 @@ for why this is intentional, not a bug.
 ```
 
 Optionally add `markerProperty` to enable `findActive()` — see
-[repositories.md](repositories.md#findactive-soft-delete-entities-only).
+[repositories.md](repositories.md#findactive-softdelete-entities-only).
 
 ```kotlin
 @SoftDelete(ttlSeconds = 86400, markerProperty = "isDeleted")

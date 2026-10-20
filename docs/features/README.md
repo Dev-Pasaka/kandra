@@ -1,6 +1,7 @@
-# Kandra 0.4.8 — Feature Reference
+# Kandra — Feature Reference
 
-One file per feature area. Start here, follow the links.
+One file per feature area. Start here, follow the links. Describes the current branch: the released version
+is 0.4.8; multi-keyspace support (see [changelog 0.5.0](../changelog/0.5.0.md)) is proposed and not yet released.
 
 | Area | File |
 |---|---|
@@ -13,6 +14,7 @@ One file per feature area. Start here, follow the links.
 | DI integrations (`kandra-kodein`, `kandra-koin`) | [di-integrations.md](di-integrations.md) |
 | Multi-DC (`kandra-multidc`) | [multidc.md](multidc.md) |
 | Testing (`kandra-test`) | [testing.md](testing.md) |
+| Multi-keyspace design record (ISS-102) | [multi-keyspace-plan.md](multi-keyspace-plan.md) |
 | Jakarta Bean Validation (`kandra-jakarta`) | [jakarta-validation.md](jakarta-validation.md) |
 
 For the full narrative reference (every annotation, config option, and method in depth), see
