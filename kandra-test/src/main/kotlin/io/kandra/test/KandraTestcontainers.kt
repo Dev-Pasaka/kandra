@@ -36,6 +36,25 @@ import kotlin.reflect.KClass
  */
 object KandraTestcontainers {
 
+    /**
+     * A session on the shared Docker container with the same 30 s request/schema timeouts as
+     * [KandraTestBackend.newSession], bound to [keyspace] when given. Unlike [KandraTestBackend] it
+     * **always** targets the container, whatever `KANDRA_TEST_BACKEND` says — for tests that are
+     * Docker-only by design (fixed keyspace names that would collide on a shared cloud cluster).
+     * The caller closes it.
+     *
+     * Use this rather than a bare `CqlSession.builder()` for admin/cleanup DDL: the driver's default
+     * 2 s request timeout is too tight for `CREATE/DROP KEYSPACE` on a loaded CI container.
+     */
+    fun newContainerSession(keyspace: String? = null): CqlSession {
+        val b = CqlSession.builder()
+            .addContactPoint(container.contactPoint)
+            .withLocalDatacenter(container.localDatacenter)
+            .withConfigLoader(KandraTestBackend.longTimeoutConfig())
+        if (keyspace != null) b.withKeyspace(keyspace)
+        return b.build()
+    }
+
     /** Shared container — started once per JVM, reused across all test classes. */
     val container: CassandraContainer<*> by lazy {
         @Suppress("UNCHECKED_CAST")
