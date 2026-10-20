@@ -161,9 +161,10 @@ class StatementBuilder(
      * multi-DC deployment). Reads the resolved table's actual replication factor from live driver
      * metadata (`session.getMetadata().getKeyspace(...)`) — not from any static config — and warns
      * when the resolved read/write consistency pair can no longer guarantee read-your-writes, i.e.
-     * when `R + W < RF`. Never throws; RF is looked up on a best-effort basis and the check is
-     * silently skipped (not "assumed safe") if the session has no current keyspace or the driver has
-     * no metadata for it yet (e.g. a bare CqlSession in a unit test).
+     * when `R + W` does not exceed `RF` (read-your-writes needs the strict `R + W > RF`). Never throws; RF is looked up on a best-effort basis and the check is
+     * silently skipped (not "assumed safe") if neither the entity nor the session names a keyspace or the
+     * driver has no metadata for it yet (e.g. a bare CqlSession in a unit test). The keyspace consulted is
+     * the entity's own (`@ScyllaTable(keyspace)`), falling back to the session's current keyspace.
      *
      * Each call only knows *one* side of the pair for certain (the value it just resolved); the other
      * side is taken from the currently configured default, since a per-call override on that other
@@ -206,8 +207,9 @@ class StatementBuilder(
 
     /**
      * Best-effort replication factor relevant to [level], read from live driver metadata for the
-     * session's current keyspace. Returns `null` (never throws) if the session has no current
-     * keyspace, the driver has no metadata for it, or the replication map can't be parsed — any of
+     * entity's keyspace (`TableSchema.keyspace`, else the session's current keyspace). Returns `null`
+     * (never throws) if neither names a keyspace, the driver has no metadata for it, or the
+     * replication map can't be parsed — any of
      * which simply skips the RF check above rather than treating it as "safe" or raising an error.
      *
      * For a non-`LOCAL_*` level (`QUORUM`, `EACH_QUORUM`, `ALL`, ...), sums every non-`class` entry

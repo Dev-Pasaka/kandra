@@ -64,7 +64,7 @@ private const val DDL_CLAIM_POLL_MS = 200L
  *
  * Built and tested against Ktor 2.3.x (`ktor-server-core` 2.3.13, see `gradle.properties`'
  * `ktorVersion`). Ktor 3.x is untested — it restructured parts of the plugin-installation API, so
- * compatibility isn't assumed; see GH #155 for tracking a real 3.x compatibility pass.
+ * compatibility isn't assumed; see GH #155 (documentation) and GH #160 (the real 3.x compatibility pass).
  *
  * ```kotlin
  * install(Kandra) {

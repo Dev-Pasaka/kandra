@@ -28,10 +28,12 @@ enum class SchemaMode {
 sealed class ReplicationStrategy {
     /**
      * @param disableTablets Opt-in, default `false` (DDL unchanged). When `true`, `autoCreateKeyspace`
-     *   appends `AND tablets = {'enabled': false}` to `CREATE KEYSPACE`. Required on ScyllaDB clusters
-     *   with tablets enabled by default (e.g. Scylla Cloud), which reject `SimpleStrategy` with
+     *   appends `AND tablets = {'enabled': false}` to `CREATE KEYSPACE`. Needed on ScyllaDB clusters
+     *   with tablets enabled by default, which reject `SimpleStrategy` with
      *   "SimpleStrategy doesn't support tablet replication". ScyllaDB only: Apache Cassandra rejects
-     *   the unknown `tablets` option. Prefer [NetworkTopologyStrategy] where possible (it works with tablets).
+     *   the unknown `tablets` option. Clusters configured with `tablets_mode_for_new_keyspaces: enforced`
+     *   reject `SimpleStrategy` entirely, even with this flag; use [NetworkTopologyStrategy] there (it works
+     *   with tablets, and is preferred wherever possible).
      */
     data class SimpleStrategy(
         val replicationFactor: Int = 1,
