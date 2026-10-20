@@ -4,6 +4,8 @@
 
 First-class support for denormalized lookup tables, composite partition keys, TTL, pagination, LWT, and counter tables — patterns ScyllaDB requires that no existing Kotlin ORM handles natively.
 
+**Website:** [kandraorm.com](https://kandraorm.com)
+
 [![CI](https://github.com/Dev-Pasaka/kandra/actions/workflows/ci.yml/badge.svg)](https://github.com/Dev-Pasaka/kandra/actions)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
@@ -91,15 +93,15 @@ against Ktor 3 in CI, and the Ktor-facing modules are also re-tested in a CI mat
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.8"))
-    implementation("ke.co.coinx.kandra:kandra-ktor")
-    implementation("ke.co.coinx.kandra:kandra-koin")   // or kandra-kodein
-    ksp("ke.co.coinx.kandra:kandra-codegen")           // optional — type-safe table objects
-    testImplementation("ke.co.coinx.kandra:kandra-test")
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.4.8"))
+    implementation("com.kandraorm.kandra:kandra-ktor")
+    implementation("com.kandraorm.kandra:kandra-koin")   // or kandra-kodein
+    ksp("com.kandraorm.kandra:kandra-codegen")           // optional — type-safe table objects
+    testImplementation("com.kandraorm.kandra:kandra-test")
     // Optional: multi-DC utilities
-    implementation("ke.co.coinx.kandra:kandra-multidc")
+    implementation("com.kandraorm.kandra:kandra-multidc")
     // Optional: versioned schema migrations
-    implementation("ke.co.coinx.kandra:kandra-migrate")
+    implementation("com.kandraorm.kandra:kandra-migrate")
 }
 ```
 
@@ -911,7 +913,7 @@ Use `@LookupIndex` instead for high-cardinality columns — it creates a proper 
 
 ```kotlin
 // Add to build.gradle.kts:
-// testImplementation("ke.co.coinx.kandra:kandra-test")
+// testImplementation("com.kandraorm.kandra:kandra-test")
 // testImplementation("org.testcontainers:cassandra:1.19.8")
 
 class UserRepositoryTest {

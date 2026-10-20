@@ -41,7 +41,7 @@ This gives you, inside the sample app project itself:
 
 **This is read-only reference material.** Rule 1 in the root [README](README.md#non-negotiable-ground-rules-for-whoever-executes-this-plan)
 still applies without exception: the sample app's `build.gradle.kts` depends on the *published*
-`ke.co.coinx.kandra` artifacts from Maven Central, never on this cloned source tree.
+`com.kandraorm.kandra` artifacts from Maven Central, never on this cloned source tree.
 
 ## 1.1 Toolchain
 
@@ -158,8 +158,8 @@ rootProject.name = "kandra-resolve-check"
 plugins { kotlin("jvm") version "2.1.21" }
 repositories { mavenCentral() }
 dependencies {
-    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.2"))
-    implementation("ke.co.coinx.kandra:kandra-ktor")
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.4.2"))
+    implementation("com.kandraorm.kandra:kandra-ktor")
 }
 ```
 
@@ -167,7 +167,7 @@ dependencies {
 ./gradlew dependencies --configuration compileClasspath
 ```
 
-- **If this fails to resolve** (`Could not find ke.co.coinx.kandra:kandra-bom:0.4.2`), the release
+- **If this fails to resolve** (`Could not find com.kandraorm.kandra:kandra-bom:0.4.2`), the release
   hasn't actually gone live on Central yet regardless of what any CI log says — stop here and report
   it as a **blocking** finding (see the scoring rubric, file 5) rather than working around it with a
   local/composite build, which would test the wrong artifact entirely.
@@ -196,14 +196,14 @@ plugins {
 repositories { mavenCentral() }
 
 dependencies {
-    implementation(platform("ke.co.coinx.kandra:kandra-bom:0.4.2"))
-    implementation("ke.co.coinx.kandra:kandra-ktor")
-    implementation("ke.co.coinx.kandra:kandra-koin")
-    implementation("ke.co.coinx.kandra:kandra-kodein")   // build both DI wirings, see file 2
-    implementation("ke.co.coinx.kandra:kandra-migrate")
-    implementation("ke.co.coinx.kandra:kandra-multidc")
-    implementation("ke.co.coinx.kandra:kandra-jakarta")
-    ksp("ke.co.coinx.kandra:kandra-codegen")
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.4.2"))
+    implementation("com.kandraorm.kandra:kandra-ktor")
+    implementation("com.kandraorm.kandra:kandra-koin")
+    implementation("com.kandraorm.kandra:kandra-kodein")   // build both DI wirings, see file 2
+    implementation("com.kandraorm.kandra:kandra-migrate")
+    implementation("com.kandraorm.kandra:kandra-multidc")
+    implementation("com.kandraorm.kandra:kandra-jakarta")
+    ksp("com.kandraorm.kandra:kandra-codegen")
 
     // Jakarta validation needs a real provider — kandra-jakarta only depends on the API, compileOnly
     implementation("org.hibernate.validator:hibernate-validator:8.0.1.Final")
@@ -218,7 +218,7 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation:2.3.13")
     implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.13")
 
-    testImplementation("ke.co.coinx.kandra:kandra-test")
+    testImplementation("com.kandraorm.kandra:kandra-test")
     testImplementation("org.testcontainers:cassandra:1.19.8")
     testImplementation("org.testcontainers:junit-jupiter:1.19.8")
     testImplementation(kotlin("test"))
