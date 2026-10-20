@@ -44,9 +44,7 @@ class MultiKeyspaceIntegrationTest {
     private enum class Backend { DOCKER, CLOUD }
 
     private fun admin(b: Backend): CqlSession = when (b) {
-        Backend.DOCKER -> CqlSession.builder()
-            .addContactPoint(KandraTestcontainers.container.contactPoint)
-            .withLocalDatacenter(KandraTestcontainers.container.localDatacenter).build()
+        Backend.DOCKER -> KandraTestcontainers.newContainerSession()
         Backend.CLOUD -> KandraCloud.newSession()
     }
 

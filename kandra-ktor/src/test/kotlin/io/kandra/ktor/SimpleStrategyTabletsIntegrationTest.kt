@@ -25,9 +25,7 @@ class SimpleStrategyTabletsIntegrationTest {
     @Test
     fun `docker - Cassandra rejects the tablets option so the flag is Scylla-only`() {
         val name = "kt_tabdocker_${UUID.randomUUID().toString().replace("-", "").take(8)}"
-        CqlSession.builder()
-            .addContactPoint(KandraTestcontainers.container.contactPoint)
-            .withLocalDatacenter(KandraTestcontainers.container.localDatacenter).build().use { s ->
+        KandraTestcontainers.newContainerSession().use { s ->
                 try {
                     val failure = runCatching {
                         s.execute(keyspaceDdl(name, ReplicationStrategy.SimpleStrategy(1, disableTablets = true)))

@@ -47,10 +47,7 @@ class KandraKoinMultiKeyspaceTest : KoinComponent {
     @AfterEach
     fun cleanup() {
         SchemaRegistry.clear()
-        CqlSession.builder()
-            .addContactPoint(KandraTestcontainers.container.contactPoint)
-            .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-            .build().use {
+        KandraTestcontainers.newContainerSession().use {
                 it.execute("DROP KEYSPACE IF EXISTS $DEFAULT_KS")
                 it.execute("DROP KEYSPACE IF EXISTS $OTHER_KS")
             }
@@ -80,7 +77,7 @@ class KandraKoinMultiKeyspaceTest : KoinComponent {
     fun `entities in two keyspaces resolve and round-trip through Koin repositories`() {
         val c = KandraTestcontainers.container
         val cp = c.contactPoint
-        CqlSession.builder().addContactPoint(cp).withLocalDatacenter(c.localDatacenter).build().use { s ->
+        KandraTestcontainers.newContainerSession().use { s ->
             for (ks in listOf(DEFAULT_KS, OTHER_KS)) {
                 s.execute(
                     "CREATE KEYSPACE IF NOT EXISTS $ks WITH replication = " +

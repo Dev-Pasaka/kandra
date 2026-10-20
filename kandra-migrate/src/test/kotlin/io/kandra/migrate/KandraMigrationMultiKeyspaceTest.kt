@@ -144,11 +144,7 @@ abstract class MultiKeyspaceScenarios {
 
 class KandraMigrationMultiKeyspaceDockerTest : MultiKeyspaceScenarios() {
     private fun open(ks: String? = null): CqlSession {
-        val b = CqlSession.builder()
-            .addContactPoint(KandraTestcontainers.container.contactPoint)
-            .withLocalDatacenter(KandraTestcontainers.container.localDatacenter)
-        if (ks != null) b.withKeyspace(ks)
-        return b.build()
+        return KandraTestcontainers.newContainerSession(ks)
     }
 
     private fun ksName() = "kandra_ms_${UUID.randomUUID().toString().replace("-", "").take(10)}"
