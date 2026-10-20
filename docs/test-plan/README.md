@@ -15,7 +15,7 @@ to be verified against the real database, not a known-good fact — that is the 
 ## Background: what Kandra is, and the problem it solves
 
 Kandra is a lightweight Kotlin-first ORM for ScyllaDB/Cassandra, shipped as a Ktor server plugin
-(`ke.co.coinx.kandra`, Apache 2.0, source at `https://github.com/Dev-Pasaka/kandra`). It exists
+(`com.kandraorm.kandra`, Apache 2.0, source at `https://github.com/Dev-Pasaka/kandra`). It exists
 because the standard "ORM" mental model — one row = one object, foreign keys, joins, `WHERE` on
 any column — actively fights how Cassandra/ScyllaDB actually work. Cassandra is a wide-column,
 partition-oriented store: queries must be servable by a partition key (or a narrow set of
@@ -74,7 +74,7 @@ Read the files **in order**. Each assumes the previous ones are done.
 
 | # | File | What it covers |
 |---|---|---|
-| 1 | [01-prerequisites-and-environment.md](01-prerequisites-and-environment.md) | Exact infrastructure you need before writing any code: a real ScyllaDB cluster (Docker Compose spec included), JDK/Kotlin/Gradle versions, and — critically — how to verify the published `ke.co.coinx.kandra` artifacts are actually resolvable before you waste time debugging what looks like a Kandra bug but is actually a missing release. |
+| 1 | [01-prerequisites-and-environment.md](01-prerequisites-and-environment.md) | Exact infrastructure you need before writing any code: a real ScyllaDB cluster (Docker Compose spec included), JDK/Kotlin/Gradle versions, and — critically — how to verify the published `com.kandraorm.kandra` artifacts are actually resolvable before you waste time debugging what looks like a Kandra bug but is actually a missing release. |
 | 2 | [02-sample-application-build-plan.md](02-sample-application-build-plan.md) | Step-by-step Ktor project scaffold, entity definitions that deliberately exercise every annotation (including combinations the docs warn are dangerous), plugin install, both DI integrations, migrations, Jakarta validation, and a route per repository method. |
 | 3 | [03-functional-coverage-matrix.md](03-functional-coverage-matrix.md) | The literal checklist of what "100% real functionality" means — one row per annotation/method/config knob, each mapped to a concrete verification step and an expected-per-docs outcome. |
 | 4 | [04-edge-cases-and-adversarial-tests.md](04-edge-cases-and-adversarial-tests.md) | The harsh-critic pass: boundary values, race conditions, malformed input, and every gotcha already known from source inspection — written so a fresh agent doesn't have to rediscover them, only confirm or refute them against a real cluster. |

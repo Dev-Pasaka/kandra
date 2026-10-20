@@ -12,7 +12,7 @@ mavenPublishing {
         name.set(project.name)
         description.set("Kotlin-first ScyllaDB ORM as a Ktor plugin")
         inceptionYear.set("2024")
-        url.set("https://github.com/Dev-Pasaka/kandra")
+        url.set("https://kandraorm.com")
 
         licenses {
             license {
