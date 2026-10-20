@@ -1,6 +1,6 @@
 # Multi-keyspace support — implementation plan
 
-**Status:** Implemented on branch `feature/multi-keyspace`, not yet released (changelog: [0.5.0](../changelog/0.5.0.md)) · **Epic:** ISS-102
+**Status:** Released in 0.5.0 (changelog: [0.5.0](../changelog/0.5.0.md)) · **Epic:** ISS-102
 
 This is the original design record. Where it differs from the current behaviour (notably the *Live-cluster testing*
 section and the codegen row of the phase table), the text below has been corrected; the user-facing reference is
