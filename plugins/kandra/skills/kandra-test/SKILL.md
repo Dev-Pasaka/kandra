@@ -57,7 +57,7 @@ All three types in this file are `internal` — implementation details of `FakeK
 | `FakeResultSet` | `internal class ... : ResultSet` | Private constructor; companion factories `empty()` and `of(rows: List<Row>)`. `iterator()`/`one()`/`all()` read from the wrapped row list; `wasApplied()` is hardcoded `true`; `getExecutionInfo()`/`getColumnDefinitions()` throw `UnsupportedOperationException`. **Only `empty()` is ever called** from `FakeKandraSession` — `of(rows)` exists but nothing in the module wires real rows into it, so results are always empty in practice. |
 | `FakeAsyncResultSet` | `internal class ... : AsyncResultSet` | `currentPage()` is always `emptyList()`, `hasMorePages()` is always `false`, `fetchNextPage()` resolves to a fresh empty instance, `wasApplied()` is hardcoded `true`. |
 | `FakePreparedStatement(query: String)` | `internal class ... : PreparedStatement` | `getQuery()` returns the original CQL string; `getId()` returns `ByteBuffer.wrap(query.toByteArray())`. `bind(vararg values)` constructs and seeds a `FakeBoundStatement` (see below) — this used to unconditionally throw `UnsupportedOperationException`; fixed in GH #28 / ISS-040. `boundStatementBuilder(...)`, `getVariableDefinitions()`, `getResultSetDefinitions()` still throw `UnsupportedOperationException` — only `bind()` was fixed. |
-| `FakeBoundStatement(preparedStatementRef, query)` | `internal class ... : BoundStatement` | The piece that makes repository calls actually work end-to-end. A minimal, structural stand-in — **no real CQL type encoding/validation/protocol serialization** — that records positionally-bound values verbatim. `set(i, v, targetClass)` stores `v` at index `i`; `setBytesUnsafe(i, v)` stores Kotlin `null` at index `i` (the tombstone-write path — `saveWithNulls`); `unset(i)` stores the `FakeUnset` sentinel at index `i` (the no-tombstone/"leave unchanged" path — a `null`-valued nullable field on a plain `save()`). `boundValues(): List<Any?>` is the test-facing accessor — an index never touched, or explicitly `unset`, reads back as `FakeUnset`, not Kotlin `null`; distinguishing those two is the whole point (they're different CQL writes). Everything else on the large `BoundStatement`/`Statement` interface (routing keys/tokens, execution profiles, consistency levels, paging state, ...) is stored in a plain field and returned faithfully via its setter/getter pair, but never interpreted — this is a recorder, not a real statement. `getBytesUnsafe`, `getType`, `firstIndexOf`, `codecRegistry`, `protocolVersion` all throw `UnsupportedOperationException` (no real byte/type layer exists to answer them). |
+| `FakeBoundStatement(preparedStatementRef, query)` | `internal class ... : BoundStatement` | The piece that makes repository calls actually work end-to-end. A minimal, structural stand-in — **no real CQL type encoding/validation/protocol serialization** — that records positionally-bound values verbatim. `set(i, v, targetClass)` stores `v` at index `i`; `setBytesUnsafe(i, v)` stores Kotlin `null` at index `i` (the tombstone-write path — `saveWithNulls`); `unset(i)` stores the `FakeUnset` sentinel at index `i` (the no-tombstone/"leave unchanged" path — a `null`-valued nullable field on a plain `save()`). `boundValues(): List<Any?>` is the accessor used by `kandra-test`'s own tests — it lives on an `internal` class, so it is **not** reachable from a consumer module (use `(stmt as BoundStatement).preparedStatement.query` and `capturedBatches()` instead). An index never touched, or explicitly `unset`, reads back as `FakeUnset`, not Kotlin `null`; distinguishing those two is the whole point (they're different CQL writes). Everything else on the large `BoundStatement`/`Statement` interface (routing keys/tokens, execution profiles, consistency levels, paging state, ...) is stored in a plain field and returned faithfully via its setter/getter pair, but never interpreted — this is a recorder, not a real statement. `getBytesUnsafe`, `getType`, `firstIndexOf`, `codecRegistry`, `protocolVersion` all throw `UnsupportedOperationException` (no real byte/type layer exists to answer them). |
 | `FakeUnset` | `internal object` | Sentinel distinguishing "never bound / explicitly unset" from a real bound `null` in `FakeBoundStatement.boundValues()`. `toString()` → `"FakeUnset"`, useful when an assertion failure prints the list. |
 
 ### Repository calls work end-to-end under `FakeKandraSession` (fixed — GH #28 / ISS-040)
@@ -177,7 +177,24 @@ Shared connection provider for live tests. `KANDRA_TEST_BACKEND` unset or `docke
 
 Env-driven harness for a live (e.g. Scylla Cloud) cluster; no credentials or hostnames live in the repo. `isConfigured` is true when `KANDRA_CLOUD_CONTACT_POINTS` is set; `assumeConfigured()` is a JUnit assumption (skips, not fails). Variables: `KANDRA_CLOUD_CONTACT_POINTS` (CSV `host[:port]`, default port 9042), `KANDRA_CLOUD_USERNAME` / `KANDRA_CLOUD_PASSWORD`, `KANDRA_CLOUD_LOCAL_DC` (default `AWS_US_EAST_1`), `KANDRA_CLOUD_TLS=true` (rewrites port 9042 to 9142; `KANDRA_CLOUD_SSL=true` is the legacy spelling with JVM trust), `KANDRA_CLOUD_CA_PEM` (in-memory trust store from the PEM), `KANDRA_CLOUD_TRUSTSTORE` + `KANDRA_CLOUD_TRUSTSTORE_PASSWORD`. Members: `localDc`, `tlsEnabled`, `contactPointsCsv()`, `username`, `password`, `tempTruststore()`, `sessionBuilder()`, `newSession(keyspace?)`, `freshKeyspace(prefix, rf = 1)` (`prefix` must match `[a-z0-9]{1,20}`; creates `kt_<prefix>_<random8>` with `AND tablets = {'enabled': false}`; `close()` always drops it). Unlike `KandraTestBackend.freshKeyspace`, `KandraCloud.freshKeyspace` does not bump RF.
 
-`KandraMultiDcTestcontainers` (same package) is a separate, Docker-only two-datacenter (`dc1`/`dc2`) Compose fixture with `pause`/`unpause`/`unpauseAll`; see `docs/features/multidc.md`.
+`KandraMultiDcTestcontainers` (same package) is a separate, Docker-only two-datacenter (`dc1`/`dc2`) Compose fixture (two gossiping `cassandra:4.1` nodes on dynamically chosen ports):
+
+```kotlin
+object KandraMultiDcTestcontainers {
+    const val DC1 = "dc1"; const val DC2 = "dc2"
+    fun contactPoint(dc: String): InetSocketAddress
+    fun pause(dc: String); fun unpause(dc: String); fun unpauseAll()
+    fun freshNetworkTopologyKeyspace(
+        vararg classes: KClass<*>,
+        localDatacenter: String = DC1,
+        dcReplicationMap: Map<String, Int> = mapOf(DC1 to 1, DC2 to 1),
+        statementBuilderConsistencyConfig: ConsistencyConfig = ConsistencyConfig()
+    ): KandraRuntimeHandle   // keyspace kandra_multidc_<uuid>, NetworkTopologyStrategy; db.close() drops it
+}
+class KandraMultiDcFixtureException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+```
+
+`KandraMultiDcFixtureException` is thrown when the Compose fixture can't start (port collision after 3 attempts, Docker not running). Always call `unpauseAll()` in `@AfterEach` after pausing a DC. See `docs/features/multidc.md`.
 
 ## Example: FakeKandraSession-based unit test
 
@@ -186,8 +203,10 @@ built (which statements, in what order, what values), not on real data or real L
 
 ```kotlin
 import io.kandra.test.FakeKandraSession
-import io.kandra.test.FakeBoundStatement
+import io.kandra.test.KandraTestUtils
+import io.kandra.core.SchemaRegistry
 import com.datastax.oss.driver.api.core.cql.BatchStatement
+import com.datastax.oss.driver.api.core.cql.BoundStatement
 import com.datastax.oss.driver.api.core.cql.DefaultBatchType
 import com.datastax.oss.driver.api.core.cql.SimpleStatement
 import org.junit.jupiter.api.AfterEach
@@ -218,16 +237,17 @@ class FakeKandraSessionCaptureTest {
     }
 
     @Test
-    fun `save builds and binds the expected LOGGED batch`() {
+    fun `save builds one LOGGED batch with the expected INSERT`() {
         val runtime = KandraTestUtils.inMemory(User::class)
+        val session = runtime.session as FakeKandraSession   // the fake wired into THIS runtime, not a separate FakeKandraSession()
         val repo = runtime.repository(User::class)
 
         repo.save(User(id = "u1", name = "Ada", email = "ada@example.com"))
 
-        val batch = fakeSession.capturedBatches().single()
-        // Inspect exactly what was bound to the primary INSERT (positional, matching column order):
-        val primaryStatement = batch.first() as FakeBoundStatement
-        assertEquals(listOf("u1", "Ada", "ada@example.com"), primaryStatement.boundValues())
+        val batch = session.capturedBatches().single()
+        // FakeBoundStatement is internal to kandra-test, so assert via the public driver API:
+        val queries = batch.map { (it as BoundStatement).preparedStatement.query }
+        assertEquals(listOf("INSERT INTO users (id, name, email) VALUES (?, ?, ?)"), queries)
 
         runtime.close()
         SchemaRegistry.clear() // schema registration is process-global — reset between tests

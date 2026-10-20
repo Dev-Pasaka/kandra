@@ -1,0 +1,12 @@
+{
+  "name": "kandra",
+  "owner": { "name": "Dev-Pasaka" },
+  "plugins": [
+    {
+      "name": "kandra",
+      "source": "./plugins/kandra",
+      "description": "Claude Code skills for the Kandra ScyllaDB/Cassandra ORM for Ktor",
+      "version": "0.5.0"
+    }
+  ]
+}

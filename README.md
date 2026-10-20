@@ -54,30 +54,38 @@ This README covers the common cases end-to-end. For everything else:
 | [`docs/history/`](docs/history/) | The original build specs used to generate each version (0.1.0 → 0.4.0) — historical context, not current docs |
 | [`docs/site/`](docs/site/README.md) | Build prompts for the separate documentation website project, one file per Kandra version |
 | [API docs (Dokka)](https://dev-pasaka.github.io/kandra/) | Generated per-release from source, published on tag |
-| [`.claude/skills/`](.claude/skills/) | Per-module Claude Code skills — see [Using with Claude Code](#using-with-claude-code) below |
+| [`plugins/kandra/skills/`](plugins/kandra/skills/) | Per-module Claude Code skills — see [Using with Claude Code](#using-with-claude-code) below |
 
 ---
 
 ## Using with Claude Code
 
-Kandra ships [Claude Code](https://claude.com/claude-code) skills at `.claude/skills/` — a project-wide
-overview (`kandra`) plus one exhaustive, module-specific skill per module (`kandra-core`, `kandra-runtime`,
-`kandra-ktor`, `kandra-kodein`, `kandra-koin`, `kandra-codegen`, `kandra-test`, `kandra-multidc`,
-`kandra-migrate`). Each module skill documents every public class, function, and property in that module,
-traced from the actual implementation — including footguns that don't show up as compile errors (e.g.
-`update(old, new)` taking two entities, or which entity annotations `kandra-codegen` actually reads versus
-which are silently ignored).
+Kandra ships [Claude Code](https://claude.com/claude-code) skills as an installable plugin — a project-wide
+overview (`kandra`), a `kandra-setup` skill for adding Kandra to a build, and one exhaustive, module-specific
+skill per module (`kandra-core`, `kandra-runtime`, `kandra-ktor`, `kandra-kodein`, `kandra-koin`,
+`kandra-codegen`, `kandra-test`, `kandra-multidc`, `kandra-migrate`, `kandra-jakarta`). Each module skill
+documents every public class, function, and property in that module, traced from the actual implementation —
+including footguns that don't show up as compile errors (e.g. `update(old, new)` taking two entities, or which
+entity annotations `kandra-codegen` actually reads versus which are silently ignored).
 
-To get this context in your own project, copy the whole folder in:
+**Install in any project** (recommended):
+
+```
+/plugin marketplace add Dev-Pasaka/kandra
+/plugin install kandra@kandra
+```
+
+**Or copy the skills** into a single project:
 
 ```bash
 mkdir -p .claude/skills
-cp -r /path/to/kandra/.claude/skills/. .claude/skills/
+cp -r /path/to/kandra/plugins/kandra/skills/. .claude/skills/
 ```
 
-Claude Code loads the relevant skill automatically based on what you're doing — defining `@ScyllaTable`
-entities, calling repository methods, configuring `install(Kandra) { ... }`, wiring DI, writing tests, or
-authoring a schema migration.
+Claude Code loads the relevant skill automatically based on what you're doing — adding Kandra to a build,
+defining `@ScyllaTable` entities, calling repository methods, configuring `install(Kandra) { ... }`, wiring DI,
+writing tests, or authoring a schema migration. The skills live in [`plugins/kandra/skills/`](plugins/kandra/skills/)
+(`.claude/skills` in this repo is a symlink to it).
 
 ---
 

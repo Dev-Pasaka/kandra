@@ -113,7 +113,7 @@ below. Closing any of these needs a targeted test in `kandra-test`'s integration
 | [ISS-078](ISS-078-ddl-claim-no-holder-fencing-clock-fallback.md) | DDL claim completion/release had no holder fencing; clock-skew check had a local-clock fallback bug |
 | [ISS-079](ISS-079-auto-migrate-key-column-add-corrupts-data.md) | AUTO_MIGRATE could silently ALTER TABLE ADD a missing key column as a plain column, causing row collisions |
 
-The multi-keyspace entries (ISS-102–ISS-111) belong to the unreleased 0.5.0 work (see the
+The multi-keyspace entries (ISS-102–ISS-111) shipped in 0.5.0 (see the
 [0.5.0 changelog](../changelog/0.5.0.md)); there is no ISS-106 (a gap in the numbering, no file was ever created).
 
 ### 2026-09-09 post-fix critical audit (ISS-080–ISS-096 / GH #93–#109)

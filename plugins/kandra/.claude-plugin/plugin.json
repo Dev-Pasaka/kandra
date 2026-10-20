@@ -1,0 +1,9 @@
+{
+  "name": "kandra",
+  "description": "Skills for building Ktor apps on ScyllaDB/Cassandra with Kandra: setup, entities, repositories, config, DI, codegen, migrations, multi-DC, validation and testing.",
+  "version": "0.5.0",
+  "author": { "name": "Dev-Pasaka" },
+  "homepage": "https://github.com/Dev-Pasaka/kandra",
+  "repository": "https://github.com/Dev-Pasaka/kandra",
+  "license": "Apache-2.0"
+}

@@ -66,8 +66,14 @@ fun save(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, cons
 fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): Boolean
 fun saveWithNulls(entity: T, ttlSeconds: Int? = null, consistency: KandraConsistency? = null)
 fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null)
+fun saveAndGet(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null): T
+fun saveIfNotExistsAndGet(entity: T, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T?   // null = row already existed
 ```
 (suspend repo: identical signatures, `suspend fun`)
+
+**`saveAndGet` / `saveIfNotExistsAndGet`** — same writes as `save`/`saveIfNotExists`, but return the entity actually persisted, with
+`@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt`/`@Version` values filled in. `save()` computes these and discards them, so use the `AndGet`
+variants whenever the caller needs the generated values (e.g. an HTTP response). GH #132, #138.
 
 - **`save`** — runs entity validators (`registerValidator`), stamps `@CreatedAt`/`@UpdatedAt` via
   reflective `copy()`, sets the initial `@Version` value (`1L` for `Long`, `Instant.now()` for
@@ -122,7 +128,10 @@ userRepo.saveAll(users, useBatch = true)                   // chunks at 100 by d
 ```kotlin
 fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL)
 fun updateForce(entity: T, consistency: KandraConsistency? = null)
+fun updateAndGet(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T
 ```
+
+**`updateAndGet`** — same write as `update`, but returns the entity as persisted, including the post-update `@Version`/`@UpdatedAt`. Chain it for repeated optimistic-locked updates of one row: reusing the stale pre-update object in a second `update()` throws `KandraOptimisticLockException`. GH #136.
 
 - **`update(old, new, consistency, ttlSeconds, serialConsistency)`** — validates `new`. **If
   `schema.versionColumn` is present** (`@Version` field): reads `old`'s current version value via
@@ -653,6 +662,7 @@ class DebugConfig {
     var logQueries: Boolean = false        // logs CQL template (never bound values) at DEBUG in StatementBuilder.prepare
     var logSlowQueriesMs: Long = 0L        // 0 = disabled; WARN in BatchEngine.executeWithRetry(Suspend)
     var logBatches: Boolean = false        // DEBUG-logs batch statement count; only checked by save()/saveAll() (and their suspend variants), NOT by update()/updateForce()/saveWithNulls()/delete()
+    var rawQueryStrictMode: Boolean = false  // true: raw()/rawSuspend()/rawQuery()/rawQuerySuspend() throw KandraQueryException when the CQL looks like it has a string literal spliced in (heuristic, not a parser); false = WARN only
 }
 
 class RetryConfig {
@@ -668,20 +678,20 @@ class RetryConfig {
 
 ```kotlin
 class KandraBatchScope internal constructor(session: CqlSession, batchEngine: BatchEngine) {
-    fun <T : Any> KandraRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null)
-    fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null)
-    fun <T : Any> KandraRepository<T>.deleteInBatch(entity: T)
-    fun <T : Any> KandraSuspendRepository<T>.deleteInBatch(entity: T)
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null)
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatchAndGet(entity: T, ttlSeconds: Int? = null): T   // entity with generated values resolved
+    suspend fun <T : Any> KandraSuspendRepository<T>.deleteInBatch(entity: T)
     fun <T : Any> KandraSuspendRepository<T>.saveIfNotExistsInBatch(entity: T): Boolean   // always throws
 }
 ```
 
-Only reachable via `KandraRuntime.batch { }` (suspend) / `batchBlocking { }`. Collects statements from
+Reachable only via the suspend `KandraRuntime.batch { }`. The blocking `batchBlocking { }` takes a separate `KandraBlockingBatchScope` (`@ExperimentalKandraApi`) with the same `saveInBatch`/`saveInBatchAndGet`/`deleteInBatch`/`saveIfNotExistsInBatch` extensions on the blocking `KandraRepository<T>` (non-suspend) — they are distinct types so each overload set resolves unambiguously (GH #99). Collects statements from
 `saveInBatch`/`deleteInBatch` calls (via `BatchEngine.collectSave`/`collectDelete` — same primary-row +
 `BATCH`-lookup statement building as the standalone methods, `EVENTUAL` lookups are **not** included)
-into one list, then on scope exit executes them as a single `LOGGED BATCH` via a plain **blocking**
-`session.execute(batch)` — even inside the `suspend fun batch { }` variant, the final commit is not
-`executeSuspend`, so it blocks the calling coroutine's thread. `findAll`/`findById`/any read method is
+into one list, then on scope exit executes them as a single `LOGGED BATCH` via
+`BatchEngine.executeBatchScopeSuspend` (suspend `batch { }`: commit uses `session.executeSuspend`, so it does not block the
+coroutine's thread) or the blocking `session.execute(batch)` (`batchBlocking { }`), both with the same shutdown gate / retry /
+in-flight tracking. `findAll`/`findById`/any read method is
 not exposed by this scope (reads can't be batched in CQL) — calling them on a captured repo still
 works, but executes immediately and is not part of the batch. Calling `saveIfNotExistsInBatch` inside
 the block always throws `KandraQueryException` — LWT can't share a `LOGGED BATCH` with regular
@@ -701,7 +711,7 @@ no compiler warning. Distinct names route correctly and make the wrong call a co
 runtime.batchBlocking {
     userRepo.saveInBatch(user)
     walletRepo.saveInBatch(wallet)
-    auditRepo.deleteInBatch(oldAudit)
+    auditRepo.deleteInBatch(oldAudit)   // non-suspend repos inside batchBlocking
 }
 ```
 

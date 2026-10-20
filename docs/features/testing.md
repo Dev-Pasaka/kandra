@@ -1,8 +1,11 @@
 # Testing (`kandra-test`)
 
-- `FakeKandraSession` — in-memory CQL session for unit tests. Verifies *structural* behaviour
-  (batch composition, save/delete ordering) — not real data round-trips, real LWT semantics, or
-  real codec/parameter binding. See
+- `FakeKandraSession` — in-memory CQL session for unit tests. The full repository stack runs against it (the real
+  `StatementBuilder`/`BatchEngine`), and `capturedStatements()`/`capturedBatches()` expose what was built, so it verifies *structural*
+  behaviour (batch composition, save/delete ordering) — not real data round-trips, real LWT semantics, or real codec/parameter binding
+  (`execute()` always returns an empty, `wasApplied() == true` result). `KandraTestUtils.inMemory(...)` wires its own instance; read it back
+  from `runtime.session as FakeKandraSession`. Until 0.4.7 `bind()` threw and repository calls failed under the fake (GH #28 / ISS-040); that is
+  fixed. See
   [ISS-020](../issues/ISS-020-fake-session-lwt-semantics.md).
 - `KandraTestUtils` — schema assertion helpers.
 - `KandraTestcontainers` — ready-to-use ScyllaDB/Cassandra Testcontainers setup.
@@ -63,3 +66,27 @@ test blocks, the ktor, koin and kodein test source sets use a small `useTestBack
 Not every suite can run against the cloud: `SslRoundTripIntegrationTest` and the multi-DC suite need their own
 containers, and a few credential-rotation tests skip themselves on cloud. See
 [`docs/test-plan/multi-keyspace-baseline.md`](../test-plan/multi-keyspace-baseline.md) for what has been run where.
+
+## Two-datacenter fixture: `KandraMultiDcTestcontainers`
+
+Docker-only; see [multidc.md](multidc.md#testing-against-a-real-multi-dc-topology) for the topology and the `pause`
+semantics. The entry point mirrors `KandraTestcontainers.freshKeyspace`:
+
+```kotlin
+class DcFailoverTest {
+    private val db = KandraMultiDcTestcontainers.freshNetworkTopologyKeyspace(User::class)   // dc1 + dc2, RF 1 each
+    @AfterEach fun cleanup() { db.close(); KandraMultiDcTestcontainers.unpauseAll() }
+
+    @Test fun `local DC down`() {
+        KandraMultiDcTestcontainers.pause(KandraMultiDcTestcontainers.DC1)
+        // ... exercise install(Kandra) with loadBalancing.dcAwareFailover / failover.onLocalDcUnavailable ...
+    }
+}
+```
+
+`freshNetworkTopologyKeyspace(vararg classes, localDatacenter = DC1, dcReplicationMap = mapOf(DC1 to 1, DC2 to 1),
+statementBuilderConsistencyConfig = ConsistencyConfig())` creates a `kandra_multidc_<uuid>` keyspace with
+`NetworkTopologyStrategy` and returns the same `KandraRuntimeHandle` as the single-DC helper. Also available:
+`contactPoint(dc)`, `pause(dc)`, `unpause(dc)`, `unpauseAll()`. If the Compose fixture itself cannot start (a dynamically chosen port still
+collided after three attempts, or Docker is not running) it throws `KandraMultiDcFixtureException` with an actionable message rather than a raw
+Docker bind error (GH #108 / ISS-095). Always `unpauseAll()` in `@AfterEach`.

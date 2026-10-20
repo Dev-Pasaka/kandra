@@ -35,6 +35,7 @@ All are `RUNTIME` retention, read via `kotlin.reflect.full.findAnnotation` in `S
 | `@ReadConsistency` / `@WriteConsistency` | Class | `(level: KandraConsistency)` | Not read by `SchemaRegistry` or `DdlGenerator` at all — these two files only declare the annotations. Consumed elsewhere (the Ktor/repository layer) for consistency resolution. |
 | `@Version` | Property (`Long` or `Instant`) | no args | Must be `Long` or `Instant` — any other type throws `KandraSchemaException` with the actual `KType` in the message. At most one per class. |
 | `@SoftDelete` | Class | `(ttlSeconds: Int = 86400, markerProperty: String = "")` | Sets `TableSchema.isSoftDelete = true` and `softDeleteTtlSeconds`. `kandra-core` only records this flag; the actual "TTL instead of DELETE" behavior is implemented by the repository layer in another module. `markerProperty` names a `Boolean` property that's written permanently (no TTL) on soft-delete, enabling `findActive()` in `kandra-runtime` — without it, `findActive()` throws. |
+| `@GeneratedUuid` | Property (`UUID`) | `(strategy: UuidStrategy = TIME_ORDERED)` | Auto-populates the `UUID` field on every INSERT via `KandraUuid` (like `@CreatedAt`); any caller-supplied value is overwritten. Never touched by `update()`/`updateForce()` (key columns are immutable). Recorded in `TableSchema.generatedUuidColumns`. Use on a `@PartitionKey`/`@ClusteringKey` instead of `Instant.now()`-derived keys, which collide within one millisecond. |
 | `@Sensitive` | Property | no args | Sets `ColumnSchema.isSensitive = true`. `kandra-core` does not do any masking itself — that's a consumer (logger) concern. |
 | `@CacheResult` | Class | `(ttlSeconds: Int = 60, maxSize: Long = 1000)` | Populates `TableSchema.cacheConfig` as a `CacheResultConfig(ttlSeconds, maxSize)`. No Caffeine dependency here — just the config record. |
 
@@ -43,6 +44,12 @@ All are `RUNTIME` retention, read via `kotlin.reflect.full.findAnnotation` in `S
 ```kotlin
 enum class ClusteringOrder { ASC, DESC }              // @ClusteringKey.order
 enum class LookupConsistency { BATCH, EVENTUAL }       // @LookupIndex.consistency
+enum class UuidStrategy { TIME_ORDERED, RANDOM }       // @GeneratedUuid.strategy
+```
+
+`io.kandra.core.KandraUuid`: `timeOrdered(): UUID` (UUIDv7, RFC 9562 — sorts chronologically as a plain CQL `uuid`, no `timeuuid` type needed) and `random(): UUID` (v4, leaks no creation time).
+
+```kotlin
 ```
 
 Both map to `TEXT` when used as an entity column type themselves (any `Enum` subclass does — see
@@ -363,9 +370,16 @@ eventListener = object : KandraEventListener {
 
 ```kotlin
 fun interface KandraMetrics {
-    fun record(tableName: String, operation: String, durationMs: Long)
+    fun record(tableName: String, operation: String, durationMs: Long)                    // the single abstract method (SAM)
+    fun record(tableName: String, operation: String, durationMs: Long, attempts: Int)      // default: delegates to the 3-arg record
+    fun recordFailure(tableName: String, operation: String, durationMs: Long, attempts: Int, exceptionType: String) {}  // default: no-op
 }
 ```
+
+The two extra methods have defaults, so existing lambdas keep compiling. Override the 4-arg `record` to see how many attempts a
+successful query needed; override `recordFailure` to count queries that ultimately failed (retry exhaustion, a non-retryable
+exception, a non-idempotent statement, or rejection during shutdown — `durationMs`/`attempts` are `0` for a shutdown rejection).
+`exceptionType` is the fully-qualified exception class name.
 
 SAM interface, no `@ExperimentalKandraApi` gate (unlike `KandraAuthProvider`/`KandraEventListener`). Called
 after every query execution on both blocking and suspend paths. `operation` is a free-form string —
@@ -434,6 +448,7 @@ open class KandraException(message: String, cause: Throwable? = null) : RuntimeE
 class KandraSchemaException(message: String) : KandraException(message)
 class KandraQueryException(message: String, cause: Throwable? = null) : KandraException(message, cause)
 class KandraAuthException(message: String, cause: Throwable? = null) : KandraException(message, cause)
+class KandraThrottledException(message: String, cause: Throwable? = null) : KandraException(message, cause)
 class KandraOptimisticLockException(
     message: String,
     val entityClass: KClass<*>,
@@ -441,6 +456,8 @@ class KandraOptimisticLockException(
 ) : KandraException(message)
 class KandraMigrationException(message: String, cause: Throwable? = null) : KandraException(message, cause)
 ```
+
+`KandraThrottledException` wraps the driver's `RequestThrottlingException` when `throttle { }` (kandra-ktor) rejects a request because `maxQueueSize` is exceeded. It is **never retried** by `RetryConfig`, regardless of `retryOn`.
 
 All are unchecked (`RuntimeException` root). Note asymmetry: `KandraSchemaException` and
 `KandraOptimisticLockException` do **not** accept a `cause` parameter — you cannot chain an underlying

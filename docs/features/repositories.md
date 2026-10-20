@@ -108,6 +108,13 @@ application.kandra.batch {
 }
 ```
 
+- `saveInBatchAndGet(entity)` is `saveInBatch` that also returns the entity as it will be persisted, with `@GeneratedUuid`/`@CreatedAt`/`@UpdatedAt` already
+  resolved (it does not inject an initial `@Version`, unlike standalone `save()`).
+- `batch { }` is `suspend` and its scope (`KandraBatchScope`) takes `KandraSuspendRepository`s; commit uses the non-blocking `executeSuspend`.
+  `batchBlocking { }` is the non-suspend counterpart with its own scope type (`KandraBlockingBatchScope`) that takes blocking `KandraRepository`s. Mixing
+  the two is a compile error.
+- `saveIfNotExistsInBatch` exists only to throw: an LWT cannot share a `LOGGED BATCH` with regular statements.
+
 ## UNSET vs NULL
 
 By default Kandra uses `UNSET` binding for nullable `null` fields — no tombstone is written. Use `saveWithNulls()` to intentionally write `NULL` (e.g. to overwrite a previously set value with empty).

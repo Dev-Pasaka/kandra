@@ -25,6 +25,8 @@ guessed — load the matching module skill instead once you know which module th
 | `kandra-test` | `FakeKandraSession`, `KandraTestUtils`, `KandraTestcontainers` — fake-session repository calls now run end-to-end (structurally, not real CQL semantics) |
 | `kandra-multidc` | `KandraMultiDc.describe()`, plus where the real multi-DC config actually lives (`kandra-ktor`) |
 | `kandra-migrate` | `KandraMigration`, `KandraMigrationRunner`, checksum/versioning semantics |
+| `kandra-jakarta` | `validateJakarta<T>()`, `JakartaKandraValidator` — Bean Validation on entities |
+| `kandra-setup` | Adding Kandra to a project: Gradle coordinates, BOM, module choice, KSP, first install |
 
 Each was produced by reading its module's source in full and tracing actual behavior, not inferring from
 names — when in doubt, they say so explicitly rather than guessing.
@@ -44,6 +46,7 @@ names — when in doubt, they say so explicitly rather than guessing.
 | `@CreatedAt` / `@UpdatedAt` | Property (`Instant`) | Auto-filled via `copy()` reflection. `@CreatedAt` only fires on INSERT. |
 | `@Version` | Property (`Long` or `Instant`) | Optimistic lock. `update()` emits `IF version = ?`; throws `KandraOptimisticLockException` on mismatch. `save()` always sets the initial version — only `update()` enforces the check. |
 | `@SoftDelete(ttlSeconds = 86400, markerProperty = "")` | Class | `delete()` sets a TTL on non-key columns instead of `DELETE`. With `markerProperty` set to a `Boolean` field, `repo.findActive()` filters out soft-deleted rows — queries the marker column's `@SecondaryIndex` directly if present, otherwise throws `KandraQueryException` unless called with `allowFullScan = true` (breaking change as of GH #12 / ISS-036 — previously a silent `ALLOW FILTERING`). `@LookupIndex` rows are kept alive until the entity's own TTL expires, not hard-deleted (ISS-030) — combining `@LookupIndex` + `@SoftDelete` on high-churn tables grows the lookup table faster than the primary table (ISS-035). |
+| `@GeneratedUuid(strategy = TIME_ORDERED)` | Property (`UUID`) | Auto-filled UUID on INSERT (UUIDv7 by default, `RANDOM` = v4); overwrites caller values, never touched by `update()`. Use for keys instead of `Instant.now()` (same-millisecond collisions). |
 | `@Sensitive` | Property | Masked as `***` by `KandraEntityLogger` in all log output (DEBUG query logs, errors, `toString()`). |
 | `@CacheResult(ttlSeconds = 60, maxSize = 1000)` | Class | Caffeine-backed `findById` cache; invalidated on save/update/delete. No-ops silently if `com.github.ben-manes.caffeine:caffeine` isn't on the classpath. |
 | `@SecondaryIndex` | Property | Native CQL secondary index — scatter-gather across **all** nodes. Only for low-cardinality fields on non-hot-path queries; logs WARN on every query. Prefer `@LookupIndex`. |
@@ -57,10 +60,13 @@ Both `KandraRepository<T>` (blocking) and `KandraSuspendRepository<T>` (suspend,
 fun save(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null)
 fun saveWithNulls(entity: T, ttlSeconds: Int? = null, consistency: KandraConsistency? = null)   // writes explicit NULL, not UNSET — causes tombstones
 fun saveIfNotExists(entity: T, serialConsistency: KandraConsistency = LOCAL_SERIAL): Boolean   // LWT
+fun saveAndGet(entity: T, ttlSeconds: Int? = null, timestampMicros: Long? = null, consistency: KandraConsistency? = null): T   // returns entity with generated @GeneratedUuid/@CreatedAt/@Version filled — save() discards them
+fun saveIfNotExistsAndGet(entity: T, serialConsistency: KandraConsistency = LOCAL_SERIAL): T?   // null = already existed
 fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null)   // auto-chunks per batchMaxChunkSize/batchAutoChunk
 
 fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null)     // ⚠️ TWO entity args — not update(new). LWT IF version=? when @Version present; ttlSeconds re-applies USING TTL or the row's TTL silently clears (ISS-058)
 fun updateForce(entity: T, consistency: KandraConsistency? = null)     // bypasses the @Version check entirely
+fun updateAndGet(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null): T   // returns the post-update @Version — use for chained optimistic updates
 
 fun delete(entity: T)          // TTL-only if @SoftDelete, else DELETE
 fun deleteAll(entities: List<T>)
@@ -106,6 +112,7 @@ ssl { enabled = true; trustStorePath = "..."; hostnameVerification = true }
 loadBalancing { tokenAware = true; dcAwareFailover = true; allowedRemoteDcs = listOf("eu-west") }
 failover { onLocalDcUnavailable = FailoverPolicy.RETRY_REMOTE_DC }
 speculativeExecution { enabled = true; delayMillis = 100; maxAttempts = 2 }
+throttle { enabled = true; maxConcurrentRequests = 10_000; maxQueueSize = 10_000 }   // overflow -> KandraThrottledException, never retried
 shutdown { graceful = true; drainTimeoutMs = 5_000 }
 metrics { enabled = true; recorder = KandraMetrics { table, op, ms -> ... } }   // NOT meterRegistry/tagX props
 validate<User> { user -> buildList { if (bad) add(KandraValidationError("field", "message")) } }
@@ -134,6 +141,7 @@ All extend `KandraException(message, cause)`:
 - `KandraOptimisticLockException(message, entityClass, partitionKey)` — `update()` LWT check failed; re-read
   and retry, don't just swallow it.
 - `KandraValidationException(errors: List<KandraValidationError>)` — thrown by the `validate<T> { }` hook.
+- `KandraThrottledException` — `throttle { }` rejected the request (queue full); not retried, shed load or back off.
 - `KandraMigrationException` — checksum mismatch on an already-applied migration.
 
 ## Testing
