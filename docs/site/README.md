@@ -13,7 +13,7 @@ Keeping one file per version makes that drift visible instead of silent.
 
 | Version | Kind | File |
 |---|---|---|
-| 0.4.7 | Incremental update | [build-prompt-0.4.7.md](build-prompt-0.4.7.md) — covers PRs #18–#25 merged since 0.4.6 (one section each); ready to hand off (0.4.7 has since been released; no prompt exists yet for 0.4.8 or the unreleased 0.5.0 multi-keyspace work) |
+| 0.4.7 | Incremental update | [build-prompt-0.4.7.md](build-prompt-0.4.7.md) — covers PRs #18–#25 merged since 0.4.6 (one section each); ready to hand off (0.4.7 has since been released. No build prompt was written for 0.4.8 or 0.5.0 — the site was updated directly for those releases and is kept in sync via its own `kandra-version-sync` check, so treat this 0.4.7 prompt as historical) |
 | 0.4.6 | Incremental update | [build-prompt-0.4.6.md](build-prompt-0.4.6.md) — adds `@GeneratedUuid`/`UuidStrategy`/`KandraUuid` coverage to specific pages only |
 | 0.4.5 | Full build | [build-prompt-0.4.5.md](build-prompt-0.4.5.md) — initial build prompt, full site scope, information architecture, and content requirements |
 

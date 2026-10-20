@@ -13,11 +13,14 @@ inspection — don't spend time debugging "why didn't this config take effect," 
 row as FAIL just because one of these had no observable impact (confirm the *absence* of effect
 matches this list first):
 
-- `PoolConfig.localRequestsPerConnection`
-- `LoadBalancingConfig.tokenAware`, `LoadBalancingConfig.maxRemoteNodesPerRemoteDc`
+- `LoadBalancingConfig.tokenAware`
 - `FailoverConfig.remoteRetryDelayMs`
 - `ConsistencyConfig.defaultSerialConsistency` (declared, but `saveIfNotExists` takes
   `serialConsistency` as a direct method parameter instead of reading this config field)
+
+> **Superseded since 0.4.2:** `PoolConfig.localRequestsPerConnection` was removed (GH #69), and `LoadBalancingConfig.maxRemoteNodesPerRemoteDc` is now
+> wired into the driver's DC-failover option (GH #58). `FailoverConfig.remoteRetryDelayMs` and `ConsistencyConfig.defaultSerialConsistency` were
+> re-checked against 0.5.0 source and are still not read by the runtime.
 
 If you're testing one of these specifically (file 3 rows P7/P9), the correct PASS outcome is
 **confirming it has no effect** — a surprising observable effect from one of these would itself be a

@@ -648,9 +648,17 @@ install(Kandra) {
         connectionTimeoutMillis       = 3000   // initial connect timeout (ms)
         heartbeatIntervalSeconds      = 30     // keep-alive interval
         maxRequestsPerConnection      = 32768
+        localPoolSize                 = 1      // connections per node in the local DC (default 1)
+        remotePoolSize                = 1      // connections per node in a remote DC (default 1; only used once cross-DC failover is enabled)
     }
 }
 ```
+
+Each pooled connection multiplexes up to `maxRequestsPerConnection` requests, so the per-node concurrency ceiling is
+`localPoolSize * maxRequestsPerConnection`. Raise `localPoolSize` only after profiling real per-node concurrency — each connection is a TCP socket
+plus driver-side heap. `remotePoolSize` has no effect unless `loadBalancing.dcAwareFailover = true` and
+`failover.onLocalDcUnavailable = FailoverPolicy.RETRY_REMOTE_DC` are both set. Kandra uses the stock DataStax driver, not a shard-aware one, so
+pool size is a coarser lever than shard-aware routing.
 
 ---
 
@@ -709,6 +717,7 @@ install(Kandra) {
         cipherSuites         = listOf("TLS_AES_256_GCM_SHA384")
         trustStorePath       = "/etc/kandra/truststore.jks"
         trustStorePassword   = System.getenv("TRUST_STORE_PASSWORD")
+        trustStoreType       = "JKS"   // default "JKS"; use "PKCS12" for .p12 stores (same for keyStoreType)
 
         // For mutual TLS (client certificate):
         keyStorePath     = "/etc/kandra/keystore.jks"
@@ -732,13 +741,14 @@ install(Kandra) {
     consistency {
         defaultRead  = KandraConsistency.LOCAL_QUORUM   // default: LOCAL_ONE
         defaultWrite = KandraConsistency.LOCAL_QUORUM   // default: LOCAL_QUORUM (already this)
+        defaultSerialConsistency = KandraConsistency.LOCAL_SERIAL   // default: LOCAL_SERIAL; the serial level for LWT (saveIfNotExists, @Version update)
     }
 }
 ```
 
-Available levels: `ANY`, `ONE`, `TWO`, `THREE`, `QUORUM`, `ALL`, `LOCAL_QUORUM`, `EACH_QUORUM`, `LOCAL_ONE`, `LOCAL_SERIAL`, `SERIAL`.
+Available levels (10 — there is no `ANY`): `ONE`, `TWO`, `THREE`, `QUORUM`, `ALL`, `LOCAL_QUORUM`, `EACH_QUORUM`, `LOCAL_ONE`, `LOCAL_SERIAL`, `SERIAL`.
 
-> **Not all 11 are valid as `defaultRead`/`defaultWrite` (or `@ReadConsistency`/`@WriteConsistency`,
+> **Not all 10 are valid as `defaultRead`/`defaultWrite` (or `@ReadConsistency`/`@WriteConsistency`,
 > or a per-call override).** `EACH_QUORUM` is write-only — using it to resolve a *read* consistency
 > throws `KandraQueryException` (Cassandra/Scylla reject it server-side for reads). `SERIAL`/
 > `LOCAL_SERIAL` are the reverse: valid only as the separate `serialConsistency` parameter of a
@@ -845,9 +855,13 @@ When enabled, Kandra registers `GET /kandra/health`. The handler runs `SELECT re
 
 ```kotlin
 install(Kandra) {
-    healthCheck = true   // default: true
+    healthCheck = true              // default: true
+    healthCheckCacheTtlMs = 500     // default: 500; how long a result is cached before the next request re-queries the cluster (0 = query every time)
 }
 ```
+
+The cache means a probe storm (a misconfigured monitor, or abuse if the route is reachable beyond the orchestrator's network) costs at most one real
+cluster query per window instead of one per request.
 
 Response:
 ```json
@@ -915,6 +929,19 @@ install(Kandra) {
 
 ---
 
+### Prepared Statement Cache
+
+```kotlin
+install(Kandra) {
+    preparedStatementCacheSize = 1000   // default: 1000
+}
+```
+
+Kandra caches prepared statements by CQL string. When the cache is full it evicts the eldest entry and logs a `WARN` ("Prepared statement cache
+eviction ... Consider increasing preparedStatementCacheSize") — if you see that warning under steady load, raise the size.
+
+---
+
 ### Metrics
 
 Kandra provides a `KandraMetrics` callback interface so you can bridge into any metrics backend without a mandatory Micrometer dependency.
@@ -937,6 +964,16 @@ install(Kandra) {
 free-form string; the values the write paths emit today are `save`, `saveIfNotExists`, `saveWithNulls`, `update`,
 `updateForce`, `delete`, `deleteById`, `saveAll`, `batch`, `append`, `remove`, `put`, `increment`, `decrement` and
 `eventualLookupInsert`. Reads are not recorded as a separate operation name.
+
+`KandraMetrics` has two more methods, both with defaults so a single-lambda recorder keeps compiling unchanged:
+
+- `record(table, operation, durationMs, attempts)` — same as above plus how many attempts the query needed (a query that only succeeded on its third
+  try still round-tripped three times). Defaults to calling the three-argument `record`.
+- `recordFailure(table, operation, durationMs, attempts, exceptionType)` — called when a query ultimately fails with no result: retry exhaustion, a
+  non-retryable exception, a non-idempotent statement, or rejection during shutdown (`durationMs` and `attempts` are `0` for a shutdown rejection).
+  `exceptionType` is the fully-qualified exception class name. Defaults to a no-op.
+
+Implement it as an `object : KandraMetrics { ... }` overriding the extra methods when you want failure counts or attempt histograms.
 
 ---
 
@@ -1466,9 +1503,16 @@ fun `save and find user`() {
         val user = User(id = UUID.randomUUID(), name = "Alice", email = "alice@example.com")
         repo.save(user)
         // assert on captured statements via FakeKandraSession
+        val session = runtime.session as FakeKandraSession   // the fake wired into this runtime
+        assertEquals(1, session.capturedBatches().size)      // save() = one LOGGED batch
     }
 }
 ```
+
+The whole repository stack runs under the fake (the real `StatementBuilder`/`BatchEngine`), but nothing is stored and `execute()` always returns an
+empty, `wasApplied() == true` result — so assert on the *statements built* via `capturedStatements()`/`capturedBatches()`, and use Testcontainers for
+read-back data, `saveIfNotExists() == false`, or optimistic-lock conflicts. Use `runtime.session` rather than a separate `FakeKandraSession()`:
+`inMemory(...)` wires its own instance.
 
 ### Testcontainers (real ScyllaDB)
 

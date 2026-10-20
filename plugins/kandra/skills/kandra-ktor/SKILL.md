@@ -1,6 +1,6 @@
 ---
 name: kandra-ktor
-description: Exhaustive API reference for kandra-ktor — the Kandra Ktor ApplicationPlugin, KandraConfig and all its nested config blocks (pool, auth, ssl, retry, debug, consistency, loadBalancing, failover, speculativeExecution, shutdown, metrics), SchemaMode, install lifecycle. Load when configuring install(Kandra) { ... } or writing Ktor application setup code.
+description: Exhaustive API reference for kandra-ktor — the Kandra Ktor ApplicationPlugin, KandraConfig and all its nested config blocks (pool, auth, ssl, retry, debug, consistency, loadBalancing, failover, speculativeExecution, throttle, shutdown, metrics, keyspace), SchemaMode, install lifecycle. Load when configuring install(Kandra) { ... } or writing Ktor application setup code.
 ---
 
 # kandra-ktor
@@ -146,6 +146,7 @@ class KandraConfig {
     var batchAutoChunk: Boolean = true                // large batches auto-split into batchMaxChunkSize chunks
 
     var healthCheck: Boolean = true                  // registers GET /kandra/health
+    var healthCheckCacheTtlMs: Long = 500            // /kandra/health result cache window; 0 = query the cluster on every request (GH-36)
 
     var eventListener: KandraEventListener? = null
 
@@ -220,13 +221,16 @@ class PoolConfig {
     var heartbeatIntervalSeconds: Int = 30      // -> DefaultDriverOption.HEARTBEAT_INTERVAL
     var requestTimeoutMillis: Long = 5000       // -> DefaultDriverOption.REQUEST_TIMEOUT (driver default is 2000ms)
     var connectionTimeoutMillis: Long = 5000    // -> DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT
+    var localPoolSize: Int = 1                  // -> CONNECTION_POOL_LOCAL_SIZE: connections per node in the local DC
+    var remotePoolSize: Int = 1                 // -> CONNECTION_POOL_REMOTE_SIZE: per node in a remote DC; only used when cross-DC failover is enabled
 }
 ```
 
 Note: an earlier version of this class also had `localRequestsPerConnection`, which was dead
-(declared but never applied). It has since been **removed entirely** (`docs/issues/ISS-068-localrequestsperconnection-dead-config.md`, GH #69) rather than left as a no-op field — don't expect it to exist. All four fields above are wired to `DefaultDriverOption`s in `buildDriverConfig()`. There is
-still no Kandra-level knob for connection-**pool size** (`CONNECTION_POOL_LOCAL_SIZE`/`REMOTE_SIZE`) —
-see `docs/issues/ISS-072-connection-pool-size-unconfigurable.md`.
+(declared but never applied). It has since been **removed entirely** (`docs/issues/ISS-068-localrequestsperconnection-dead-config.md`, GH #69) rather than left as a no-op field — don't expect it to exist. All six fields above are wired to `DefaultDriverOption`s in `buildDriverConfig()`. Pool size is
+configurable via `localPoolSize`/`remotePoolSize` (GH #80 / ISS-072); the per-node concurrency ceiling is
+`localPoolSize * maxRequestsPerConnection`. `remotePoolSize` has no effect unless both `loadBalancing.dcAwareFailover = true`
+and `failover.onLocalDcUnavailable = RETRY_REMOTE_DC` are set. Kandra uses the stock OSS driver (not shard-aware), so pool size is a coarse lever.
 
 ```kotlin
 pool {
@@ -402,6 +406,26 @@ request fired after `delayMillis` if the first hasn't returned).
 ```kotlin
 speculativeExecution { enabled = true; delayMillis = 150; maxAttempts = 3 }
 // original request + up to 2 speculative retries, each fired 150ms after the previous if still pending
+```
+
+## `throttle { }` — `ThrottleConfig`
+
+```kotlin
+class ThrottleConfig {
+    var enabled: Boolean = false
+    var maxConcurrentRequests: Int = 10_000   // max in-flight requests once enabled
+    var maxQueueSize: Int = 10_000            // extra requests queued beyond that; the rest are rejected immediately
+}
+```
+
+Wires the driver's `ConcurrencyLimitingRequestThrottler` for client-side backpressure (GH #81). Off by default (driver default is a
+pass-through throttler that never queues or rejects). A rejection surfaces as `KandraThrottledException` (from `kandra-core`), which
+`retry { }` **never** retries regardless of `retryOn`. It only throttles `session.execute`/`executeAsync` admission and is unrelated to
+`BatchEngine.inFlightCount` (shutdown draining). **Interacts with `speculativeExecution`**: each speculative copy counts toward
+`maxConcurrentRequests`, so enabling both can self-throttle under tail latency — raise the limits or keep speculation conservative.
+
+```kotlin
+throttle { enabled = true; maxConcurrentRequests = 2_000; maxQueueSize = 5_000 }
 ```
 
 ## `shutdown { }` — `ShutdownConfig`
