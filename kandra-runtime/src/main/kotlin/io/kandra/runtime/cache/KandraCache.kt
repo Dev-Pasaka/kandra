@@ -3,9 +3,29 @@ package io.kandra.runtime.cache
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.kandra.core.schema.CacheResultConfig
 import java.lang.reflect.Method
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.concurrent.ConcurrentHashMap
 
 private val logger = KotlinLogging.logger {}
+
+/**
+ * GH #178: normalizes a cache key to the precision the database actually stores.
+ *
+ * CQL `timestamp` has millisecond precision, but a caller can hold a finer `Instant` (e.g. `Instant.now()`
+ * is microsecond precision on most JVMs and may be echoed back by an earlier API response). `findById`
+ * caches under whatever the caller passed, while writes invalidate under the key rebuilt from the entity
+ * as stored. Without normalization those two never compare equal, so invalidation silently misses and a
+ * stale entry survives until TTL expiry. Applying this to every key on every cache entry point (read,
+ * put, invalidate, and the race-guard stamps) makes both sides agree.
+ *
+ * Only [Instant] is stored as a CQL `timestamp`; composite keys (`List`) are normalized element-wise.
+ */
+internal fun normalizeCacheKey(key: Any): Any = when (key) {
+    is Instant -> key.truncatedTo(ChronoUnit.MILLIS)
+    is List<*> -> if (key.any { it is Instant || it is List<*> }) key.map { if (it == null) it else normalizeCacheKey(it) } else key
+    else -> key
+}
 
 /**
  * Thin wrapper around an optional Caffeine cache. Falls back to no-op when Caffeine is not on the classpath.
@@ -90,7 +110,7 @@ internal class KandraCache<K : Any, V : Any>(config: CacheResultConfig?) {
         }
 
     @Suppress("UNCHECKED_CAST")
-    fun getIfPresent(key: K): V? = getIfPresentMethod?.invoke(inner, key) as? V
+    fun getIfPresent(key: K): V? = getIfPresentMethod?.invoke(inner, normalize(key)) as? V
 
     /** A monotonic stamp to capture (via [readStamp]) before starting a read whose result will conditionally [put]. */
     fun readStamp(): Long = System.nanoTime()
@@ -103,20 +123,25 @@ internal class KandraCache<K : Any, V : Any>(config: CacheResultConfig?) {
      * e.g. for a write's own post-commit cache population, where there's no read-vs-write race to guard.
      */
     fun put(key: K, value: V, readStartedAt: Long? = null) {
+        val k = normalize(key)
         if (readStartedAt != null) {
-            val invalidatedAt = lastInvalidatedAt[key]
+            val invalidatedAt = lastInvalidatedAt[k]
             if (invalidatedAt != null && invalidatedAt >= readStartedAt) return
         }
-        putMethod?.invoke(inner, key, value)
+        putMethod?.invoke(inner, k, value)
     }
 
     fun invalidate(key: K) {
+        val k = normalize(key)
         if (inner != null) {
-            lastInvalidatedAt[key] = System.nanoTime()
+            lastInvalidatedAt[k] = System.nanoTime()
             if (lastInvalidatedAt.size > invalidationSweepThreshold) sweepStaleInvalidationStamps()
         }
-        invalidateMethod?.invoke(inner, key)
+        invalidateMethod?.invoke(inner, k)
     }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun normalize(key: K): K = normalizeCacheKey(key) as K
 
     private fun sweepStaleInvalidationStamps() {
         val cutoff = System.nanoTime() - ttlNanos
