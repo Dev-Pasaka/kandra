@@ -147,16 +147,9 @@ abstract class KandraMigration(
                     .map { file -> (if (packagePath.isEmpty()) file.name else "$packagePath/${file.name}").removeSuffix(".class") }
                     .filterTo(mutableSetOf(), ::matches)
             }
-            root.isFile && root.name.endsWith(".jar") -> {
-                JarFile(root).use { jar ->
-                    jar.entries().asSequence()
-                        .map { entry -> entry.name }
-                        .filter { entryName -> entryName.endsWith(".class") }
-                        .map { entryName -> entryName.removeSuffix(".class") }
-                        .filter(::matches)
-                        .toSet()
-                }
-            }
+            root.isFile && root.name.endsWith(".jar") ->
+                // GH #194: one indexed scan per jar per JVM, instead of a full scan per migration.
+                JarClassIndex.classesUnder(root, ownResourcePath.substringBefore('$')).filterTo(mutableSetOf(), ::matches)
             else -> emptySet()
         }
     }
