@@ -6,6 +6,7 @@ import com.datastax.oss.driver.api.core.cql.ResultSet
 import com.datastax.oss.driver.api.core.cql.Row
 import com.datastax.oss.driver.api.core.cql.Statement
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.kandra.core.CqlNaming
 import io.kandra.core.InternalKandraApi
 import io.kandra.core.KandraConsistency
 import io.kandra.core.exception.KandraQueryException
@@ -391,7 +392,7 @@ class QueryExecutor(
     private fun buildActiveQueryCql(marker: io.kandra.core.schema.ColumnSchema, allowFullScan: Boolean): String {
         val hasSecondaryIndex = schema.secondaryIndexes.any { it.cqlName == marker.cqlName }
         if (hasSecondaryIndex) {
-            return "SELECT * FROM ${schema.qualifiedTableName} WHERE ${marker.cqlName} = ?"
+            return "SELECT * FROM ${schema.qualifiedTableName} WHERE ${marker.cqlIdentifier} = ?"
         }
         if (!allowFullScan) {
             throw KandraQueryException(
@@ -401,7 +402,7 @@ class QueryExecutor(
             )
         }
         activeMarkerWarning(marker)
-        return "SELECT * FROM ${schema.qualifiedTableName} WHERE ${marker.cqlName} = ? ALLOW FILTERING"
+        return "SELECT * FROM ${schema.qualifiedTableName} WHERE ${marker.cqlIdentifier} = ? ALLOW FILTERING"
     }
 
     fun <T : Any> findActive(entityClass: KClass<T>, allowFullScan: Boolean = false): List<T> {
@@ -506,7 +507,7 @@ class QueryExecutor(
 
         // ── Direct CQL query ──────────────────────────────────────────────────
         val (whereParts, values) = buildWhere(ctx.predicates)
-        val selectCols = if (selectKeys) schema.partitionKeys.joinToString(", ") { it.cqlName } else "*"
+        val selectCols = if (selectKeys) schema.partitionKeys.joinToString(", ") { it.cqlIdentifier } else "*"
         val limitClause = when {
             limitOne -> " LIMIT 1"
             ctx.limit != null -> " LIMIT ${ctx.limit}"
@@ -612,7 +613,7 @@ class QueryExecutor(
 
         // ── Direct CQL query ──────────────────────────────────────────────────
         val (whereParts, values) = buildWhere(ctx.predicates)
-        val selectCols = if (selectKeys) schema.partitionKeys.joinToString(", ") { it.cqlName } else "*"
+        val selectCols = if (selectKeys) schema.partitionKeys.joinToString(", ") { it.cqlIdentifier } else "*"
         val limitClause = when {
             limitOne -> " LIMIT 1"
             ctx.limit != null -> " LIMIT ${ctx.limit}"
@@ -678,14 +679,14 @@ class QueryExecutor(
 
         predicates.forEach { pred ->
             when (pred) {
-                is KandraPredicate.Eq -> { parts += "${pred.column} = ?"; values += encodePredicateValue(pred.column, pred.value) }
-                is KandraPredicate.Gt -> { parts += "${pred.column} > ?"; values += encodePredicateValue(pred.column, pred.value) }
-                is KandraPredicate.Gte -> { parts += "${pred.column} >= ?"; values += encodePredicateValue(pred.column, pred.value) }
-                is KandraPredicate.Lt -> { parts += "${pred.column} < ?"; values += encodePredicateValue(pred.column, pred.value) }
-                is KandraPredicate.Lte -> { parts += "${pred.column} <= ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Eq -> { parts += "${CqlNaming.quoteIfNeeded(pred.column)} = ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Gt -> { parts += "${CqlNaming.quoteIfNeeded(pred.column)} > ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Gte -> { parts += "${CqlNaming.quoteIfNeeded(pred.column)} >= ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Lt -> { parts += "${CqlNaming.quoteIfNeeded(pred.column)} < ?"; values += encodePredicateValue(pred.column, pred.value) }
+                is KandraPredicate.Lte -> { parts += "${CqlNaming.quoteIfNeeded(pred.column)} <= ?"; values += encodePredicateValue(pred.column, pred.value) }
                 is KandraPredicate.In -> {
                     val placeholders = pred.values.joinToString(", ") { "?" }
-                    parts += "${pred.column} IN ($placeholders)"
+                    parts += "${CqlNaming.quoteIfNeeded(pred.column)} IN ($placeholders)"
                     values.addAll(pred.values.map { encodePredicateValue(pred.column, it) })
                 }
             }

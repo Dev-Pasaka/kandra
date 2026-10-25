@@ -98,7 +98,22 @@ object SchemaRegistry {
                     "only letters, digits, and underscores."
             )
         }
+        // GH #188: column names that are reserved words are quoted in generated CQL, but table and
+        // keyspace names are not (they are also spliced into lookup-table and index names), so
+        // reject a reserved one here with a clear message instead of a parse error at CREATE TABLE.
+        if (CqlNaming.isReserved(tableName)) {
+            throw KandraSchemaException(
+                "Class '${klass.simpleName}' has @ScyllaTable name '$tableName', which is a reserved " +
+                    "CQL keyword. Choose another table name (e.g. '${tableName}_table')."
+            )
+        }
         val keyspace = tableAnnotation.keyspace.takeIf { it.isNotBlank() }
+        if (keyspace != null && CqlNaming.isReserved(keyspace)) {
+            throw KandraSchemaException(
+                "Class '${klass.simpleName}' has @ScyllaTable keyspace '$keyspace', which is a reserved " +
+                    "CQL keyword. Choose another keyspace name."
+            )
+        }
         if (keyspace != null && !CqlNaming.isValidIdentifier(keyspace)) {
             throw KandraSchemaException(
                 "Class '${klass.simpleName}' has an invalid @ScyllaTable keyspace '$keyspace' — " +

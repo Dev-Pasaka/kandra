@@ -21,7 +21,15 @@ data class ColumnSchema(
     val isSensitive: Boolean = false,
     val isVersion: Boolean = false,
     val generatedUuidStrategy: UuidStrategy? = null
-)
+) {
+    /**
+     * [cqlName] as it must appear in generated CQL: double-quoted when it is a reserved word
+     * (`"token"`), unchanged otherwise. Use [cqlName] for comparisons, row reads and messages.
+     * GH #188.
+     */
+    val cqlIdentifier: String
+        get() = io.kandra.core.CqlNaming.quoteIfNeeded(cqlName)
+}
 
 data class ClusteringKeySchema(val order: ClusteringOrder, val index: Int)
 

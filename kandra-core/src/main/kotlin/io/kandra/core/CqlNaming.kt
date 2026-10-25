@@ -41,10 +41,39 @@ object CqlNaming {
     /**
      * Basic CQL identifier shape check: non-blank, first character is a letter or underscore,
      * remaining characters are letters/digits/underscores. This is intentionally not a full CQL
-     * grammar validator (no reserved-word check, no quoted-identifier support) — it exists only to
+     * grammar validator (reserved words are handled by [quoteIfNeeded]) — it exists only to
      * catch obvious mistakes (blank names, names starting with a digit, names containing spaces or
      * punctuation) before they get spliced into DDL/DML strings.
      */
     fun isValidIdentifier(name: String): Boolean =
         name.isNotBlank() && IDENTIFIER_REGEX.matches(name)
+
+    /**
+     * Words that Cassandra 4.1 or ScyllaDB 2026.1 reject as a bare identifier. Every word in the
+     * keyword appendix of either grammar was tried as a bare column name in `CREATE TABLE` against
+     * both databases (GH #188); this is the union of the ones that failed (e.g. `token`, `order`,
+     * `default`), plus the documented reserved keywords that happened to parse in those versions
+     * (`mbean`, `mbeans`). Unreserved keywords such as `timestamp`, `type`, `key`, `ttl`, `date` or
+     * `count` are deliberately absent: they work bare, so their DDL stays byte-for-byte unchanged.
+     */
+    val RESERVED_WORDS: Set<String> = setOf(
+        "add", "allow", "alter", "and", "apply", "asc", "authorize", "batch", "begin", "by", "cast",
+        "columnfamily", "create", "default", "delete", "desc", "describe", "drop", "entries", "execute",
+        "from", "full", "grant", "if", "in", "index", "infinity", "insert", "into", "is", "keyspace",
+        "limit", "materialized", "mbean", "mbeans", "modify", "nan", "norecursive", "not", "null", "of",
+        "on", "or", "order", "primary", "rename", "replace", "revoke", "schema", "select", "set", "table",
+        "to", "token", "truncate", "unlogged", "unset", "update", "use", "using", "view", "where", "with",
+    )
+
+    /** `true` when [name] (case-insensitively) is in [RESERVED_WORDS]. */
+    fun isReserved(name: String): Boolean = name.lowercase() in RESERVED_WORDS
+
+    /**
+     * Renders a column [name] for splicing into generated CQL. A reserved word is double-quoted in
+     * its lowercase form (`token` -> `"token"`), which names exactly the column an unquoted
+     * `token` would if the grammar allowed it, so existing tables, `system_schema` lookups and
+     * `Row.get("token")` reads keep working. Every other name is returned unchanged. GH #188.
+     */
+    fun quoteIfNeeded(name: String): String =
+        if (isReserved(name)) "\"${name.lowercase()}\"" else name
 }
