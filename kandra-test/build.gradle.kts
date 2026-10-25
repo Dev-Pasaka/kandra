@@ -21,16 +21,15 @@ dependencies {
     implementation(libs.kotlin.logging)
     implementation(libs.slf4j.simple)
     compileOnly(libs.junit) // KandraCloud.assumeConfigured() (JUnit assumptions)
-    compileOnly(libs.testcontainers.cassandra)
-    // ComposeContainer (org.testcontainers.containers.ComposeContainer), backing
-    // KandraMultiDcTestcontainers (GH #84 / ISS-076), lives in the base `testcontainers` artifact
-    // rather than the `cassandra` module above -- compileOnly here (like the cassandra module) so
-    // consumers of kandra-test that never touch Testcontainers don't pull it in transitively.
-    compileOnly(libs.testcontainers.core)
+    // GH #190: KandraTestcontainers.container is a public CassandraContainer, and
+    // KandraMultiDcTestcontainers (GH #84 / ISS-076) is built on ComposeContainer from the base
+    // `testcontainers` artifact. Both were compileOnly, so calling KandraTestcontainers.freshKeyspace()
+    // without hand-adding org.testcontainers:cassandra failed with NoClassDefFoundError. kandra-test is
+    // a test-scope artifact anyway, so ship both as `api` at the version it was built against.
+    api(libs.testcontainers.cassandra)
+    api(libs.testcontainers.core)
 
     testImplementation(libs.junit)
-    testImplementation(libs.testcontainers.cassandra)
-    testImplementation(libs.testcontainers.core)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.caffeine)
     testRuntimeOnly(libs.junit.launcher)
