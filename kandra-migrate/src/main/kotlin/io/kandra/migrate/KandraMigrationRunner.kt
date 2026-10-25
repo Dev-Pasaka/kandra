@@ -129,6 +129,27 @@ class KandraMigrationRunner @JvmOverloads constructor(
     private val migrationsTable: String =
         if (keyspace == null) "kandra_migrations" else "$keyspace.kandra_migrations"
 
+    // GH #194: each of these was re-prepared on every call; prepare once per runner instead. Lazy,
+    // because kandra_migrations only exists after init's bootstrap has run.
+    private val claimStatement by lazy {
+        session.prepare(
+            "INSERT INTO $migrationsTable (version, name, status, claimed_at, checksum) " +
+            "VALUES (?, ?, ?, toTimestamp(now()), ?) IF NOT EXISTS"
+        )
+    }
+    private val markAppliedStatement by lazy {
+        session.prepare("UPDATE $migrationsTable SET status = ?, applied_at = ? WHERE version = ?")
+    }
+    private val updateChecksumStatement by lazy {
+        session.prepare("UPDATE $migrationsTable SET checksum = ? WHERE version = ?")
+    }
+    private val releaseClaimStatement by lazy {
+        session.prepare("DELETE FROM $migrationsTable WHERE version = ?")
+    }
+    private val serverNowStatement by lazy {
+        session.prepare("SELECT toTimestamp(now()) AS server_now FROM $migrationsTable WHERE version = ?")
+    }
+
     init {
         if (keyspace != null && !CqlNaming.isValidIdentifier(keyspace)) {
             throw IllegalArgumentException("Invalid keyspace name '$keyspace' for KandraMigrationRunner")
@@ -212,9 +233,7 @@ class KandraMigrationRunner @JvmOverloads constructor(
                 // (An Error, e.g. from a crashed/killed process, is NOT caught here on purpose --
                 // that's exactly the case handleUnresolvedClaim exists to surface loudly instead
                 // of silently trusting or silently retrying.)
-                session.execute(
-                    session.prepare("DELETE FROM $migrationsTable WHERE version = ?").bind(migration.version)
-                )
+                session.execute(releaseClaimStatement.bind(migration.version))
                 throw KandraMigrationException("Migration v${migration.version} ('${migration.name}') failed: ${e.message}", e)
             }
             markApplied(migration)
@@ -236,10 +255,7 @@ class KandraMigrationRunner @JvmOverloads constructor(
             // still in. If the stored value matches that legacy hash, the migration is unchanged;
             // store the new checksum so later layout-only edits verify too.
             if (existing.checksum == migration.legacyChecksum()) {
-                session.execute(
-                    session.prepare("UPDATE $migrationsTable SET checksum = ? WHERE version = ?")
-                        .bind(checksum, migration.version)
-                )
+                session.execute(updateChecksumStatement.bind(checksum, migration.version))
                 logger.info {
                     "Migration v${migration.version} ('${migration.name}'): stored checksum upgraded to the " +
                     "line-number-independent form (GH #191)."
@@ -316,10 +332,7 @@ class KandraMigrationRunner @JvmOverloads constructor(
      * read and this call.
      */
     private fun serverNow(version: Int): Instant {
-        val prepared = session.prepare(
-            "SELECT toTimestamp(now()) AS server_now FROM $migrationsTable WHERE version = ?"
-        )
-        val row = session.execute(prepared.bind(version)).one()
+        val row = session.execute(serverNowStatement.bind(version)).one()
         return row?.getInstant("server_now") ?: Instant.now()
     }
 
@@ -356,12 +369,8 @@ class KandraMigrationRunner @JvmOverloads constructor(
      * includes the current values of that row on failure, so no extra read is needed.
      */
     private fun claim(migration: KandraMigration): MigrationHistory? {
-        val prepared = session.prepare(
-            "INSERT INTO $migrationsTable (version, name, status, claimed_at, checksum) " +
-            "VALUES (?, ?, ?, toTimestamp(now()), ?) IF NOT EXISTS"
-        )
         val rs = session.execute(
-            prepared.bind(
+            claimStatement.bind(
                 migration.version,
                 migration.name,
                 MigrationRowStatus.CLAIMED.name,
@@ -384,10 +393,7 @@ class KandraMigrationRunner @JvmOverloads constructor(
 
     /** Marks a claimed migration as confirmed complete. Only called after `up()` returns successfully. */
     private fun markApplied(migration: KandraMigration) {
-        session.execute(
-            session.prepare("UPDATE $migrationsTable SET status = ?, applied_at = ? WHERE version = ?")
-                .bind(MigrationRowStatus.APPLIED.name, Instant.now(), migration.version)
-        )
+        session.execute(markAppliedStatement.bind(MigrationRowStatus.APPLIED.name, Instant.now(), migration.version))
     }
 }
 
@@ -439,6 +445,15 @@ internal fun claimAndRunDdlBootstrap(
     action: () -> Unit
 ) {
     val locks = ddlLocksTable(keyspace)
+    // GH #194 fast path: once the bootstrap has run, the lock row reads DONE forever, and every
+    // later startup used to pay CREATE TABLE IF NOT EXISTS plus a losing IF NOT EXISTS LWT (Paxos)
+    // just to discover that. A plain read answers it in one round trip. Anything other than a
+    // DONE row (no table yet, no row, CLAIMED) falls through to the full protocol below, so this
+    // can only skip work the protocol itself would also skip.
+    if (ddlLockIsDone(session, locks, lockName)) {
+        logger.debug { "Kandra: DDL bootstrap lock '$lockName' already DONE -- skipping DDL." }
+        return
+    }
     ensureDdlLockTable(session, locks)
     val holder = UUID.randomUUID().toString()
 
@@ -556,6 +571,21 @@ private fun ensureDdlLockTable(session: CqlSession, locks: String) {
         )
         """.trimIndent()
     )
+}
+
+/**
+ * `true` only when [locks] exists and [lockName]'s row reads `DONE`. A missing table (the very
+ * first bootstrap against this keyspace) reads as `false`; other errors propagate, as the
+ * `CREATE TABLE` that used to run first would have. GH #194.
+ */
+private fun ddlLockIsDone(session: CqlSession, locks: String, lockName: String): Boolean = try {
+    session.execute(
+        com.datastax.oss.driver.api.core.cql.SimpleStatement.newInstance(
+            "SELECT status FROM $locks WHERE lock_name = ?", lockName
+        )
+    ).one()?.getString("status") == "DONE"
+} catch (e: com.datastax.oss.driver.api.core.servererrors.InvalidQueryException) {
+    false
 }
 
 /** Returns `true` if this call won the claim on [lockName]. */
