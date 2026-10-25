@@ -60,11 +60,21 @@ abstract class KandraMigration(
      * KDoc, and the class-level note above for what it still can't see through, and the
      * documented operator recovery path for when a mismatch is a false positive anyway.
      */
-    internal fun checksum(): String {
+    internal fun checksum(): String = checksumWith(BytecodeNormalizer::normalize)
+
+    /**
+     * The checksum Kandra computed before GH #191, which kept Kotlin's SMAP constant (with its line
+     * numbers) in the hash. [KandraMigrationRunner] accepts a stored checksum equal to this one and
+     * rewrites it to [checksum], so upgrading Kandra doesn't fail every applied migration whose
+     * `up()` calls an inline function. Differs from [checksum] only for such migrations.
+     */
+    internal fun legacyChecksum(): String = checksumWith(BytecodeNormalizer::normalizeLegacy)
+
+    private fun checksumWith(normalize: (ByteArray) -> ByteArray): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         digest.update("${version}:${name}:${this::class.qualifiedName}".toByteArray())
         for (bytes in compiledClassFiles()) {
-            digest.update(BytecodeNormalizer.normalize(bytes))
+            digest.update(normalize(bytes))
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }

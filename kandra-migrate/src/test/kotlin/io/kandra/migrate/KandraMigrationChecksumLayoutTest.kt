@@ -1,9 +1,12 @@
 package io.kandra.migrate
 
+import io.kandra.core.exception.KandraMigrationException
+import io.kandra.test.KandraTestBackend
 import org.jetbrains.kotlin.cli.common.ExitCode
 import org.jetbrains.kotlin.cli.jvm.K2JVMCompiler
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -42,8 +45,11 @@ class KandraMigrationChecksumLayoutTest {
         }
     """.trimIndent()
 
-    /** Compiles [source] into [outDir] and returns the migration object's [KandraMigration.checksum]. */
-    private fun compileAndChecksum(source: String, workDir: File): String {
+    /** Compiles [source] into [workDir] and returns the migration object's [KandraMigration.checksum]. */
+    private fun compileAndChecksum(source: String, workDir: File): String = compileAndLoad(source, workDir) { it.checksum() }
+
+    /** Compiles [source] into [workDir], loads the migration object and passes it to [use]. */
+    private fun <R> compileAndLoad(source: String, workDir: File, use: (KandraMigration) -> R): R {
         val srcFile = File(workDir, "src/V001.kt").apply { parentFile.mkdirs(); writeText(source) }
         val outDir = File(workDir, "classes").apply { mkdirs() }
         val log = ByteArrayOutputStream()
@@ -58,7 +64,7 @@ class KandraMigrationChecksumLayoutTest {
         assertEquals(ExitCode.OK, exit, "compilation failed:\n$log")
         URLClassLoader(arrayOf(outDir.toURI().toURL()), javaClass.classLoader).use { loader ->
             val migration = loader.loadClass("gh191.V001_CreateUsersTables").getField("INSTANCE").get(null) as KandraMigration
-            return migration.checksum()
+            return use(migration)
         }
     }
 
@@ -89,5 +95,43 @@ class KandraMigrationChecksumLayoutTest {
             tmp.resolve("b").toFile()
         )
         assertNotEquals(before, after, "a change to the CQL up() runs must still change the checksum")
+    }
+
+    @Test
+    fun `a row applied with the pre-fix checksum verifies and is upgraded to the new checksum`(@TempDir tmp: Path) {
+        val keyspace = KandraTestBackend.keyspaceName("gh191")
+        KandraTestBackend.createKeyspace(keyspace)
+        try {
+            KandraTestBackend.newSession(keyspace).use { session ->
+                compileAndLoad(source(padding = ""), tmp.resolve("a").toFile()) { migration ->
+                    val legacy = migration.legacyChecksum()
+                    assertNotEquals(legacy, migration.checksum(), "an inline-calling migration's legacy checksum differs")
+
+                    // Simulate a row written by Kandra <= 0.5.1: APPLIED with the legacy checksum.
+                    val runner = KandraMigrationRunner(session)
+                    session.execute(
+                        session.prepare(
+                            "INSERT INTO kandra_migrations (version, name, status, applied_at, checksum) " +
+                                "VALUES (?, ?, 'APPLIED', toTimestamp(now()), ?)"
+                        ).bind(migration.version, migration.name, legacy)
+                    )
+
+                    runner.run(migration) // must not throw
+                    val stored = runner.history().single { it.version == migration.version }.checksum
+                    assertEquals(migration.checksum(), stored, "the stored checksum is rewritten to the new form")
+                    runner.run(migration) // and verifies directly from now on
+                }
+
+                // A genuinely different migration under the same version is still rejected.
+                compileAndLoad(
+                    source(padding = "", cql = "CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, email TEXT)"),
+                    tmp.resolve("b").toFile()
+                ) { changed ->
+                    assertThrows(KandraMigrationException::class.java) { KandraMigrationRunner(session).run(changed) }
+                }
+            }
+        } finally {
+            KandraTestBackend.dropKeyspace(keyspace)
+        }
     }
 }

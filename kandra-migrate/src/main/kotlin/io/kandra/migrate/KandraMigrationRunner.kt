@@ -230,11 +230,26 @@ class KandraMigrationRunner @JvmOverloads constructor(
      * to verify is that nobody silently edited the migration since it was applied.
      */
     private fun verifyAppliedChecksum(existing: MigrationHistory, migration: KandraMigration) {
-        if (existing.checksum != migration.checksum()) {
+        val checksum = migration.checksum()
+        if (existing.checksum != checksum) {
+            // GH #191: rows applied by an earlier Kandra were hashed with the Kotlin SMAP constant
+            // still in. If the stored value matches that legacy hash, the migration is unchanged;
+            // store the new checksum so later layout-only edits verify too.
+            if (existing.checksum == migration.legacyChecksum()) {
+                session.execute(
+                    session.prepare("UPDATE $migrationsTable SET checksum = ? WHERE version = ?")
+                        .bind(checksum, migration.version)
+                )
+                logger.info {
+                    "Migration v${migration.version} ('${migration.name}'): stored checksum upgraded to the " +
+                    "line-number-independent form (GH #191)."
+                }
+                return
+            }
             throw KandraMigrationException(
                 "Migration v${migration.version} ('${migration.name}') checksum mismatch — " +
                 "the migration was modified after being applied. " +
-                "Expected: ${existing.checksum}, got: ${migration.checksum()}. " +
+                "Expected: ${existing.checksum}, got: $checksum. " +
                 "Never modify a migration after it has been applied."
             )
         }

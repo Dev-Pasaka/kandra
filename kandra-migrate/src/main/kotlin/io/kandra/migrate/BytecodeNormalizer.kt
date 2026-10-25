@@ -54,8 +54,17 @@ internal object BytecodeNormalizer {
      * Returns [bytes] with the toolchain-noise ranges from [excludedRanges] removed, or [bytes]
      * unchanged if it can't be parsed as a class file.
      */
-    fun normalize(bytes: ByteArray): ByteArray {
-        val ranges = runCatching { excludedRanges(bytes) }.getOrNull() ?: return bytes
+    fun normalize(bytes: ByteArray): ByteArray = normalize(bytes, stripSmapConstants = true)
+
+    /**
+     * [normalize] as it was before GH #191, keeping SMAP constant-pool entries. Only
+     * [KandraMigration.legacyChecksum] uses it, so a migration applied by an earlier Kandra still
+     * verifies after an upgrade instead of failing once.
+     */
+    fun normalizeLegacy(bytes: ByteArray): ByteArray = normalize(bytes, stripSmapConstants = false)
+
+    private fun normalize(bytes: ByteArray, stripSmapConstants: Boolean): ByteArray {
+        val ranges = runCatching { excludedRanges(bytes, stripSmapConstants) }.getOrNull() ?: return bytes
         val out = ByteArrayOutputStream(bytes.size)
         var cursor = 0
         for (range in ranges) {
@@ -84,7 +93,7 @@ internal object BytecodeNormalizer {
      * Throws on anything that doesn't parse as expected -- callers (namely [normalize]) treat
      * that as "give up, hash the raw bytes" rather than risk excluding the wrong bytes.
      */
-    internal fun excludedRanges(bytes: ByteArray): List<IntRange> {
+    internal fun excludedRanges(bytes: ByteArray, stripSmapConstants: Boolean = true): List<IntRange> {
         val cursor = Cursor(bytes)
         val excluded = mutableListOf<IntRange>()
 
@@ -94,7 +103,7 @@ internal object BytecodeNormalizer {
         cursor.skip(2) // major_version
         excluded += versionStart until cursor.pos
 
-        val utf8ByIndex = readConstantPool(cursor, excluded)
+        val utf8ByIndex = readConstantPool(cursor, excluded.takeIf { stripSmapConstants })
 
         cursor.skip(2) // access_flags
         cursor.skip(2) // this_class
@@ -125,7 +134,7 @@ internal object BytecodeNormalizer {
      * payload): its slot stays in place, so every other constant-pool index the class references is
      * unaffected, and only the line-number text drops out of the hash (GH #191).
      */
-    private fun readConstantPool(cursor: Cursor, excluded: MutableList<IntRange>): Map<Int, String> {
+    private fun readConstantPool(cursor: Cursor, excluded: MutableList<IntRange>?): Map<Int, String> {
         val count = cursor.u2()
         val utf8ByIndex = HashMap<Int, String>()
         var index = 1
@@ -136,7 +145,7 @@ internal object BytecodeNormalizer {
                     val length = cursor.u2()
                     val value = String(cursor.bytes(length), Charsets.UTF_8)
                     utf8ByIndex[index] = value
-                    if (value.startsWith(SMAP_PREFIX)) excluded += entryStart until cursor.pos
+                    if (excluded != null && value.startsWith(SMAP_PREFIX)) excluded += entryStart until cursor.pos
                 }
                 7, 8, 16, 19, 20 -> cursor.skip(2)       // Class, String, MethodType, Module, Package
                 3, 4, 9, 10, 11, 12, 17, 18 -> cursor.skip(4) // Integer, Float, *ref, NameAndType, Dynamic, InvokeDynamic
