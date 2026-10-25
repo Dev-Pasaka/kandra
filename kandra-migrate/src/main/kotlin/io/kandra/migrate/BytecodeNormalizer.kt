@@ -14,6 +14,10 @@ import java.io.ByteArrayOutputStream
  *    elsewhere in the file, or disappears entirely with `-g:none`.
  *  - `SourceFile` and `SourceDebugExtension` attributes record the source file name / line
  *    mapping, not behavior.
+ *  - Kotlin's inline-function source map (SMAP) also lands in the constant pool as a Utf8
+ *    entry, as the value of the `@kotlin.jvm.internal.SourceDebugExtension` annotation Kotlin
+ *    emits on any class that calls an inline function (`forEach`, `map`, `use`, ...). It carries
+ *    line numbers (`line 25: 0`), so moving the source lines changes it (GH #191).
  *
  * None of those describe what `up()` actually *does*. [normalize] removes exactly those byte
  * ranges so [KandraMigration.checksum] is insensitive to them, while remaining sensitive to any
@@ -50,8 +54,17 @@ internal object BytecodeNormalizer {
      * Returns [bytes] with the toolchain-noise ranges from [excludedRanges] removed, or [bytes]
      * unchanged if it can't be parsed as a class file.
      */
-    fun normalize(bytes: ByteArray): ByteArray {
-        val ranges = runCatching { excludedRanges(bytes) }.getOrNull() ?: return bytes
+    fun normalize(bytes: ByteArray): ByteArray = normalize(bytes, stripSmapConstants = true)
+
+    /**
+     * [normalize] as it was before GH #191, keeping SMAP constant-pool entries. Only
+     * [KandraMigration.legacyChecksum] uses it, so a migration applied by an earlier Kandra still
+     * verifies after an upgrade instead of failing once.
+     */
+    fun normalizeLegacy(bytes: ByteArray): ByteArray = normalize(bytes, stripSmapConstants = false)
+
+    private fun normalize(bytes: ByteArray, stripSmapConstants: Boolean): ByteArray {
+        val ranges = runCatching { excludedRanges(bytes, stripSmapConstants) }.getOrNull() ?: return bytes
         val out = ByteArrayOutputStream(bytes.size)
         var cursor = 0
         for (range in ranges) {
@@ -63,17 +76,24 @@ internal object BytecodeNormalizer {
     }
 
     /**
+     * Prefix of a Kotlin SMAP (`SMAP\n<file>\nKotlin\n*S Kotlin\n*F\n...*L\n...`). A constant-pool
+     * Utf8 entry starting with it is debug data, never something `up()` executes (GH #191).
+     */
+    private const val SMAP_PREFIX = "SMAP\n"
+
+    /**
      * Parses [bytes] as a class file and returns the sorted, non-overlapping byte ranges
      * (inclusive `first`, inclusive `last`) that [normalize] excludes: the `minor_version`/
-     * `major_version` fields, plus every [STRIPPED_ATTRIBUTES] occurrence at class, field,
-     * method, and (recursively) `Code` attribute level. Exposed internally so tests can assert
+     * `major_version` fields, every constant-pool Utf8 entry holding a Kotlin SMAP, plus every
+     * [STRIPPED_ATTRIBUTES] occurrence at class, field, method, and (recursively) `Code`
+     * attribute level. Exposed internally so tests can assert
      * directly against known-safe "inside an excluded range" vs. "outside every excluded range"
      * byte offsets without duplicating this parser.
      *
      * Throws on anything that doesn't parse as expected -- callers (namely [normalize]) treat
      * that as "give up, hash the raw bytes" rather than risk excluding the wrong bytes.
      */
-    internal fun excludedRanges(bytes: ByteArray): List<IntRange> {
+    internal fun excludedRanges(bytes: ByteArray, stripSmapConstants: Boolean = true): List<IntRange> {
         val cursor = Cursor(bytes)
         val excluded = mutableListOf<IntRange>()
 
@@ -83,7 +103,13 @@ internal object BytecodeNormalizer {
         cursor.skip(2) // major_version
         excluded += versionStart until cursor.pos
 
-        val utf8ByIndex = readConstantPool(cursor)
+        val pool = readConstantPool(cursor)
+        val utf8ByIndex = pool.utf8ByIndex
+        if (stripSmapConstants) {
+            pool.utf8RangeByIndex.forEach { (index, range) ->
+                if (utf8ByIndex.getValue(index).startsWith(SMAP_PREFIX)) excluded += range
+            }
+        }
 
         cursor.skip(2) // access_flags
         cursor.skip(2) // this_class
@@ -103,21 +129,39 @@ internal object BytecodeNormalizer {
             walkAttributes(cursor, utf8ByIndex, excluded)
         }
 
-        walkAttributes(cursor, utf8ByIndex, excluded) // class-level attributes (e.g. SourceFile)
+        walkAttributes(cursor, utf8ByIndex, excluded) { name, start, length ->
+            // GH #191: every string the @kotlin.jvm.internal.SourceDebugExtension annotation holds
+            // is SMAP text. A long SMAP is split across several array elements, and only the first
+            // starts with SMAP_PREFIX, so drop each referenced Utf8 entry, not just prefixed ones.
+            if (stripSmapConstants && (name == "RuntimeInvisibleAnnotations" || name == "RuntimeVisibleAnnotations")) {
+                sourceDebugExtensionStrings(bytes, start, length, utf8ByIndex)
+                    .forEach { index -> pool.utf8RangeByIndex[index]?.let { excluded += it } }
+            }
+        } // class-level attributes (e.g. SourceFile)
 
-        return excluded.sortedBy { it.first }
+        return excluded.distinct().sortedBy { it.first }
     }
 
-    /** Reads the constant pool, resolving only Utf8 entries (needed to identify attribute names by index). */
-    private fun readConstantPool(cursor: Cursor): Map<Int, String> {
+    private class ConstantPool(val utf8ByIndex: Map<Int, String>, val utf8RangeByIndex: Map<Int, IntRange>)
+
+    /**
+     * Reads the constant pool, resolving only Utf8 entries (needed to identify attribute names by
+     * index) and the byte range (tag, length and payload) of each, so an SMAP entry can be excluded
+     * whole: its slot stays in place, so every other constant-pool index the class references is
+     * unaffected, and only the line-number text drops out of the hash (GH #191).
+     */
+    private fun readConstantPool(cursor: Cursor): ConstantPool {
         val count = cursor.u2()
         val utf8ByIndex = HashMap<Int, String>()
+        val utf8RangeByIndex = HashMap<Int, IntRange>()
         var index = 1
         while (index < count) {
+            val entryStart = cursor.pos
             when (val tag = cursor.u1()) {
                 1 -> { // Utf8
                     val length = cursor.u2()
                     utf8ByIndex[index] = String(cursor.bytes(length), Charsets.UTF_8)
+                    utf8RangeByIndex[index] = entryStart until cursor.pos
                 }
                 7, 8, 16, 19, 20 -> cursor.skip(2)       // Class, String, MethodType, Module, Package
                 3, 4, 9, 10, 11, 12, 17, 18 -> cursor.skip(4) // Integer, Float, *ref, NameAndType, Dynamic, InvokeDynamic
@@ -127,7 +171,44 @@ internal object BytecodeNormalizer {
             }
             index++
         }
-        return utf8ByIndex
+        return ConstantPool(utf8ByIndex, utf8RangeByIndex)
+    }
+
+    private const val SOURCE_DEBUG_EXTENSION_DESCRIPTOR = "Lkotlin/jvm/internal/SourceDebugExtension;"
+
+    /**
+     * Constant-pool indices of the strings held by a `@kotlin.jvm.internal.SourceDebugExtension`
+     * annotation inside the `Runtime(In)VisibleAnnotations` attribute payload at
+     * [bytes]`[start, start + length)`. Parsed on its own cursor, so the caller's position is
+     * unaffected. JVM Spec §4.7.16.
+     */
+    private fun sourceDebugExtensionStrings(bytes: ByteArray, start: Int, length: Int, utf8ByIndex: Map<Int, String>): List<Int> {
+        val c = Cursor(bytes).apply { skip(start) }
+        val found = mutableListOf<Int>()
+        fun elementValue(collect: Boolean) {
+            when (c.u1().toChar()) {
+                'B', 'C', 'D', 'F', 'I', 'J', 'S', 'Z' -> c.skip(2)
+                's' -> c.u2().let { if (collect) found += it }
+                'e' -> c.skip(4)
+                'c' -> c.skip(2)
+                '@' -> annotation(c, ::elementValue)
+                '[' -> repeat(c.u2()) { elementValue(collect) }
+                else -> error("unrecognized element_value tag")
+            }
+        }
+        repeat(c.u2()) {
+            val typeIndex = c.u2()
+            val collect = utf8ByIndex[typeIndex] == SOURCE_DEBUG_EXTENSION_DESCRIPTOR
+            repeat(c.u2()) { c.skip(2); elementValue(collect) }
+        }
+        check(c.pos == start + length) { "annotations attribute length mismatch" }
+        return found
+    }
+
+    /** Skips one nested `annotation` structure; its strings are never SMAP text. */
+    private fun annotation(c: Cursor, elementValue: (Boolean) -> Unit) {
+        c.skip(2) // type_index
+        repeat(c.u2()) { c.skip(2); elementValue(false) }
     }
 
     /**
@@ -137,13 +218,19 @@ internal object BytecodeNormalizer {
      * `LineNumberTable`/`LocalVariableTable`/`LocalVariableTypeTable` actually live) rather than
      * skipped as an opaque blob.
      */
-    private fun walkAttributes(cursor: Cursor, utf8ByIndex: Map<Int, String>, excluded: MutableList<IntRange>) {
+    private fun walkAttributes(
+        cursor: Cursor,
+        utf8ByIndex: Map<Int, String>,
+        excluded: MutableList<IntRange>,
+        onAttribute: ((name: String?, payloadStart: Int, length: Int) -> Unit)? = null,
+    ) {
         val count = cursor.u2()
         repeat(count) {
             val nameIndex = cursor.u2()
             val length = cursor.u4()
             val headerStart = cursor.pos - 6
             val name = utf8ByIndex[nameIndex]
+            onAttribute?.invoke(name, cursor.pos, length)
             when {
                 name in STRIPPED_ATTRIBUTES -> {
                     excluded += headerStart until (cursor.pos + length)
