@@ -105,10 +105,13 @@ this Mac. Failure classes and what was done (#205, PR pending):
 
 | Failures | Cause | Fix |
 |---|---|---|
-| 5 ktor `testApplication` tests, `UncompletedCoroutinesError` after 1 m | kotlinx-coroutines-test's 60 s default under Ktor's `testApplication` (no parameter in Ktor 3.6) vs WAN DDL | `KANDRA_TEST_BACKEND=cloud` sets `kotlinx.coroutines.test.default_timeout=10m` (root build) |
+| 5 ktor `testApplication` tests, `UncompletedCoroutinesError` after 1 m | Ktor 3.6's `testApplication` runs `runTestWithRealTime(timeout = 60.seconds)`, no parameter, and the kotlinx `default_timeout` property does not apply to an explicit timeout; `install(Kandra)` is 30-200 s of WAN DDL (and 39-73 s for `AutoCreateRedeployTest`'s two installs on Docker under load) | `kandraTestApplication` (kandra-ktor test helper): `runTestApplication` under a 10-minute `runTestWithRealTime`, used at every call site |
 | 2 ktor `DdlBootstrapClaimTest` lost-fencing tests | the test's simulated reclaim was a plain `UPDATE`; its client timestamp lost to the claim's Paxos timestamp (#203 ordering) | simulation is an LWT (`IF EXISTS`), both copies |
 | 2 migrate `DdlBootstrapClaimTest` concurrency tests, 30 s latch | 8 simultaneous bootstraps serialise `CREATE TABLE IF NOT EXISTS` through Raft (~2 s each) plus Paxos contention | `KandraTestBackend.concurrencyBudgetSeconds` (30 s Docker, 180 s cloud) |
 | migrate concurrent runners: `WriteTimeoutException` (CAS) from `claim()` | real bug: CAS timeout under contention propagated | runner and lock helpers re-read and retry (#205) |
 | `KandraPluginTest` cleanup: `system.peers` timed out after PT5S | driver connection-init query timeout not raised by the test builders (nor by `pool.requestTimeoutMillis` in production) | 30 s in test builders; production derives from request timeout |
 | `ReservedIdentifierIntegrationTest` exhaustive check, PT30S | 65 sequential `CREATE TABLE`s | one table with every reserved word as a column |
 | 6 kandra-test failures, `UnknownHostException` | DNS resolution on this Mac dropped during the run; also hit a v0.5.1 baseline attempt | none (environment); rerun |
+| `KandraMigrationChecksumLayoutTest` legacy-row upgrade (Docker full check, once) | the fixture wrote the simulated 0.5.1 row with a plain `INSERT` (client timestamp); the runner's conditional upgrade is an LWT (ballot timestamp). Most likely the Docker VM clock trailed the host at that moment (it wanders by seconds; precise probes showed -10 ms and +2 s minutes apart), so the CAS applied but its cell lost. Not proven. | fixture writes the row with `IF NOT EXISTS`, as 0.5.1's `claim()` did |
+
+v0.5.1 baseline of the migrate/ktor `DdlBootstrapClaimTest` and `KandraMigrationMultiKeyspaceCloudTest` classes on the same cluster, run **alone**: 19/19 pass. The `main` failures above occurred inside the full 90-minute run; the same classes alone on `main` + #203 are compared below once run.
