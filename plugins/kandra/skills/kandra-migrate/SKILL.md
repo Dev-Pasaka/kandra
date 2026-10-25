@@ -49,6 +49,21 @@ actual bytecode instructions, constant pool, and annotations sensitive to change
 to hashing the raw bytes unmodified — normalization can only *reduce* false positives, never mask a real edit.
 See `docs/issues/ISS-062-migration-checksum-false-positive-risk.md`.
 
+**Inline functions and the source layout (GH #191, unreleased, next: 0.5.2).** A migration whose `up()` calls an inline
+function (`forEach`, `map`, `use`, ...) carries Kotlin's inline source map (SMAP — line numbers and the file's total line
+count) as the string value of a `@kotlin.jvm.internal.SourceDebugExtension` annotation. On 0.5.1 and earlier those
+constant-pool strings were hashed, so reformatting the file or adding a line *anywhere in it* failed the applied
+migration with a checksum mismatch. The normalizer now excludes every Utf8 constant that annotation references (and any
+`SMAP\n`-prefixed constant); the annotation's type and indices still count. Upgrading is automatic: the runner also
+computes the old-style checksum (`legacyChecksum()`), and when a stored row matches it, it rewrites the row to the new
+checksum and logs an INFO line instead of throwing. On 0.5.1, avoid inline calls in `up()` (a plain
+`for (cql in statements) session.execute(cql)`).
+
+**Startup cost (GH #194, unreleased, next: 0.5.2).** Constructing a runner against an already-bootstrapped keyspace does one
+plain `SELECT` of its `kandra_ddl_locks` row instead of `CREATE TABLE IF NOT EXISTS` plus a losing `IF NOT EXISTS` LWT;
+the application jar is indexed once per JVM (`JarClassIndex`) instead of scanned in full for every migration; each
+migration's checksum is computed once per `run()`; the runner's own statements are prepared once.
+
 **Residual limitation:** this remains an approximation, not a semantic diff — a large enough compiler/toolchain
 change can still, rarely, flip a checksum for source that didn't actually change. The documented recovery path
 (on `KandraMigration.checksum()`'s own KDoc) is to confirm via source diff that it's a genuine false positive,

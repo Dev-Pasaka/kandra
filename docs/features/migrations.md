@@ -37,6 +37,13 @@ runner.run(CreateUsersTable, AddPhoneColumn)
   Kotlin 2.x — GH #102/ISS-089) are stored in `kandra_migrations` and validated on re-run; mismatch
   throws `KandraMigrationException`. Editing an anonymous class or object expression inside `up()`
   changes the checksum just like editing `up()`'s own body does.
+- Debug data is not part of the checksum: line numbers, local-variable tables, the target bytecode version, and
+  *(unreleased, next: 0.5.2 — GH #191)* Kotlin's inline source map (SMAP), which a migration gets when `up()` calls an
+  inline function such as `forEach`. Through 0.5.1 the SMAP's line numbers were hashed, so reformatting the file, or adding
+  a line anywhere in it, failed an applied migration; avoid inline calls in `up()` on those versions. Upgrading is automatic:
+  a stored checksum computed by an older Kandra is accepted and rewritten to the new form.
+- *(unreleased, next: 0.5.2 — GH #194)* Startup is cheap when nothing is pending: an already-bootstrapped keyspace is detected
+  with one plain read (no DDL, no LWT), and the application jar is indexed once instead of scanned for every migration.
 - Each migration is claimed via an LWT (`INSERT ... IF NOT EXISTS`) before it runs, so two
   runner instances racing against the same keyspace can't both execute the same migration
   concurrently. If `up()` throws, the claim is released so a retry can pick it up.
