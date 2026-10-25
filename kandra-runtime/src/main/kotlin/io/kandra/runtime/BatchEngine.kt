@@ -6,6 +6,7 @@ import com.datastax.oss.driver.api.core.cql.AsyncResultSet
 import com.datastax.oss.driver.api.core.cql.BatchStatement
 import com.datastax.oss.driver.api.core.cql.BatchableStatement
 import com.datastax.oss.driver.api.core.cql.BoundStatement
+import com.datastax.oss.driver.api.core.cql.PreparedStatement
 import com.datastax.oss.driver.api.core.cql.DefaultBatchType
 import com.datastax.oss.driver.api.core.RequestThrottlingException
 import com.datastax.oss.driver.api.core.cql.Statement
@@ -452,7 +453,8 @@ class BatchEngine(
         new: Any,
         consistency: KandraConsistency? = null,
         ttlSeconds: Int? = null,
-        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL,
+        writeNulls: Boolean = false
     ): Any {
         validateEntity(new)
         val versionCol = schema.versionColumn
@@ -465,7 +467,7 @@ class BatchEngine(
                 ?: throw KandraQueryException("@Version field '${versionCol.propertyName}' is null")
             val newVersion = incrementVersion(versionCol, oldVersion)
             val stampedWithVersion = injectVersion(schema, stamped, versionCol.propertyName, newVersion)
-            val stmt = buildVersionedUpdateStatement(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds, serialConsistency)
+            val stmt = buildVersionedUpdateStatement(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds, serialConsistency, writeNulls)
             // Not executeWithRetry: a blind retry of this LWT would risk observing our own prior
             // attempt's success as a false optimistic-lock conflict. See executeOnce's doc.
             val rs = executeOnce(stmt, schema.qualifiedTableName, "update")
@@ -476,10 +478,14 @@ class BatchEngine(
         }
 
         val (batchStmts, eventualStmts) = buildUpdateStatements(schema, old, stamped)
+        // GH #189: writeNulls (updateWithNulls) binds a null property as NULL, clearing the column,
+        // instead of UNSET -- the same choice bindVersionedUpdate makes for the versioned branch.
+        val primaryStmt = if (writeNulls) statementBuilder.insertPrimaryWithNulls(schema, stamped, ttlSeconds, consistency = consistency)
+            else statementBuilder.insertPrimary(schema, stamped, consistency = consistency)
         val batch = batchStmts.fold(
-            newLoggedBatch(schema, consistency).add(statementBuilder.insertPrimary(schema, stamped, consistency = consistency))
+            newLoggedBatch(schema, consistency).add(primaryStmt)
         ) { acc, stmt -> acc.add(stmt) }
-        executeWithRetry(batch, schema.qualifiedTableName, "update")
+        executeWithRetry(batch, schema.qualifiedTableName, if (writeNulls) "updateWithNulls" else "update")
         fireEventualStatements(eventualStmts, new, "(update)", schema.qualifiedTableName)
         return stamped
     }
@@ -647,11 +653,15 @@ class BatchEngine(
      * backs [KandraBatchScope.saveInBatchAndGet]/[KandraBlockingBatchScope.saveInBatchAndGet].
      * See [saveAndGet]'s doc for the underlying gap this closes.
      */
-    internal fun collectSaveAndGet(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): Pair<List<BatchableStatement<*>>, Any> {
+    internal fun collectSaveAndGet(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, writeNulls: Boolean = false): Pair<List<BatchableStatement<*>>, Any> {
         if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot be saved in a batch scope.")
         val stamped = injectTimestamps(schema, entity, isInsert = true)
         val statements = buildList {
-            add(statementBuilder.insertPrimary(schema, stamped, ttlSeconds))
+            // GH #189: writeNulls backs saveWithNullsInBatch -- a null property is bound as NULL.
+            add(
+                if (writeNulls) statementBuilder.insertPrimaryWithNulls(schema, stamped, ttlSeconds)
+                else statementBuilder.insertPrimary(schema, stamped, ttlSeconds)
+            )
             schema.lookupTables.filter { it.consistency == LookupConsistency.BATCH }
                 .forEach { add(statementBuilder.insertLookup(schema, it, stamped)) }
         }
@@ -683,11 +693,15 @@ class BatchEngine(
         collectSaveAndGetSuspend(schema, entity, ttlSeconds).first
 
     /** Suspend counterpart of [collectSaveAndGet] — see its doc. */
-    internal suspend fun collectSaveAndGetSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null): Pair<List<BatchableStatement<*>>, Any> {
+    internal suspend fun collectSaveAndGetSuspend(schema: TableSchema, entity: Any, ttlSeconds: Int? = null, writeNulls: Boolean = false): Pair<List<BatchableStatement<*>>, Any> {
         if (schema.isCounterTable) throw KandraQueryException("Counter tables cannot be saved in a batch scope.")
         val stamped = injectTimestamps(schema, entity, isInsert = true)
         val statements = buildList {
-            add(statementBuilder.insertPrimarySuspend(schema, stamped, ttlSeconds))
+            // GH #189: see collectSaveAndGet.
+            add(
+                if (writeNulls) statementBuilder.insertPrimaryWithNullsSuspend(schema, stamped, ttlSeconds)
+                else statementBuilder.insertPrimarySuspend(schema, stamped, ttlSeconds)
+            )
             schema.lookupTables.filter { it.consistency == LookupConsistency.BATCH }
                 .forEach { add(statementBuilder.insertLookupSuspend(schema, it, stamped)) }
         }
@@ -816,7 +830,8 @@ class BatchEngine(
         new: Any,
         consistency: KandraConsistency? = null,
         ttlSeconds: Int? = null,
-        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL,
+        writeNulls: Boolean = false
     ): Any {
         validateEntity(new)
         val versionCol = schema.versionColumn
@@ -830,7 +845,7 @@ class BatchEngine(
             val newVersion = incrementVersion(versionCol, oldVersion)
             val stampedWithVersion = injectVersion(schema, stamped, versionCol.propertyName, newVersion)
             // Async prepare avoids blocking the dispatcher on the first call for this CQL string
-            val stmt = buildVersionedUpdateStatementSuspend(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds, serialConsistency)
+            val stmt = buildVersionedUpdateStatementSuspend(schema, versionCol, stampedWithVersion, oldVersion, consistency, ttlSeconds, serialConsistency, writeNulls)
             // Not executeWithRetrySuspend: a blind retry of this LWT would risk observing our own
             // prior attempt's success as a false optimistic-lock conflict. See executeOnceSuspend's doc.
             val rs = executeOnceSuspend(stmt, schema.qualifiedTableName, "update")
@@ -841,11 +856,13 @@ class BatchEngine(
         }
 
         val (batchStmts, eventualStmts) = buildUpdateStatementsSuspend(schema, old, stamped)
-        val primaryStmt = statementBuilder.insertPrimarySuspend(schema, stamped, consistency = consistency)
+        // GH #189: see updateAndGet.
+        val primaryStmt = if (writeNulls) statementBuilder.insertPrimaryWithNullsSuspend(schema, stamped, ttlSeconds, consistency = consistency)
+            else statementBuilder.insertPrimarySuspend(schema, stamped, consistency = consistency)
         val batch = batchStmts.fold(
             newLoggedBatch(schema, consistency).add(primaryStmt)
         ) { acc, stmt -> acc.add(stmt) }
-        executeWithRetrySuspend(batch, schema.qualifiedTableName, "update")
+        executeWithRetrySuspend(batch, schema.qualifiedTableName, if (writeNulls) "updateWithNulls" else "update")
         fireEventualStatementsSuspend(eventualStmts, new, "(update)", schema.qualifiedTableName)
         return stamped
     }
@@ -1037,7 +1054,8 @@ class BatchEngine(
         oldVersion: Any,
         consistency: KandraConsistency? = null,
         ttlSeconds: Int? = null,
-        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL,
+        writeNulls: Boolean = false
     ): BoundStatement {
         val nonKeyCols = buildList {
             addAll(schema.columns)
@@ -1056,8 +1074,7 @@ class BatchEngine(
         val entityProps = schema.reflection.propertiesByName
         val values = mutableListOf<Any?>()
         nonKeyCols.forEach { col ->
-            val encoded = codec.encode(entityProps[col.propertyName]?.call(stampedWithVersion), col.type)
-            values.add(if (encoded === KandraUnset) null else encoded)
+            values.add(codec.encode(entityProps[col.propertyName]?.call(stampedWithVersion), col.type))
         }
         (schema.partitionKeys + schema.clusteringKeys).forEach { key ->
             val encoded = codec.encode(entityProps[key.propertyName]?.call(stampedWithVersion), key.type)
@@ -1067,7 +1084,7 @@ class BatchEngine(
         values.add(if (encodedOldVersion === KandraUnset) null else encodedOldVersion)
 
         val resolved = statementBuilder.resolveWriteConsistency(schema, consistency)
-        return prepared.bind(*values.toTypedArray())
+        return bindVersionedUpdate(prepared, values, writeNulls)
             .setConsistencyLevel(DefaultConsistencyLevel.valueOf(resolved.name))
             .setSerialConsistencyLevel(DefaultConsistencyLevel.valueOf(serialConsistency.name))
     }
@@ -1084,7 +1101,8 @@ class BatchEngine(
         oldVersion: Any,
         consistency: KandraConsistency? = null,
         ttlSeconds: Int? = null,
-        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL,
+        writeNulls: Boolean = false
     ): BoundStatement {
         val nonKeyCols = buildList {
             addAll(schema.columns)
@@ -1103,8 +1121,7 @@ class BatchEngine(
         val entityProps = schema.reflection.propertiesByName
         val values = mutableListOf<Any?>()
         nonKeyCols.forEach { col ->
-            val encoded = codec.encode(entityProps[col.propertyName]?.call(stampedWithVersion), col.type)
-            values.add(if (encoded === KandraUnset) null else encoded)
+            values.add(codec.encode(entityProps[col.propertyName]?.call(stampedWithVersion), col.type))
         }
         (schema.partitionKeys + schema.clusteringKeys).forEach { key ->
             val encoded = codec.encode(entityProps[key.propertyName]?.call(stampedWithVersion), key.type)
@@ -1114,9 +1131,28 @@ class BatchEngine(
         values.add(if (encodedOldVersion === KandraUnset) null else encodedOldVersion)
 
         val resolved = statementBuilder.resolveWriteConsistency(schema, consistency)
-        return prepared.bind(*values.toTypedArray())
+        return bindVersionedUpdate(prepared, values, writeNulls)
             .setConsistencyLevel(DefaultConsistencyLevel.valueOf(resolved.name))
             .setSerialConsistencyLevel(DefaultConsistencyLevel.valueOf(serialConsistency.name))
+    }
+
+    /**
+     * Binds a versioned UPDATE's values positionally. A null non-key property (encoded as
+     * [KandraUnset]) is left UNSET, so the stored value stays and no tombstone is written, the
+     * same rule as `save()`; with [writeNulls] (`updateWithNulls`) it is bound as NULL and clears
+     * the column. GH #189: before this, every versioned `update()` bound NULL for each null column,
+     * writing a tombstone per null column per update.
+     */
+    private fun bindVersionedUpdate(prepared: PreparedStatement, values: List<Any?>, writeNulls: Boolean): BoundStatement {
+        var stmt = prepared.bind()
+        values.forEachIndexed { idx, value ->
+            stmt = when {
+                value === KandraUnset && !writeNulls -> stmt.unset(idx)
+                value === KandraUnset || value == null -> stmt.setToNull(idx)
+                else -> @Suppress("UNCHECKED_CAST") stmt.set(idx, value, value::class.java as Class<Any>)
+            }
+        }
+        return stmt
     }
 
     private fun incrementVersion(versionCol: ColumnSchema, oldVersion: Any): Any =

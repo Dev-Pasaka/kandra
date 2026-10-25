@@ -136,6 +136,41 @@ class KandraSuspendRepository<T : Any>(
         return updated
     }
 
+    /**
+     * Same as [update], but a `null` nullable property is written as `NULL` — clearing the stored
+     * value (a tombstone) — instead of being left UNSET (unchanged). The update counterpart of
+     * [saveWithNulls]; lookup rows are maintained exactly as in [update]. GH #189.
+     *
+     * Works for both shapes: on a `@Version` entity the version-checked `UPDATE ... IF version = ?`
+     * binds the null columns as `NULL`; otherwise the full-row INSERT does.
+     */
+    suspend fun updateWithNulls(
+        old: T,
+        new: T,
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    ) {
+        updateWithNullsAndGet(old, new, consistency, ttlSeconds, serialConsistency)
+    }
+
+    /** [updateWithNulls] that returns the persisted entity, like [updateAndGet] does for [update]. GH #189. */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun updateWithNullsAndGet(
+        old: T,
+        new: T,
+        consistency: KandraConsistency? = null,
+        ttlSeconds: Int? = null,
+        serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL
+    ): T {
+        val updated = batchEngine.updateAndGetSuspend(
+            schema, old, new, consistency = consistency, ttlSeconds = ttlSeconds,
+            serialConsistency = serialConsistency, writeNulls = true
+        ) as T
+        cache.invalidate(cacheKeyOf(updated))
+        return updated
+    }
+
     suspend fun updateForce(entity: T, consistency: KandraConsistency? = null) {
         batchEngine.updateForceSuspend(schema, entity, consistency = consistency)
         cache.invalidate(cacheKeyOf(entity))

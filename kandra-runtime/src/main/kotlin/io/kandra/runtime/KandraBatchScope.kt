@@ -11,7 +11,7 @@ import io.kandra.runtime.repository.KandraSuspendRepository
 /**
  * DSL scope for building a caller-controlled LOGGED batch inside [KandraRuntime.batch] (suspend).
  *
- * All `saveInBatch()` and `deleteInBatch()` calls inside the block are collected and executed as a
+ * All `saveInBatch()`, `saveWithNullsInBatch()` and `deleteInBatch()` calls inside the block are collected and executed as a
  * single atomic `LOGGED BATCH` when the block exits. See [KandraBlockingBatchScope] for the
  * `batchBlocking` (non-suspend) counterpart.
  *
@@ -73,6 +73,26 @@ class KandraBatchScope internal constructor(
     @OptIn(InternalKandraApi::class)
     suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatchAndGet(entity: T, ttlSeconds: Int? = null): T {
         val (stmts, stamped) = batchEngine.collectSaveAndGetSuspend(schema, entity, ttlSeconds)
+        statements.addAll(stmts)
+        this@KandraBatchScope.schema = schema
+        return stamped as T
+    }
+
+    /**
+     * Same as [saveInBatch], but a `null` nullable property is written as `NULL` — clearing the
+     * stored value (a tombstone) — instead of being left UNSET. The batch counterpart of
+     * [KandraSuspendRepository.saveWithNulls], so a column can be cleared atomically with the
+     * other writes in this `LOGGED BATCH`. GH #189.
+     */
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveWithNullsInBatch(entity: T, ttlSeconds: Int? = null) {
+        saveWithNullsInBatchAndGet(entity, ttlSeconds)
+    }
+
+    /** [saveWithNullsInBatch] that returns the entity as it will be persisted — see [saveInBatchAndGet]. GH #189. */
+    @Suppress("UNCHECKED_CAST")
+    @OptIn(InternalKandraApi::class)
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveWithNullsInBatchAndGet(entity: T, ttlSeconds: Int? = null): T {
+        val (stmts, stamped) = batchEngine.collectSaveAndGetSuspend(schema, entity, ttlSeconds, writeNulls = true)
         statements.addAll(stmts)
         this@KandraBatchScope.schema = schema
         return stamped as T
@@ -141,6 +161,21 @@ class KandraBlockingBatchScope internal constructor(
     @OptIn(InternalKandraApi::class)
     fun <T : Any> KandraRepository<T>.saveInBatchAndGet(entity: T, ttlSeconds: Int? = null): T {
         val (stmts, stamped) = batchEngine.collectSaveAndGet(schema, entity, ttlSeconds)
+        statements.addAll(stmts)
+        this@KandraBlockingBatchScope.schema = schema
+        return stamped as T
+    }
+
+    /** Blocking counterpart of [KandraBatchScope.saveWithNullsInBatch]: a `null` property is written as `NULL`. GH #189. */
+    fun <T : Any> KandraRepository<T>.saveWithNullsInBatch(entity: T, ttlSeconds: Int? = null) {
+        saveWithNullsInBatchAndGet(entity, ttlSeconds)
+    }
+
+    /** [saveWithNullsInBatch] that returns the entity as it will be persisted — see [saveInBatchAndGet]. GH #189. */
+    @Suppress("UNCHECKED_CAST")
+    @OptIn(InternalKandraApi::class)
+    fun <T : Any> KandraRepository<T>.saveWithNullsInBatchAndGet(entity: T, ttlSeconds: Int? = null): T {
+        val (stmts, stamped) = batchEngine.collectSaveAndGet(schema, entity, ttlSeconds, writeNulls = true)
         statements.addAll(stmts)
         this@KandraBlockingBatchScope.schema = schema
         return stamped as T
