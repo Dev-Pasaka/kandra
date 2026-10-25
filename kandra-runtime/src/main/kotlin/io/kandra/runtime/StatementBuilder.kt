@@ -524,7 +524,7 @@ class StatementBuilder(
      * always an instance of [schema]'s `entityClass`.
      */
     fun insertLookup(schema: TableSchema, lookup: LookupTableSchema, entity: Any): BoundStatement {
-        val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns + lookup.clusteringKeyColumns
+        val cols = listOf(lookup.indexColumn) + lookup.storedKeyColumns // GH #187: index column once
         val colNames = cols.joinToString(", ") { it.cqlName }
         val placeholders = cols.joinToString(", ") { "?" }
         val cql = "INSERT INTO ${lookup.qualifiedTableName} ($colNames) VALUES ($placeholders)"
@@ -544,7 +544,7 @@ class StatementBuilder(
 
     /** Suspend counterpart of [insertLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
     suspend fun insertLookupSuspend(schema: TableSchema, lookup: LookupTableSchema, entity: Any): BoundStatement {
-        val cols = listOf(lookup.indexColumn) + lookup.partitionKeyColumns + lookup.clusteringKeyColumns
+        val cols = listOf(lookup.indexColumn) + lookup.storedKeyColumns // GH #187: index column once
         val colNames = cols.joinToString(", ") { it.cqlName }
         val placeholders = cols.joinToString(", ") { "?" }
         val cql = "INSERT INTO ${lookup.qualifiedTableName} ($colNames) VALUES ($placeholders)"

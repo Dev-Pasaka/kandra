@@ -80,11 +80,10 @@ object DdlGenerator {
             // partition/clustering key on the *primary* table's schema — force key-aware (frozen<>
             // if a collection) rendering here rather than trusting its origin-schema flags. See GH-31.
             add("${lookup.indexColumn.cqlName} ${columnCqlType(lookup.indexColumn, forceKey = true)}")
-            lookup.partitionKeyColumns.forEach { pk ->
-                add("${pk.cqlName} ${columnCqlType(pk)}")
-            }
-            lookup.clusteringKeyColumns.forEach { ck ->
-                add("${ck.cqlName} ${columnCqlType(ck)}")
+            // storedKeyColumns, not partitionKeyColumns + clusteringKeyColumns: when the indexed
+            // column is itself a primary-table key column it must not be declared twice (GH #187).
+            lookup.storedKeyColumns.forEach { key ->
+                add("${key.cqlName} ${columnCqlType(key)}")
             }
         }
         val colDefs = cols.joinToString(",\n    ")

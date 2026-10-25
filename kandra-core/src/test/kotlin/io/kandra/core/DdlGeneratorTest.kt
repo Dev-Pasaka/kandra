@@ -51,6 +51,21 @@ data class CollectionLookupIndexEntity(
     val tags: Set<String>
 )
 
+@ScyllaTable(name = "support_recoveries", keyspace = "circaso_identity")
+data class ClusteringKeyLookupEntity(
+    @PartitionKey val userId: UUID,
+    @ClusteringKey(order = ClusteringOrder.DESC)
+    @LookupIndex(tableSuffix = "by_request") val requestId: UUID,
+    val status: String,
+)
+
+@ScyllaTable("partition_key_lookup_entities")
+data class PartitionKeyLookupEntity(
+    @PartitionKey(index = 0) val tenantId: UUID,
+    @PartitionKey(index = 1) @LookupIndex(tableSuffix = "by_doc") val docId: UUID,
+    val title: String,
+)
+
 class DdlGeneratorTest {
 
     @AfterEach
@@ -214,5 +229,37 @@ class DdlGeneratorTest {
         val lookup = schema.lookupTables.first()
         val ddl = DdlGenerator.lookupTable(lookup)
         assertTrue(ddl.contains("tags FROZEN<SET<TEXT>>"), "Expected FROZEN indexColumn in: $ddl")
+    }
+
+    // ── GH #187: @LookupIndex on a primary-table key column ───────────────────
+
+    @Test
+    fun `LookupIndex on a clustering key declares the indexed column once in the lookup table`() {
+        val schema = SchemaRegistry.register(ClusteringKeyLookupEntity::class)
+        val ddl = DdlGenerator.lookupTable(schema.lookupTables.single())
+        assertEquals(
+            "CREATE TABLE IF NOT EXISTS circaso_identity.support_recoveries_by_request (\n" +
+                "    request_id UUID,\n" +
+                "    user_id UUID,\n" +
+                "    PRIMARY KEY (request_id)\n" +
+                ");",
+            ddl
+        )
+    }
+
+    @Test
+    fun `LookupIndex on a partition key declares the indexed column once in the lookup table`() {
+        val schema = SchemaRegistry.register(PartitionKeyLookupEntity::class)
+        val ddl = DdlGenerator.lookupTable(schema.lookupTables.single())
+        assertEquals(1, Regex("\\bdoc_id UUID").findAll(ddl).count(), "doc_id must be declared once in: $ddl")
+        assertTrue(ddl.contains("tenant_id UUID"), ddl)
+        assertTrue(ddl.contains("PRIMARY KEY (doc_id)"), ddl)
+    }
+
+    @Test
+    fun `storedKeyColumns keeps every key column when the indexed column is a regular column`() {
+        val schema = SchemaRegistry.register(User::class)
+        val lookup = schema.lookupTables.find { it.tableName == "users_by_email" }!!
+        assertEquals(lookup.partitionKeyColumns + lookup.clusteringKeyColumns, lookup.storedKeyColumns)
     }
 }

@@ -91,6 +91,17 @@ data class LookupTableSchema(
     /** `tableName` when [keyspace] is null, else `"$keyspace.$tableName"`. */
     val qualifiedTableName: String
         get() = if (keyspace == null) tableName else "$keyspace.$tableName"
+
+    /**
+     * The primary table's key columns ([partitionKeyColumns] + [clusteringKeyColumns]) that the
+     * lookup table stores as plain columns next to [indexColumn], in that order. When the indexed
+     * column is itself one of those key columns (`@LookupIndex` on a `@ClusteringKey` or
+     * `@PartitionKey`), it is already the lookup table's own key and is left out here, so the
+     * lookup DDL and INSERT name it once. GH #187: listing it twice produced
+     * `CREATE TABLE ... (request_id UUID, user_id UUID, request_id UUID, ...)`, which the database rejects.
+     */
+    val storedKeyColumns: List<ColumnSchema>
+        get() = (partitionKeyColumns + clusteringKeyColumns).filter { it.cqlName != indexColumn.cqlName }
 }
 
 data class CacheResultConfig(val ttlSeconds: Int, val maxSize: Long)
