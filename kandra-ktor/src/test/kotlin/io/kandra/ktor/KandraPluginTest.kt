@@ -286,10 +286,11 @@ class KandraPluginTest {
     @Test
     fun `kandra health debounces repeated hits within the cache TTL and re-probes after it elapses`() {
         lateinit var cache: HealthCheckCache
-        // The TTL must comfortably exceed one health probe (a cluster round trip): 400 ms is fine on
-        // the Docker container, but a ~250 ms WAN probe with jitter overran it on ScyllaDB Cloud,
-        // so the second of the "rapid" hits re-probed and the count below read 2.
-        val ttlMs = if (KandraTestBackend.isCloud) 5_000L else 400L
+        // The TTL must comfortably exceed one health probe (a cluster round trip), or the second of
+        // the "rapid" hits re-probes and the count below reads 2. 400 ms was not enough: a ~250 ms
+        // WAN probe with jitter overran it on ScyllaDB Cloud, and so did a Docker probe on a loaded
+        // machine (load average 17). The test only needs "well inside" and "well past" the TTL.
+        val ttlMs = if (KandraTestBackend.isCloud) 5_000L else 2_000L
         kandraTestApplication {
             application {
                 install(Kandra) {
