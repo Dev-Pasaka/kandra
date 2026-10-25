@@ -969,8 +969,10 @@ class BatchEngine(
             val cql = "UPDATE ${schema.qualifiedTableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
             val prepared = session.prepare(cql)
             val values = mutableListOf<Any?>()
-            nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
-            keyValues.forEach { values.add(it) }
+            // GH #198: through the codec like every other write (enums -> TEXT, custom encoders). A
+            // null stays NULL here on purpose: the TTL'd rewrite must not leave an un-expiring cell.
+            nonKeyCols.forEach { col -> values.add(encodeSoftDeleteValue(props[col.propertyName]?.call(entity), col)) }
+            (schema.partitionKeys + schema.clusteringKeys).zip(keyValues).forEach { (col, v) -> values.add(encodeSoftDeleteValue(v, col)) }
             executeWithRetry(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.qualifiedTableName, "delete")
         }
         // Marker write is an INSERT, not an UPDATE -- deliberately. The row's original save()
@@ -992,7 +994,8 @@ class BatchEngine(
             val placeholders = keyCols.indices.map { "?" }.plus("?").joinToString(", ")
             val cql = "INSERT INTO ${schema.qualifiedTableName} ($insertCols) VALUES ($placeholders) USING TTL $markerTtl"
             val prepared = session.prepare(cql)
-            val values = keyValues.toMutableList<Any?>().also { it.add(true) }
+            val values = keyCols.zip(keyValues).map { (col, v) -> encodeSoftDeleteValue(v, col) }
+                .toMutableList<Any?>().also { it.add(encodeSoftDeleteValue(true, marker)) }
             executeWithRetry(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.qualifiedTableName, "delete")
         }
         // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
@@ -1019,8 +1022,10 @@ class BatchEngine(
             // prepareSuspend avoids blocking the coroutine dispatcher; driver caches the result
             val prepared = session.prepareSuspend(cql)
             val values = mutableListOf<Any?>()
-            nonKeyCols.forEach { col -> values.add(props[col.propertyName]?.call(entity)) }
-            keyValues.forEach { values.add(it) }
+            // GH #198: through the codec like every other write (enums -> TEXT, custom encoders). A
+            // null stays NULL here on purpose: the TTL'd rewrite must not leave an un-expiring cell.
+            nonKeyCols.forEach { col -> values.add(encodeSoftDeleteValue(props[col.propertyName]?.call(entity), col)) }
+            (schema.partitionKeys + schema.clusteringKeys).zip(keyValues).forEach { (col, v) -> values.add(encodeSoftDeleteValue(v, col)) }
             executeWithRetrySuspend(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.qualifiedTableName, "delete")
         }
         if (marker != null) {
@@ -1032,7 +1037,8 @@ class BatchEngine(
             val placeholders = keyCols.indices.map { "?" }.plus("?").joinToString(", ")
             val cql = "INSERT INTO ${schema.qualifiedTableName} ($insertCols) VALUES ($placeholders) USING TTL $markerTtl"
             val prepared = session.prepareSuspend(cql)
-            val values = keyValues.toMutableList<Any?>().also { it.add(true) }
+            val values = keyCols.zip(keyValues).map { (col, v) -> encodeSoftDeleteValue(v, col) }
+                .toMutableList<Any?>().also { it.add(encodeSoftDeleteValue(true, marker)) }
             executeWithRetrySuspend(prepared.bind(*values.toTypedArray()).setConsistencyLevel(resolvedConsistency), schema.qualifiedTableName, "delete")
         }
         // Lookup rows are deliberately left alone (see ISS-030) -- a soft-deleted row still "exists"
@@ -1154,6 +1160,10 @@ class BatchEngine(
         }
         return stmt
     }
+
+    /** Encodes a soft-delete bind value with [KandraCodec]; `null` (and an UNSET encoding) binds as NULL. GH #198. */
+    private fun encodeSoftDeleteValue(value: Any?, col: ColumnSchema): Any? =
+        value?.let { codec.encode(it, col.type) }?.takeIf { it !== KandraUnset }
 
     private fun incrementVersion(versionCol: ColumnSchema, oldVersion: Any): Any =
         when (versionCol.type.classifier) {
