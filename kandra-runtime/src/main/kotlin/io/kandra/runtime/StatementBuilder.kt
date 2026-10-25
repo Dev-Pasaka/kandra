@@ -285,7 +285,7 @@ class StatementBuilder(
     private fun TableSchema.primaryKeyColumns(): List<io.kandra.core.schema.ColumnSchema> = partitionKeys + clusteringKeys
 
     private fun TableSchema.primaryKeyWhereClause(): String =
-        primaryKeyColumns().joinToString(" AND ") { "${it.cqlName} = ?" }
+        primaryKeyColumns().joinToString(" AND ") { "${it.cqlIdentifier} = ?" }
 
     /**
      * Guards against silently truncating key values to fewer than the full primary key — e.g. calling
@@ -322,7 +322,7 @@ class StatementBuilder(
             addAll(schema.lookupTables.map { it.indexColumn })
         }.distinctBy { it.cqlName }
 
-        val colNames = allCols.joinToString(", ") { it.cqlName }
+        val colNames = allCols.joinToString(", ") { it.cqlIdentifier }
         val placeholders = allCols.joinToString(", ") { "?" }
 
         val effectiveTtl = ttlSeconds ?: schema.defaultTtl
@@ -378,7 +378,7 @@ class StatementBuilder(
             addAll(schema.lookupTables.map { it.indexColumn })
         }.distinctBy { it.cqlName }
 
-        val colNames = allCols.joinToString(", ") { it.cqlName }
+        val colNames = allCols.joinToString(", ") { it.cqlIdentifier }
         val placeholders = allCols.joinToString(", ") { "?" }
 
         val effectiveTtl = ttlSeconds ?: schema.defaultTtl
@@ -441,7 +441,7 @@ class StatementBuilder(
             addAll(schema.lookupTables.map { it.indexColumn })
         }.distinctBy { it.cqlName }
 
-        val colNames = allCols.joinToString(", ") { it.cqlName }
+        val colNames = allCols.joinToString(", ") { it.cqlIdentifier }
         val placeholders = allCols.joinToString(", ") { "?" }
         val effectiveTtl = ttlSeconds ?: schema.defaultTtl
         val modifiers = buildList<String> {
@@ -488,7 +488,7 @@ class StatementBuilder(
             addAll(schema.lookupTables.map { it.indexColumn })
         }.distinctBy { it.cqlName }
 
-        val colNames = allCols.joinToString(", ") { it.cqlName }
+        val colNames = allCols.joinToString(", ") { it.cqlIdentifier }
         val placeholders = allCols.joinToString(", ") { "?" }
         val effectiveTtl = ttlSeconds ?: schema.defaultTtl
         val modifiers = buildList<String> {
@@ -525,7 +525,7 @@ class StatementBuilder(
      */
     fun insertLookup(schema: TableSchema, lookup: LookupTableSchema, entity: Any): BoundStatement {
         val cols = listOf(lookup.indexColumn) + lookup.storedKeyColumns // GH #187: index column once
-        val colNames = cols.joinToString(", ") { it.cqlName }
+        val colNames = cols.joinToString(", ") { it.cqlIdentifier }
         val placeholders = cols.joinToString(", ") { "?" }
         val cql = "INSERT INTO ${lookup.qualifiedTableName} ($colNames) VALUES ($placeholders)"
         val prepared = prepare(cql)
@@ -545,7 +545,7 @@ class StatementBuilder(
     /** Suspend counterpart of [insertLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
     suspend fun insertLookupSuspend(schema: TableSchema, lookup: LookupTableSchema, entity: Any): BoundStatement {
         val cols = listOf(lookup.indexColumn) + lookup.storedKeyColumns // GH #187: index column once
-        val colNames = cols.joinToString(", ") { it.cqlName }
+        val colNames = cols.joinToString(", ") { it.cqlIdentifier }
         val placeholders = cols.joinToString(", ") { "?" }
         val cql = "INSERT INTO ${lookup.qualifiedTableName} ($colNames) VALUES ($placeholders)"
         val prepared = prepareSuspend(cql)
@@ -563,7 +563,7 @@ class StatementBuilder(
     }
 
     fun deleteLookup(lookup: LookupTableSchema, indexValue: Any): BoundStatement {
-        val cql = "DELETE FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val cql = "DELETE FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlIdentifier} = ?"
         val prepared = prepare(cql)
         return prepared.bind(codec.encode(indexValue, lookup.indexColumn.type))
             .setIdempotent(true) // delete is idempotent
@@ -571,7 +571,7 @@ class StatementBuilder(
 
     /** Suspend counterpart of [deleteLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
     suspend fun deleteLookupSuspend(lookup: LookupTableSchema, indexValue: Any): BoundStatement {
-        val cql = "DELETE FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val cql = "DELETE FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlIdentifier} = ?"
         val prepared = prepareSuspend(cql)
         return prepared.bind(codec.encode(indexValue, lookup.indexColumn.type))
             .setIdempotent(true) // delete is idempotent
@@ -608,8 +608,8 @@ class StatementBuilder(
         // Select both partition AND clustering key columns of the primary table -- a lookup row must
         // be able to reconstruct the primary table's FULL key, not just its partition key, since
         // selectById requires the full key (see ISS-029).
-        val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlName }
-        val cql = "SELECT $keyCols FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlIdentifier }
+        val cql = "SELECT $keyCols FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlIdentifier} = ?"
         val prepared = prepare(cql)
         return prepared.bind(codec.encode(value, lookup.indexColumn.type))
             .setIdempotent(true)
@@ -618,8 +618,8 @@ class StatementBuilder(
 
     /** Suspend counterpart of [selectByLookup] (GH #27 / ISS-049) — see [prepareSuspend]. */
     suspend fun selectByLookupSuspend(schema: TableSchema, lookup: LookupTableSchema, value: Any, consistency: KandraConsistency? = null): BoundStatement {
-        val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlName }
-        val cql = "SELECT $keyCols FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlName} = ?"
+        val keyCols = (lookup.partitionKeyColumns + lookup.clusteringKeyColumns).joinToString(", ") { it.cqlIdentifier }
+        val cql = "SELECT $keyCols FROM ${lookup.qualifiedTableName} WHERE ${lookup.indexColumn.cqlIdentifier} = ?"
         val prepared = prepareSuspend(cql)
         return prepared.bind(codec.encode(value, lookup.indexColumn.type))
             .setIdempotent(true)
@@ -632,7 +632,7 @@ class StatementBuilder(
             "Table '${schema.qualifiedTableName}' has a composite partition key."
         )
         val pkCol = schema.partitionKeys.first()
-        val cql = "SELECT * FROM ${schema.qualifiedTableName} WHERE ${pkCol.cqlName} IN ?"
+        val cql = "SELECT * FROM ${schema.qualifiedTableName} WHERE ${pkCol.cqlIdentifier} IN ?"
         val prepared = prepare(cql)
         val encoded = ids.map { codec.encode(it, pkCol.type) }
         return prepared.bind(encoded)
@@ -647,7 +647,7 @@ class StatementBuilder(
             "Table '${schema.qualifiedTableName}' has a composite partition key."
         )
         val pkCol = schema.partitionKeys.first()
-        val cql = "SELECT * FROM ${schema.qualifiedTableName} WHERE ${pkCol.cqlName} IN ?"
+        val cql = "SELECT * FROM ${schema.qualifiedTableName} WHERE ${pkCol.cqlIdentifier} IN ?"
         val prepared = prepareSuspend(cql)
         val encoded = ids.map { codec.encode(it, pkCol.type) }
         return prepared.bind(encoded)
@@ -719,7 +719,7 @@ class StatementBuilder(
             ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.qualifiedTableName}'")
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, keyValues.size, "append")
-        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlIdentifier} = ${col.cqlIdentifier} + ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
@@ -742,7 +742,7 @@ class StatementBuilder(
             ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.qualifiedTableName}'")
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, keyValues.size, "append")
-        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} + ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlIdentifier} = ${col.cqlIdentifier} + ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepareSuspend(cql)
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
@@ -764,7 +764,7 @@ class StatementBuilder(
             ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.qualifiedTableName}'")
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, keyValues.size, "remove")
-        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlIdentifier} = ${col.cqlIdentifier} - ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
@@ -787,7 +787,7 @@ class StatementBuilder(
             ?: throw KandraSchemaException("Column '$columnName' not found in schema '${schema.qualifiedTableName}'")
         val keyCols = schema.primaryKeyColumns()
         requireFullKey(schema, keyCols, keyValues.size, "remove")
-        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} - ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlIdentifier} = ${col.cqlIdentifier} - ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepareSuspend(cql)
         val encodedKeys = keyCols.zip(keyValues).map { (keyCol, v) ->
             codec.encode(v, keyCol.type)
@@ -828,7 +828,7 @@ class StatementBuilder(
         val absDelta = safeAbsoluteDelta(delta, schema, columnName)
         val keyCols = schema.primaryKeyColumns()
         val op = if (delta >= 0) "+" else "-"
-        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlIdentifier} = ${col.cqlIdentifier} $op ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepare(cql)
         val keyValues = keyCols.map { key ->
             partitionKeys[key.propertyName] ?: partitionKeys[key.cqlName]
@@ -852,7 +852,7 @@ class StatementBuilder(
         val absDelta = safeAbsoluteDelta(delta, schema, columnName)
         val keyCols = schema.primaryKeyColumns()
         val op = if (delta >= 0) "+" else "-"
-        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlName} = ${col.cqlName} $op ? WHERE ${schema.primaryKeyWhereClause()}"
+        val cql = "UPDATE ${schema.qualifiedTableName} SET ${col.cqlIdentifier} = ${col.cqlIdentifier} $op ? WHERE ${schema.primaryKeyWhereClause()}"
         val prepared = prepareSuspend(cql)
         val keyValues = keyCols.map { key ->
             partitionKeys[key.propertyName] ?: partitionKeys[key.cqlName]
@@ -893,7 +893,7 @@ class StatementBuilder(
 
     fun existsQuery(schema: TableSchema, whereCql: String, values: List<Any?>): BoundStatement {
         checkRawInjectionRisk(whereCql, "existsQuery")
-        val pkCols = schema.partitionKeys.joinToString(", ") { it.cqlName }
+        val pkCols = schema.partitionKeys.joinToString(", ") { it.cqlIdentifier }
         val cql = "SELECT $pkCols FROM ${schema.qualifiedTableName} WHERE $whereCql LIMIT 1"
         val prepared = prepare(cql)
         return prepared.bind(*values.toTypedArray()).setIdempotent(true)

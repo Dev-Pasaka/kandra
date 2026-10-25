@@ -38,26 +38,26 @@ object DdlGenerator {
 
         val columnDefs = allColumns.joinToString(",\n    ") { col ->
             val cqlType = if (col.isCounter) "COUNTER" else columnCqlType(col)
-            "${col.cqlName} $cqlType"
+            "${col.cqlIdentifier} $cqlType"
         }
 
         val partitionKeyPart = if (schema.partitionKeys.size == 1) {
-            schema.partitionKeys.first().cqlName
+            schema.partitionKeys.first().cqlIdentifier
         } else {
-            "(${schema.partitionKeys.joinToString(", ") { it.cqlName }})"
+            "(${schema.partitionKeys.joinToString(", ") { it.cqlIdentifier }})"
         }
 
         val primaryKey = if (schema.clusteringKeys.isEmpty()) {
             "PRIMARY KEY ($partitionKeyPart)"
         } else {
-            val clusteringCols = schema.clusteringKeys.joinToString(", ") { it.cqlName }
+            val clusteringCols = schema.clusteringKeys.joinToString(", ") { it.cqlIdentifier }
             "PRIMARY KEY ($partitionKeyPart, $clusteringCols)"
         }
 
         val options = buildList<String> {
             if (schema.clusteringKeys.isNotEmpty()) {
                 val orderDefs = schema.clusteringKeys.joinToString(", ") { col ->
-                    "${col.cqlName} ${col.clusteringKey!!.order.name}"
+                    "${col.cqlIdentifier} ${col.clusteringKey!!.order.name}"
                 }
                 add("CLUSTERING ORDER BY ($orderDefs)")
             }
@@ -79,22 +79,22 @@ object DdlGenerator {
             // indexColumn is this lookup table's own PRIMARY KEY, regardless of whether it was a
             // partition/clustering key on the *primary* table's schema — force key-aware (frozen<>
             // if a collection) rendering here rather than trusting its origin-schema flags. See GH-31.
-            add("${lookup.indexColumn.cqlName} ${columnCqlType(lookup.indexColumn, forceKey = true)}")
+            add("${lookup.indexColumn.cqlIdentifier} ${columnCqlType(lookup.indexColumn, forceKey = true)}")
             // storedKeyColumns, not partitionKeyColumns + clusteringKeyColumns: when the indexed
             // column is itself a primary-table key column it must not be declared twice (GH #187).
             lookup.storedKeyColumns.forEach { key ->
-                add("${key.cqlName} ${columnCqlType(key)}")
+                add("${key.cqlIdentifier} ${columnCqlType(key)}")
             }
         }
         val colDefs = cols.joinToString(",\n    ")
-        return "CREATE TABLE IF NOT EXISTS ${lookup.qualifiedTableName} (\n    $colDefs,\n    PRIMARY KEY (${lookup.indexColumn.cqlName})\n);"
+        return "CREATE TABLE IF NOT EXISTS ${lookup.qualifiedTableName} (\n    $colDefs,\n    PRIMARY KEY (${lookup.indexColumn.cqlIdentifier})\n);"
     }
 
     fun secondaryIndex(schema: TableSchema, column: io.kandra.core.schema.ColumnSchema): String =
-        "CREATE INDEX IF NOT EXISTS ${schema.qualifiedTableName}_${column.cqlName}_idx ON ${schema.qualifiedTableName} (${column.cqlName});"
+        "CREATE INDEX IF NOT EXISTS ${schema.qualifiedTableName}_${column.cqlName}_idx ON ${schema.qualifiedTableName} (${column.cqlIdentifier});"
 
     fun alterTableAddColumn(schema: TableSchema, column: io.kandra.core.schema.ColumnSchema): String =
-        "ALTER TABLE ${schema.qualifiedTableName} ADD ${column.cqlName} ${columnCqlType(column)};"
+        "ALTER TABLE ${schema.qualifiedTableName} ADD ${column.cqlIdentifier} ${columnCqlType(column)};"
 
     /** Returns the CQL type name for a column as it would appear in DDL (e.g. "UUID", "TEXT", "BIGINT"). */
     fun cqlTypeString(column: io.kandra.core.schema.ColumnSchema): String =

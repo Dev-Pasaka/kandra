@@ -958,14 +958,14 @@ class BatchEngine(
         val ttl = schema.softDeleteTtlSeconds!!
         val marker = schema.softDeleteMarkerColumn
         val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter && it != marker }
-        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
+        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlIdentifier} = ?" }
         // Soft-delete builds its CQL directly (not via StatementBuilder), so it needs its own
         // consistency resolution — previously neither statement here called .setConsistencyLevel(...)
         // at all, silently downgrading every soft-delete to the driver's LOCAL_ONE default regardless
         // of configuration (see ISS-061 / GH #62, the same class of gap ISS-053 fixed for batches).
         val resolvedConsistency = DefaultConsistencyLevel.valueOf(statementBuilder.resolveWriteConsistency(schema, null).name)
         if (nonKeyCols.isNotEmpty()) {
-            val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
+            val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlIdentifier} = ?" }
             val cql = "UPDATE ${schema.qualifiedTableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
             val prepared = session.prepare(cql)
             val values = mutableListOf<Any?>()
@@ -988,7 +988,7 @@ class BatchEngine(
         if (marker != null) {
             val markerTtl = schema.softDeleteMarkerTtlSeconds!!
             val keyCols = schema.partitionKeys + schema.clusteringKeys
-            val insertCols = (keyCols.map { it.cqlName } + marker.cqlName).joinToString(", ")
+            val insertCols = (keyCols.map { it.cqlIdentifier } + marker.cqlIdentifier).joinToString(", ")
             val placeholders = keyCols.indices.map { "?" }.plus("?").joinToString(", ")
             val cql = "INSERT INTO ${schema.qualifiedTableName} ($insertCols) VALUES ($placeholders) USING TTL $markerTtl"
             val prepared = session.prepare(cql)
@@ -1010,11 +1010,11 @@ class BatchEngine(
         val ttl = schema.softDeleteTtlSeconds!!
         val marker = schema.softDeleteMarkerColumn
         val nonKeyCols = schema.columns.filter { !it.isTransient && !it.isCounter && it != marker }
-        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
+        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlIdentifier} = ?" }
         // See softDeleteBlocking's identical comment — ISS-061 / GH #62.
         val resolvedConsistency = DefaultConsistencyLevel.valueOf(statementBuilder.resolveWriteConsistency(schema, null).name)
         if (nonKeyCols.isNotEmpty()) {
-            val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
+            val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlIdentifier} = ?" }
             val cql = "UPDATE ${schema.qualifiedTableName} USING TTL $ttl SET $setClauses WHERE $whereParts"
             // prepareSuspend avoids blocking the coroutine dispatcher; driver caches the result
             val prepared = session.prepareSuspend(cql)
@@ -1028,7 +1028,7 @@ class BatchEngine(
             // (GH #154 / ISS-097: refreshing the row marker itself, not just the marker column).
             val markerTtl = schema.softDeleteMarkerTtlSeconds!!
             val keyCols = schema.partitionKeys + schema.clusteringKeys
-            val insertCols = (keyCols.map { it.cqlName } + marker.cqlName).joinToString(", ")
+            val insertCols = (keyCols.map { it.cqlIdentifier } + marker.cqlIdentifier).joinToString(", ")
             val placeholders = keyCols.indices.map { "?" }.plus("?").joinToString(", ")
             val cql = "INSERT INTO ${schema.qualifiedTableName} ($insertCols) VALUES ($placeholders) USING TTL $markerTtl"
             val prepared = session.prepareSuspend(cql)
@@ -1062,13 +1062,13 @@ class BatchEngine(
             addAll(schema.lookupTables.map { it.indexColumn })
         }.distinctBy { it.cqlName }.filter { !it.isTransient }
 
-        val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
-        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
+        val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlIdentifier} = ?" }
+        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlIdentifier} = ?" }
         // TTL is a per-cell property: an UPDATE with no USING TTL writes its touched cells with no
         // expiry, silently clearing the row's TTL on the first update after save() (see ISS-058 / GH #59).
         val effectiveTtl = ttlSeconds ?: schema.defaultTtl
         val usingClause = if (effectiveTtl != null) " USING TTL $effectiveTtl" else ""
-        val cql = "UPDATE ${schema.qualifiedTableName}$usingClause SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
+        val cql = "UPDATE ${schema.qualifiedTableName}$usingClause SET $setClauses WHERE $whereParts IF ${versionCol.cqlIdentifier} = ?"
         val prepared = session.prepareSuspend(cql)   // truly async prepare
 
         val entityProps = schema.reflection.propertiesByName
@@ -1109,13 +1109,13 @@ class BatchEngine(
             addAll(schema.lookupTables.map { it.indexColumn })
         }.distinctBy { it.cqlName }.filter { !it.isTransient }
 
-        val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlName} = ?" }
-        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlName} = ?" }
+        val setClauses = nonKeyCols.joinToString(", ") { "${it.cqlIdentifier} = ?" }
+        val whereParts = (schema.partitionKeys + schema.clusteringKeys).joinToString(" AND ") { "${it.cqlIdentifier} = ?" }
         // TTL is a per-cell property: an UPDATE with no USING TTL writes its touched cells with no
         // expiry, silently clearing the row's TTL on the first update after save() (see ISS-058 / GH #59).
         val effectiveTtl = ttlSeconds ?: schema.defaultTtl
         val usingClause = if (effectiveTtl != null) " USING TTL $effectiveTtl" else ""
-        val cql = "UPDATE ${schema.qualifiedTableName}$usingClause SET $setClauses WHERE $whereParts IF ${versionCol.cqlName} = ?"
+        val cql = "UPDATE ${schema.qualifiedTableName}$usingClause SET $setClauses WHERE $whereParts IF ${versionCol.cqlIdentifier} = ?"
         val prepared = session.prepare(cql)
 
         val entityProps = schema.reflection.propertiesByName
