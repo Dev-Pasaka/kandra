@@ -192,6 +192,8 @@ class KandraMigrationRunner @JvmOverloads constructor(
     fun run(vararg migrations: KandraMigration) {
         val applied = loadApplied()
         for (migration in migrations.sortedBy { it.version }) {
+            // GH #194: hash the migration's class files once per run, not once per use below.
+            val checksum = migration.checksum()
             val existing = applied[migration.version]
             if (existing != null) {
                 if (existing.status == MigrationRowStatus.CLAIMED) {
@@ -201,13 +203,13 @@ class KandraMigrationRunner @JvmOverloads constructor(
                     return
                 }
 
-                verifyAppliedChecksum(existing, migration)
+                verifyAppliedChecksum(existing, migration, checksum)
                 continue
             }
 
             // Claim the version via LWT before running it, so two runner instances racing
             // against the same keyspace can't both execute the same migration concurrently.
-            val lostRace = claim(migration)
+            val lostRace = claim(migration, checksum)
             if (lostRace != null) {
                 // Another instance claimed this version between our snapshot read and now --
                 // but "lost the race" doesn't mean "still in progress": the LWT failure just
@@ -217,7 +219,7 @@ class KandraMigrationRunner @JvmOverloads constructor(
                 // is exactly the pre-existing-row case above, just discovered a moment later than
                 // the initial loadApplied() snapshot.
                 if (lostRace.status == MigrationRowStatus.APPLIED) {
-                    verifyAppliedChecksum(lostRace, migration)
+                    verifyAppliedChecksum(lostRace, migration, checksum)
                     continue
                 }
                 handleUnresolvedClaim(lostRace, migration)
@@ -248,8 +250,7 @@ class KandraMigrationRunner @JvmOverloads constructor(
      * ISS-088). Either way the meaning is identical: this version is done, so the only thing left
      * to verify is that nobody silently edited the migration since it was applied.
      */
-    private fun verifyAppliedChecksum(existing: MigrationHistory, migration: KandraMigration) {
-        val checksum = migration.checksum()
+    private fun verifyAppliedChecksum(existing: MigrationHistory, migration: KandraMigration, checksum: String) {
         if (existing.checksum != checksum) {
             // GH #191: rows applied by an earlier Kandra were hashed with the Kotlin SMAP constant
             // still in. If the stored value matches that legacy hash, the migration is unchanged;
@@ -368,13 +369,13 @@ class KandraMigrationRunner @JvmOverloads constructor(
      * claimed (or applied) this version first -- Cassandra/Scylla's `IF NOT EXISTS` LWT response
      * includes the current values of that row on failure, so no extra read is needed.
      */
-    private fun claim(migration: KandraMigration): MigrationHistory? {
+    private fun claim(migration: KandraMigration, checksum: String): MigrationHistory? {
         val rs = session.execute(
             claimStatement.bind(
                 migration.version,
                 migration.name,
                 MigrationRowStatus.CLAIMED.name,
-                migration.checksum()
+                checksum
             )
         )
         if (rs.wasApplied()) return null

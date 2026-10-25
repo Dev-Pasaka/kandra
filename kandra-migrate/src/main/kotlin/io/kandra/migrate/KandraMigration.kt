@@ -60,12 +60,7 @@ abstract class KandraMigration(
      * KDoc, and the class-level note above for what it still can't see through, and the
      * documented operator recovery path for when a mismatch is a false positive anyway.
      */
-    internal fun checksum(): String = checksum
-
-    // GH #194: memoized. A migration's compiled bytes can't change while its class is loaded, and
-    // computing this reads every class file of the migration.
-    private val checksum: String by lazy { checksumWith(BytecodeNormalizer::normalize) }
-    private val legacyChecksum: String by lazy { checksumWith(BytecodeNormalizer::normalizeLegacy) }
+    internal fun checksum(): String = checksumWith(BytecodeNormalizer::normalize)
 
     /**
      * The checksum Kandra computed before GH #191, which kept Kotlin's SMAP constant (with its line
@@ -73,7 +68,7 @@ abstract class KandraMigration(
      * rewrites it to [checksum], so upgrading Kandra doesn't fail every applied migration whose
      * `up()` calls an inline function. Differs from [checksum] only for such migrations.
      */
-    internal fun legacyChecksum(): String = legacyChecksum
+    internal fun legacyChecksum(): String = checksumWith(BytecodeNormalizer::normalizeLegacy)
 
     private fun checksumWith(normalize: (ByteArray) -> ByteArray): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
