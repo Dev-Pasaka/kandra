@@ -70,6 +70,12 @@ so its cells carry the Paxos ballot timestamp. `markApplied` (`… IF status = '
 writes that a lagging application clock could make lose to the claim, leaving a migration that ran `CLAIMED`. `markApplied`
 now throws `KandraMigrationException` if the row is no longer `CLAIMED` when `up()` returns.
 
+**LWT timeouts (GH #205, unreleased, next: 0.5.2).** A `WriteTimeoutException` on a CAS write means the outcome is unknown, and the
+driver does not retry it. Every CAS write in the runner and the lock bootstrap re-reads its row on a timeout: `claim()` treats a present
+row as a lost race and retries an absent one (5 attempts, jittered backoff, then `KandraMigrationException`); `markApplied()` accepts an
+`APPLIED` row as its own write; the lock helpers recognise their own `holder`. A claim that landed but whose response was lost shows up as a
+fresh `CLAIMED` row and follows the unresolved-claim rule (WARN, halt; reclaimable once stale).
+
 **Residual limitation:** this remains an approximation, not a semantic diff — a large enough compiler/toolchain
 change can still, rarely, flip a checksum for source that didn't actually change. The documented recovery path
 (on `KandraMigration.checksum()`'s own KDoc) is to confirm via source diff that it's a genuine false positive,

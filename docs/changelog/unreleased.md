@@ -1,7 +1,7 @@
 # [Unreleased] — next: 0.5.2
 
 Fixes for five bugs reported while building the Circaso backend (#187–#191), a migration-runner startup speed-up (#194), a soft-delete
-encoding fix (#198) and a migration-claim clock-skew fix (#203). Drop-in for 0.5.1 except for one behavior change to versioned `update()`, called out under **Changed**.
+encoding fix (#198), a migration-claim clock-skew fix (#203) and LWT-contention handling at startup (#205). Drop-in for 0.5.1 except for one behavior change to versioned `update()`, called out under **Changed**.
 
 ### Fixed
 
@@ -33,6 +33,14 @@ encoding fix (#198) and a migration-claim clock-skew fix (#203). Drop-in for 0.5
   marking it `APPLIED`, releasing it after a failed `up()`, and the #191 checksum upgrade were plain writes with the client's
   timestamp. With the application clock behind the cluster's they were silently dropped: a migration that ran stayed `CLAIMED`, and
   a failed one was never released. All three are now conditional (`IF status = 'CLAIMED'` / `IF checksum = <old>`).
+
+- **LWT timeouts under contention (#205).** Several replicas starting together race the same `kandra_migrations` and `kandra_ddl_locks`
+  rows; the server times a Paxos round out rather than queueing, and the driver rethrows CAS timeouts. `KandraMigrationRunner.claim()`
+  propagated that and crashed the replica at startup. Every CAS write (claim, mark applied, lock claim/done/release, in `kandra-migrate` and
+  `kandra-ktor`) now re-reads its row on a timeout and continues from what it finds, retrying with backoff when the write did not land.
+- **Connection-init timeout (#205).** The driver's 5 s timeout for connection-setup queries (`system.peers`, schema refresh, `USE`) was not
+  reached by `pool { requestTimeoutMillis }`, so a loaded or distant cluster failed `install(Kandra)` with
+  `query 'SELECT * FROM system.peers' timed out after PT5S`. It now follows the request timeout, never below the driver default.
 
 ### Changed
 

@@ -16,7 +16,7 @@ GH #178 (`@CacheResult` key normalization) and GH #179–#181 (`kandra-test` usa
 GitHub-only, fixed on `main` and not yet released (next: 0.5.2), each with a live Testcontainers test — see the
 [unreleased changelog](../changelog/unreleased.md): GH #187 (`@LookupIndex` on a key column), #188 (reserved-word column names),
 #189 (writing nulls in batches/updates), #190 (Testcontainers as `kandra-test` `api` deps), #191 (migration checksum vs. source
-layout), #194 (migration-runner startup cost), #198 (soft-delete codec), #203 (migration claim writes lost under clock skew).
+layout), #194 (migration-runner startup cost), #198 (soft-delete codec), #203 (migration claim writes lost under clock skew), #205 (LWT timeouts under contention crashed startup).
 
 Open on GitHub: **#199** — runtime performance findings from the 2026-10-25 code review (statement-cache locking, literal
 `TTL`/`TIMESTAMP` in CQL, single-statement `LOGGED` batches, per-call repository/cache construction, and more).

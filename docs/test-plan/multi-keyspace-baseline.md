@@ -94,3 +94,21 @@ Remaining gaps / by design Docker-only:
 - Two KandraPluginTest credential-rotation tests skip on cloud (`assumeFalse`): they need fake credentials / a no-auth cluster.
 - Not run on cloud: the rest of kandra-ktor (config/unit tests need no cluster), kandra-runtime live tests (not migrated here), `KandraMigrationMultiKeyspace*`
   (already has its own cloud variant).
+
+
+## 2026-10-25: full suite against a new ScyllaDB Cloud cluster (3 nodes, us-east-1, tablets on)
+
+`KANDRA_TEST_BACKEND=cloud ./gradlew test --continue` on `main` after #187-#191/#194/#198/#203: 646 tests, 19 failures, 1 h 31 m.
+Measured per statement from here (RTT 245 ms): `CREATE KEYSPACE` ~5 s, `CREATE TABLE` 1-2 s, `CREATE INDEX` ~3 s, `DROP KEYSPACE` ~8 s,
+LWT ~0.4 s. One-keyspace `install(Kandra)` takes 30-65 s, three keyspaces 140-197 s. The coordinator's clock is ~120-250 ms ahead of
+this Mac. Failure classes and what was done (#205, PR pending):
+
+| Failures | Cause | Fix |
+|---|---|---|
+| 5 ktor `testApplication` tests, `UncompletedCoroutinesError` after 1 m | kotlinx-coroutines-test's 60 s default under Ktor's `testApplication` (no parameter in Ktor 3.6) vs WAN DDL | `KANDRA_TEST_BACKEND=cloud` sets `kotlinx.coroutines.test.default_timeout=10m` (root build) |
+| 2 ktor `DdlBootstrapClaimTest` lost-fencing tests | the test's simulated reclaim was a plain `UPDATE`; its client timestamp lost to the claim's Paxos timestamp (#203 ordering) | simulation is an LWT (`IF EXISTS`), both copies |
+| 2 migrate `DdlBootstrapClaimTest` concurrency tests, 30 s latch | 8 simultaneous bootstraps serialise `CREATE TABLE IF NOT EXISTS` through Raft (~2 s each) plus Paxos contention | `KandraTestBackend.concurrencyBudgetSeconds` (30 s Docker, 180 s cloud) |
+| migrate concurrent runners: `WriteTimeoutException` (CAS) from `claim()` | real bug: CAS timeout under contention propagated | runner and lock helpers re-read and retry (#205) |
+| `KandraPluginTest` cleanup: `system.peers` timed out after PT5S | driver connection-init query timeout not raised by the test builders (nor by `pool.requestTimeoutMillis` in production) | 30 s in test builders; production derives from request timeout |
+| `ReservedIdentifierIntegrationTest` exhaustive check, PT30S | 65 sequential `CREATE TABLE`s | one table with every reserved word as a column |
+| 6 kandra-test failures, `UnknownHostException` | DNS resolution on this Mac dropped during the run; also hit a v0.5.1 baseline attempt | none (environment); rerun |
