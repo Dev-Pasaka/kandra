@@ -14,6 +14,10 @@ import java.io.ByteArrayOutputStream
  *    elsewhere in the file, or disappears entirely with `-g:none`.
  *  - `SourceFile` and `SourceDebugExtension` attributes record the source file name / line
  *    mapping, not behavior.
+ *  - Kotlin's inline-function source map (SMAP) also lands in the constant pool as a Utf8
+ *    entry, as the value of the `@kotlin.jvm.internal.SourceDebugExtension` annotation Kotlin
+ *    emits on any class that calls an inline function (`forEach`, `map`, `use`, ...). It carries
+ *    line numbers (`line 25: 0`), so moving the source lines changes it (GH #191).
  *
  * None of those describe what `up()` actually *does*. [normalize] removes exactly those byte
  * ranges so [KandraMigration.checksum] is insensitive to them, while remaining sensitive to any
@@ -63,10 +67,17 @@ internal object BytecodeNormalizer {
     }
 
     /**
+     * Prefix of a Kotlin SMAP (`SMAP\n<file>\nKotlin\n*S Kotlin\n*F\n...*L\n...`). A constant-pool
+     * Utf8 entry starting with it is debug data, never something `up()` executes (GH #191).
+     */
+    private const val SMAP_PREFIX = "SMAP\n"
+
+    /**
      * Parses [bytes] as a class file and returns the sorted, non-overlapping byte ranges
      * (inclusive `first`, inclusive `last`) that [normalize] excludes: the `minor_version`/
-     * `major_version` fields, plus every [STRIPPED_ATTRIBUTES] occurrence at class, field,
-     * method, and (recursively) `Code` attribute level. Exposed internally so tests can assert
+     * `major_version` fields, every constant-pool Utf8 entry holding a Kotlin SMAP, plus every
+     * [STRIPPED_ATTRIBUTES] occurrence at class, field, method, and (recursively) `Code`
+     * attribute level. Exposed internally so tests can assert
      * directly against known-safe "inside an excluded range" vs. "outside every excluded range"
      * byte offsets without duplicating this parser.
      *
@@ -83,7 +94,7 @@ internal object BytecodeNormalizer {
         cursor.skip(2) // major_version
         excluded += versionStart until cursor.pos
 
-        val utf8ByIndex = readConstantPool(cursor)
+        val utf8ByIndex = readConstantPool(cursor, excluded)
 
         cursor.skip(2) // access_flags
         cursor.skip(2) // this_class
@@ -108,16 +119,24 @@ internal object BytecodeNormalizer {
         return excluded.sortedBy { it.first }
     }
 
-    /** Reads the constant pool, resolving only Utf8 entries (needed to identify attribute names by index). */
-    private fun readConstantPool(cursor: Cursor): Map<Int, String> {
+    /**
+     * Reads the constant pool, resolving only Utf8 entries (needed to identify attribute names by
+     * index). A Utf8 entry holding a Kotlin SMAP is recorded into [excluded] whole (tag, length and
+     * payload): its slot stays in place, so every other constant-pool index the class references is
+     * unaffected, and only the line-number text drops out of the hash (GH #191).
+     */
+    private fun readConstantPool(cursor: Cursor, excluded: MutableList<IntRange>): Map<Int, String> {
         val count = cursor.u2()
         val utf8ByIndex = HashMap<Int, String>()
         var index = 1
         while (index < count) {
+            val entryStart = cursor.pos
             when (val tag = cursor.u1()) {
                 1 -> { // Utf8
                     val length = cursor.u2()
-                    utf8ByIndex[index] = String(cursor.bytes(length), Charsets.UTF_8)
+                    val value = String(cursor.bytes(length), Charsets.UTF_8)
+                    utf8ByIndex[index] = value
+                    if (value.startsWith(SMAP_PREFIX)) excluded += entryStart until cursor.pos
                 }
                 7, 8, 16, 19, 20 -> cursor.skip(2)       // Class, String, MethodType, Module, Package
                 3, 4, 9, 10, 11, 12, 17, 18 -> cursor.skip(4) // Integer, Float, *ref, NameAndType, Dynamic, InvokeDynamic

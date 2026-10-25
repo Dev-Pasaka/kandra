@@ -19,5 +19,8 @@ dependencies {
     testImplementation(project(":kandra-test"))
     testImplementation(libs.testcontainers.cassandra)
     testImplementation(libs.testcontainers.junit)
+    // GH #191: KandraMigrationChecksumLayoutTest compiles the same migration source twice (lines
+    // moved) to prove a layout-only change keeps the checksum.
+    testImplementation(libs.kotlin.compiler.embeddable)
     testRuntimeOnly(libs.junit.launcher)
 }

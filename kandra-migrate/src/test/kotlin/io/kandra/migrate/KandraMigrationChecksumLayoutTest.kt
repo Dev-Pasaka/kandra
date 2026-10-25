@@ -1,0 +1,93 @@
+package io.kandra.migrate
+
+import org.jetbrains.kotlin.cli.common.ExitCode
+import org.jetbrains.kotlin.cli.jvm.K2JVMCompiler
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.PrintStream
+import java.net.URLClassLoader
+import java.nio.file.Path
+
+/**
+ * Regression coverage for GH #191: a migration whose `up()` calls an inline function (`forEach`)
+ * gets Kotlin's inline source map (SMAP, with line numbers) as a constant-pool Utf8 entry, not
+ * only in the stripped `SourceDebugExtension` attribute. Moving the migration's source lines (a
+ * reformat, a KDoc added above it) changed that constant and with it the checksum, so
+ * [KandraMigrationRunner] refused to start against an already-applied migration.
+ *
+ * Unlike [BytecodeNormalizerTest], which mutates bytes of one already-compiled class, this test
+ * really compiles the same source twice with the Kotlin compiler, the second time with lines
+ * added above the `object`, and compares [KandraMigration.checksum] of the two results.
+ */
+class KandraMigrationChecksumLayoutTest {
+
+    private fun source(padding: String, cql: String = "CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY)") = """
+        package gh191
+        $padding
+        import com.datastax.oss.driver.api.core.CqlSession
+        import io.kandra.migrate.KandraMigration
+        $padding
+        object V001_CreateUsersTables : KandraMigration(version = 1, name = "create users tables") {
+            override fun up(session: CqlSession) {
+                listOf(
+                    "$cql",
+                    "CREATE TABLE IF NOT EXISTS users_by_email (email TEXT PRIMARY KEY, id UUID)",
+                ).forEach { session.execute(it) }
+            }
+        }
+    """.trimIndent()
+
+    /** Compiles [source] into [outDir] and returns the migration object's [KandraMigration.checksum]. */
+    private fun compileAndChecksum(source: String, workDir: File): String {
+        val srcFile = File(workDir, "src/V001.kt").apply { parentFile.mkdirs(); writeText(source) }
+        val outDir = File(workDir, "classes").apply { mkdirs() }
+        val log = ByteArrayOutputStream()
+        val exit = K2JVMCompiler().exec(
+            PrintStream(log),
+            srcFile.path,
+            "-d", outDir.path,
+            "-classpath", System.getProperty("java.class.path"),
+            "-no-stdlib", "-no-reflect",
+            "-jvm-target", "21",
+        )
+        assertEquals(ExitCode.OK, exit, "compilation failed:\n$log")
+        URLClassLoader(arrayOf(outDir.toURI().toURL()), javaClass.classLoader).use { loader ->
+            val migration = loader.loadClass("gh191.V001_CreateUsersTables").getField("INSTANCE").get(null) as KandraMigration
+            return migration.checksum()
+        }
+    }
+
+    private fun classFileOf(workDir: File) = File(workDir, "classes/gh191/V001_CreateUsersTables.class").readBytes()
+
+    @Test
+    fun `moving the source lines of a migration that calls an inline function keeps its checksum`(@TempDir tmp: Path) {
+        val a = tmp.resolve("a").toFile()
+        val b = tmp.resolve("b").toFile()
+        val before = compileAndChecksum(source(padding = ""), a)
+        val after = compileAndChecksum(source(padding = "\n".repeat(9) + "/** A KDoc line added above the migration. */"), b)
+
+        // Sanity: the raw class files really differ (the SMAP constant carries the moved line
+        // numbers), otherwise this test would prove nothing.
+        val rawA = classFileOf(a)
+        val rawB = classFileOf(b)
+        assertTrue(String(rawA, Charsets.ISO_8859_1).contains("SMAP\n"), "expected an SMAP constant in the compiled class")
+        assertNotEquals(rawA.toList(), rawB.toList(), "the raw class files should differ after moving the lines")
+
+        assertEquals(before, after, "a layout-only change must not change the migration checksum")
+    }
+
+    @Test
+    fun `changing the CQL of a migration that calls an inline function still changes its checksum`(@TempDir tmp: Path) {
+        val before = compileAndChecksum(source(padding = ""), tmp.resolve("a").toFile())
+        val after = compileAndChecksum(
+            source(padding = "", cql = "CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, email TEXT)"),
+            tmp.resolve("b").toFile()
+        )
+        assertNotEquals(before, after, "a change to the CQL up() runs must still change the checksum")
+    }
+}
