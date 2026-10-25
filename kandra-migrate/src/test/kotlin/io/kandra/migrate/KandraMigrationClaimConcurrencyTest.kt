@@ -99,7 +99,7 @@ class KandraMigrationClaimConcurrencyTest {
             }
         }
         startLatch.countDown()
-        assertTrue(doneLatch.await(30, TimeUnit.SECONDS), "all simulated instances should finish within the timeout")
+        assertTrue(doneLatch.await(KandraTestBackend.concurrencyBudgetSeconds, TimeUnit.SECONDS), "all simulated instances should finish within the timeout")
         executor.shutdown()
 
         assertTrue(errors.isEmpty(), "no racer should throw -- an unresolved-but-fresh claim must halt, not error: $errors")
@@ -143,7 +143,7 @@ class KandraMigrationClaimConcurrencyTest {
             }
         }
         startLatch.countDown()
-        assertTrue(doneLatch.await(30, TimeUnit.SECONDS))
+        assertTrue(doneLatch.await(KandraTestBackend.concurrencyBudgetSeconds, TimeUnit.SECONDS))
         executor.shutdown()
 
         assertTrue(errors.isEmpty(), "no racer should throw: $errors")
@@ -205,7 +205,7 @@ class KandraMigrationClaimConcurrencyTest {
             }
         }
         startLatch.countDown()
-        assertTrue(doneLatch.await(30, TimeUnit.SECONDS))
+        assertTrue(doneLatch.await(KandraTestBackend.concurrencyBudgetSeconds, TimeUnit.SECONDS))
         executor.shutdown()
 
         assertEquals(instanceCount, thrown.size, "every single racer must surface the stale claim as an error")

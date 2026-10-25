@@ -63,6 +63,14 @@ object KandraTestBackend {
     fun effectiveRf(requested: Int): Int = if (isCloud && requested == 1) 3 else requested
 
     /**
+     * Wall-clock budget, in seconds, for tests that race several simulated instances through the
+     * LWT/DDL bootstrap paths. 30 s against the Docker container. 180 s against the cloud, where
+     * each DDL statement takes 1-5 s (schema agreement over a ~245 ms WAN; measured 2026-10-25 on
+     * ScyllaDB Cloud) and simultaneous claims contend in Paxos.
+     */
+    val concurrencyBudgetSeconds: Long get() = if (isCloud) 180 else 30
+
+    /**
      * A unique keyspace name. Docker: `kandra_<tag>_<32 hex>` (as the tests always used); cloud: the
      * cleanup-friendly `kt_<tag>_<8 hex>`. Keep [tag] short (lowercase alphanumeric/underscore).
      */
@@ -131,5 +139,8 @@ object KandraTestBackend {
         .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(30))
         .withDuration(DefaultDriverOption.METADATA_SCHEMA_REQUEST_TIMEOUT, Duration.ofSeconds(30))
         .withDuration(DefaultDriverOption.CONTROL_CONNECTION_AGREEMENT_TIMEOUT, Duration.ofSeconds(30))
+        // Connection-init and control-connection queries (system.peers, schema refresh, USE) have
+        // their own timeout, 5 s by default, which a loaded cluster exceeded (GH #205).
+        .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofSeconds(30))
         .build()
 }

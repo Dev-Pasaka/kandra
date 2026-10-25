@@ -87,7 +87,7 @@ class DdlBootstrapClaimTest {
             }
         }
         startLatch.countDown() // release every thread at (as close to) the same instant as possible
-        assertTrue(doneLatch.await(30, TimeUnit.SECONDS), "all simulated instances should finish within the timeout")
+        assertTrue(doneLatch.await(KandraTestBackend.concurrencyBudgetSeconds, TimeUnit.SECONDS), "all simulated instances should finish within the timeout")
         executor.shutdown()
 
         assertTrue(errors.isEmpty(), "no instance should see a schema-disagreement-shaped error: $errors")
@@ -134,7 +134,7 @@ class DdlBootstrapClaimTest {
             }
         }
         startLatch.countDown()
-        assertTrue(doneLatch.await(30, TimeUnit.SECONDS), "all simulated instances should finish within the timeout")
+        assertTrue(doneLatch.await(KandraTestBackend.concurrencyBudgetSeconds, TimeUnit.SECONDS), "all simulated instances should finish within the timeout")
         executor.shutdown()
 
         assertTrue(errors.isEmpty(), "no instance should see a schema-disagreement-shaped error: $errors")
@@ -221,7 +221,11 @@ class DdlBootstrapClaimTest {
                 // Simulates another instance's reclaimStaleDdlLock winning its CAS while we are
                 // still (unbeknownst to it) alive and running -- same net effect on the row.
                 session.execute(
-                    "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) WHERE lock_name = ?",
+                    // IF EXISTS makes this an LWT like the real reclaimStaleDdlLock. A plain write carries the
+                    // client's timestamp and can lose to the claim's Paxos-ballot timestamp when the client clock
+                    // trails the cluster's (seen against ScyllaDB Cloud, ~120-250 ms behind) -- the same ordering
+                    // GH #203 fixed in production code -- which left `holder` untouched and the fencing CAS winning.
+                    "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) WHERE lock_name = ? IF EXISTS",
                     "other-instance", lockName
                 )
             }
@@ -247,7 +251,11 @@ class DdlBootstrapClaimTest {
         val thrown = assertThrows(RuntimeException::class.java) {
             claimAndRunDdlBootstrap(session, lockName) {
                 session.execute(
-                    "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) WHERE lock_name = ?",
+                    // IF EXISTS makes this an LWT like the real reclaimStaleDdlLock. A plain write carries the
+                    // client's timestamp and can lose to the claim's Paxos-ballot timestamp when the client clock
+                    // trails the cluster's (seen against ScyllaDB Cloud, ~120-250 ms behind) -- the same ordering
+                    // GH #203 fixed in production code -- which left `holder` untouched and the fencing CAS winning.
+                    "UPDATE kandra_ddl_locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) WHERE lock_name = ? IF EXISTS",
                     "other-instance-2", lockName
                 )
                 throw actionFailure

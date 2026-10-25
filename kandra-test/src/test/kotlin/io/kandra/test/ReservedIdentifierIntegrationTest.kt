@@ -128,14 +128,21 @@ class ReservedIdentifierIntegrationTest {
 
     @Test
     fun `every reserved word works as a quoted column on this database`() {
+        // One table with every reserved word as a column (and one as the key), not one table per
+        // word: 65 sequential CREATE TABLEs took 1-5 s each against ScyllaDB Cloud and timed out.
+        val words = CqlNaming.RESERVED_WORDS.sorted()
+        val key = words.first()
+        val others = words.drop(1)
         KandraTestBackend.newSession(db.keyspace).use { s ->
-            CqlNaming.RESERVED_WORDS.forEach { word ->
-                val col = CqlNaming.quoteIfNeeded(word)
-                s.execute("CREATE TABLE IF NOT EXISTS rw_$word ($col text PRIMARY KEY, v int)")
-                s.execute(s.prepare("INSERT INTO rw_$word ($col, v) VALUES (?, ?)").bind("k", 1))
-                val row = s.execute(s.prepare("SELECT $col, v FROM rw_$word WHERE $col = ?").bind("k")).one()
-                assertEquals("k", row?.getString(word), "row read by the raw name '$word'")
-            }
+            val columns = (listOf("${CqlNaming.quoteIfNeeded(key)} text PRIMARY KEY") + others.map { "${CqlNaming.quoteIfNeeded(it)} int" })
+            s.execute("CREATE TABLE IF NOT EXISTS rw_all (${columns.joinToString(", ")})")
+            val names = words.joinToString(", ") { CqlNaming.quoteIfNeeded(it) }
+            val placeholders = words.joinToString(", ") { "?" }
+            val values = listOf<Any>("k") + others.indices.map { it }
+            s.execute(s.prepare("INSERT INTO rw_all ($names) VALUES ($placeholders)").bind(*values.toTypedArray()))
+            val row = s.execute(s.prepare("SELECT $names FROM rw_all WHERE ${CqlNaming.quoteIfNeeded(key)} = ?").bind("k")).one()!!
+            assertEquals("k", row.getString(key), "key read back by its raw name '$key'")
+            others.forEachIndexed { i, w -> assertEquals(i, row.getInt(w), "column read back by its raw name '$w'") }
         }
     }
 }
