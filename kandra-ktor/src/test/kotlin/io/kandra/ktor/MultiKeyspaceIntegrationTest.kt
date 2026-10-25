@@ -8,7 +8,6 @@ import io.kandra.core.exception.KandraSchemaException
 import io.kandra.test.KandraCloud
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -95,7 +94,7 @@ class MultiKeyspaceIntegrationTest {
 
     private fun install(b: Backend, rf: Int, mode: SchemaMode, vararg entities: kotlin.reflect.KClass<*>) {
         SchemaRegistry.clear()
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     connect(b, rf)
@@ -165,7 +164,7 @@ class MultiKeyspaceIntegrationTest {
         SchemaRegistry.clear()
         val before = cqlSessionsBuilt.get()
         val ex = assertThrows(Exception::class.java) {
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         connect(Backend.DOCKER, 1)

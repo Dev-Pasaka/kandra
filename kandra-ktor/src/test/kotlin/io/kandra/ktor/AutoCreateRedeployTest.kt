@@ -9,7 +9,6 @@ import io.kandra.core.annotations.ScyllaTable
 import io.kandra.test.KandraTestBackend
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -71,7 +70,7 @@ class AutoCreateRedeployTest {
 
         // Deploy 1: only RedeployEntityA is registered. This wins the DDL bootstrap claim and
         // marks it DONE.
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -88,7 +87,7 @@ class AutoCreateRedeployTest {
         // Deploy 2: same keyspace, but a new entity (RedeployEntityB) was added to the app and is
         // now also registered -- the normal shape of "I added a table" in a real deployment.
         SchemaRegistry.clear()
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()

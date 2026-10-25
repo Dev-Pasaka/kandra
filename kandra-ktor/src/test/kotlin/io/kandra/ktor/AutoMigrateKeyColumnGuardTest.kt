@@ -11,7 +11,6 @@ import io.kandra.core.exception.KandraSchemaException
 import io.kandra.test.KandraTestBackend
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -91,7 +90,7 @@ class AutoMigrateKeyColumnGuardTest {
 
     @OptIn(ExperimentalKandraApi::class)
     private fun installV1(keyspaceName: String) {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -111,7 +110,7 @@ class AutoMigrateKeyColumnGuardTest {
         installV1(keyspaceName)
 
         SchemaRegistry.clear()
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -137,7 +136,7 @@ class AutoMigrateKeyColumnGuardTest {
 
         SchemaRegistry.clear()
         val ex = assertThrows(KandraSchemaException::class.java) {
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         useTestBackend()
@@ -166,7 +165,7 @@ class AutoMigrateKeyColumnGuardTest {
 
         SchemaRegistry.clear()
         val ex = assertThrows(KandraSchemaException::class.java) {
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         useTestBackend()

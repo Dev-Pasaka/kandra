@@ -12,7 +12,6 @@ import io.kandra.migrate.KandraMigrationRunner
 import io.kandra.test.KandraCloud
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -114,7 +113,7 @@ class MultiKeyspaceCloudE2ETest {
 
     private fun run(mode: SchemaMode, vararg entities: kotlin.reflect.KClass<*>, body: Application.() -> Unit = {}) {
         SchemaRegistry.clear()
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     connectCloud()

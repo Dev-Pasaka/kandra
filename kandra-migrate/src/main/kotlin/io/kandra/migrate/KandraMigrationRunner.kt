@@ -282,8 +282,12 @@ class KandraMigrationRunner @JvmOverloads constructor(
             // still in. If the stored value matches that legacy hash, the migration is unchanged;
             // store the new checksum so later layout-only edits verify too.
             if (existing.checksum == migration.legacyChecksum()) {
-                // Not applied only if another instance upgraded the same row first, to the same value.
-                session.execute(updateChecksumStatement.bind(checksum, migration.version, existing.checksum))
+                val upgraded = session.execute(updateChecksumStatement.bind(checksum, migration.version, existing.checksum)).wasApplied()
+                if (!upgraded) {
+                    // Another instance upgraded the same row first, to the same value.
+                    logger.info { "Migration v${migration.version}: stored checksum was already upgraded by another instance." }
+                    return
+                }
                 logger.info {
                     "Migration v${migration.version} ('${migration.name}'): stored checksum upgraded to the " +
                     "line-number-independent form (GH #191)."

@@ -26,12 +26,6 @@ subprojects {
 
         tasks.withType<Test> {
             useJUnitPlatform()
-            // KANDRA_TEST_BACKEND=cloud: install(Kandra) against a WAN cluster spends 30-200 s in DDL
-            // (1-5 s per statement with schema agreement), past the 60 s default kotlinx-coroutines-test
-            // applies to the runTest that Ktor's testApplication runs under (no parameter in Ktor 3.6).
-            if (providers.environmentVariable("KANDRA_TEST_BACKEND").orNull?.lowercase() == "cloud") {
-                systemProperty("kotlinx.coroutines.test.default_timeout", "10m")
-            }
         }
     }
 
