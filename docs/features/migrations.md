@@ -47,6 +47,8 @@ runner.run(CreateUsersTable, AddPhoneColumn)
 - Each migration is claimed via an LWT (`INSERT ... IF NOT EXISTS`) before it runs, so two
   runner instances racing against the same keyspace can't both execute the same migration
   concurrently. If `up()` throws, the claim is released so a retry can pick it up.
+  Every later write to a claimed row (marking it `APPLIED`, releasing it, upgrading its checksum) is conditional too, so a
+  lagging application clock can't make it lose to the claim *(unreleased, next: 0.5.2 — GH #203)*.
 - `runner.history()` returns a list of applied migrations.
 
 See [ISS-017](../issues/ISS-017-migration-checksum-not-body-based.md) and

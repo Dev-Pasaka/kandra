@@ -64,6 +64,12 @@ plain `SELECT` of its `kandra_ddl_locks` row instead of `CREATE TABLE IF NOT EXI
 the application jar is indexed once per JVM (`JarClassIndex`) instead of scanned in full for every migration; each
 migration's checksum is computed once per `run()`; the runner's own statements are prepared once.
 
+**Claimed rows are only written conditionally (GH #203, unreleased, next: 0.5.2).** The claim is an `INSERT … IF NOT EXISTS` LWT,
+so its cells carry the Paxos ballot timestamp. `markApplied` (`… IF status = 'CLAIMED'`), the release after a failed `up()`
+(`DELETE … IF status = 'CLAIMED'`) and the checksum upgrade (`… IF checksum = <old>`) are LWTs too. On 0.5.1 they were plain
+writes that a lagging application clock could make lose to the claim, leaving a migration that ran `CLAIMED`. `markApplied`
+now throws `KandraMigrationException` if the row is no longer `CLAIMED` when `up()` returns.
+
 **Residual limitation:** this remains an approximation, not a semantic diff — a large enough compiler/toolchain
 change can still, rarely, flip a checksum for source that didn't actually change. The documented recovery path
 (on `KandraMigration.checksum()`'s own KDoc) is to confirm via source diff that it's a genuine false positive,

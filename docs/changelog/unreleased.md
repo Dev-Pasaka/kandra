@@ -1,7 +1,7 @@
 # [Unreleased] — next: 0.5.2
 
-Fixes for five bugs reported while building the Circaso backend (#187–#191), a migration-runner startup speed-up (#194) and a soft-delete
-encoding fix (#198). Drop-in for 0.5.1 except for one behavior change to versioned `update()`, called out under **Changed**.
+Fixes for five bugs reported while building the Circaso backend (#187–#191), a migration-runner startup speed-up (#194), a soft-delete
+encoding fix (#198) and a migration-claim clock-skew fix (#203). Drop-in for 0.5.1 except for one behavior change to versioned `update()`, called out under **Changed**.
 
 ### Fixed
 
@@ -28,6 +28,11 @@ encoding fix (#198). Drop-in for 0.5.1 except for one behavior change to version
   A `verifyTestcontainersIsApi` task in `check` guards it.
 - **Soft delete encoding (#198, PR #201).** `delete()` on a `@SoftDelete` entity bound raw property values, skipping `KandraCodec`, so an enum or custom-typed column
   failed with a driver codec error. Values now go through the codec like every other write, and a `null` column is left UNSET.
+
+- **Lost `markApplied` under clock skew (#203, PR #204).** The migration claim is an `IF NOT EXISTS` LWT (Paxos ballot timestamp), but
+  marking it `APPLIED`, releasing it after a failed `up()`, and the #191 checksum upgrade were plain writes with the client's
+  timestamp. With the application clock behind the cluster's they were silently dropped: a migration that ran stayed `CLAIMED`, and
+  a failed one was never released. All three are now conditional (`IF status = 'CLAIMED'` / `IF checksum = <old>`).
 
 ### Changed
 
