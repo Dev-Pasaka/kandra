@@ -103,7 +103,13 @@ internal object BytecodeNormalizer {
         cursor.skip(2) // major_version
         excluded += versionStart until cursor.pos
 
-        val utf8ByIndex = readConstantPool(cursor, excluded.takeIf { stripSmapConstants })
+        val pool = readConstantPool(cursor)
+        val utf8ByIndex = pool.utf8ByIndex
+        if (stripSmapConstants) {
+            pool.utf8RangeByIndex.forEach { (index, range) ->
+                if (utf8ByIndex.getValue(index).startsWith(SMAP_PREFIX)) excluded += range
+            }
+        }
 
         cursor.skip(2) // access_flags
         cursor.skip(2) // this_class
@@ -123,29 +129,39 @@ internal object BytecodeNormalizer {
             walkAttributes(cursor, utf8ByIndex, excluded)
         }
 
-        walkAttributes(cursor, utf8ByIndex, excluded) // class-level attributes (e.g. SourceFile)
+        walkAttributes(cursor, utf8ByIndex, excluded) { name, start, length ->
+            // GH #191: every string the @kotlin.jvm.internal.SourceDebugExtension annotation holds
+            // is SMAP text. A long SMAP is split across several array elements, and only the first
+            // starts with SMAP_PREFIX, so drop each referenced Utf8 entry, not just prefixed ones.
+            if (stripSmapConstants && (name == "RuntimeInvisibleAnnotations" || name == "RuntimeVisibleAnnotations")) {
+                sourceDebugExtensionStrings(bytes, start, length, utf8ByIndex)
+                    .forEach { index -> pool.utf8RangeByIndex[index]?.let { excluded += it } }
+            }
+        } // class-level attributes (e.g. SourceFile)
 
-        return excluded.sortedBy { it.first }
+        return excluded.distinct().sortedBy { it.first }
     }
+
+    private class ConstantPool(val utf8ByIndex: Map<Int, String>, val utf8RangeByIndex: Map<Int, IntRange>)
 
     /**
      * Reads the constant pool, resolving only Utf8 entries (needed to identify attribute names by
-     * index). A Utf8 entry holding a Kotlin SMAP is recorded into [excluded] whole (tag, length and
-     * payload): its slot stays in place, so every other constant-pool index the class references is
+     * index) and the byte range (tag, length and payload) of each, so an SMAP entry can be excluded
+     * whole: its slot stays in place, so every other constant-pool index the class references is
      * unaffected, and only the line-number text drops out of the hash (GH #191).
      */
-    private fun readConstantPool(cursor: Cursor, excluded: MutableList<IntRange>?): Map<Int, String> {
+    private fun readConstantPool(cursor: Cursor): ConstantPool {
         val count = cursor.u2()
         val utf8ByIndex = HashMap<Int, String>()
+        val utf8RangeByIndex = HashMap<Int, IntRange>()
         var index = 1
         while (index < count) {
             val entryStart = cursor.pos
             when (val tag = cursor.u1()) {
                 1 -> { // Utf8
                     val length = cursor.u2()
-                    val value = String(cursor.bytes(length), Charsets.UTF_8)
-                    utf8ByIndex[index] = value
-                    if (excluded != null && value.startsWith(SMAP_PREFIX)) excluded += entryStart until cursor.pos
+                    utf8ByIndex[index] = String(cursor.bytes(length), Charsets.UTF_8)
+                    utf8RangeByIndex[index] = entryStart until cursor.pos
                 }
                 7, 8, 16, 19, 20 -> cursor.skip(2)       // Class, String, MethodType, Module, Package
                 3, 4, 9, 10, 11, 12, 17, 18 -> cursor.skip(4) // Integer, Float, *ref, NameAndType, Dynamic, InvokeDynamic
@@ -155,7 +171,44 @@ internal object BytecodeNormalizer {
             }
             index++
         }
-        return utf8ByIndex
+        return ConstantPool(utf8ByIndex, utf8RangeByIndex)
+    }
+
+    private const val SOURCE_DEBUG_EXTENSION_DESCRIPTOR = "Lkotlin/jvm/internal/SourceDebugExtension;"
+
+    /**
+     * Constant-pool indices of the strings held by a `@kotlin.jvm.internal.SourceDebugExtension`
+     * annotation inside the `Runtime(In)VisibleAnnotations` attribute payload at
+     * [bytes]`[start, start + length)`. Parsed on its own cursor, so the caller's position is
+     * unaffected. JVM Spec §4.7.16.
+     */
+    private fun sourceDebugExtensionStrings(bytes: ByteArray, start: Int, length: Int, utf8ByIndex: Map<Int, String>): List<Int> {
+        val c = Cursor(bytes).apply { skip(start) }
+        val found = mutableListOf<Int>()
+        fun elementValue(collect: Boolean) {
+            when (c.u1().toChar()) {
+                'B', 'C', 'D', 'F', 'I', 'J', 'S', 'Z' -> c.skip(2)
+                's' -> c.u2().let { if (collect) found += it }
+                'e' -> c.skip(4)
+                'c' -> c.skip(2)
+                '@' -> annotation(c, ::elementValue)
+                '[' -> repeat(c.u2()) { elementValue(collect) }
+                else -> error("unrecognized element_value tag")
+            }
+        }
+        repeat(c.u2()) {
+            val typeIndex = c.u2()
+            val collect = utf8ByIndex[typeIndex] == SOURCE_DEBUG_EXTENSION_DESCRIPTOR
+            repeat(c.u2()) { c.skip(2); elementValue(collect) }
+        }
+        check(c.pos == start + length) { "annotations attribute length mismatch" }
+        return found
+    }
+
+    /** Skips one nested `annotation` structure; its strings are never SMAP text. */
+    private fun annotation(c: Cursor, elementValue: (Boolean) -> Unit) {
+        c.skip(2) // type_index
+        repeat(c.u2()) { c.skip(2); elementValue(false) }
     }
 
     /**
@@ -165,13 +218,19 @@ internal object BytecodeNormalizer {
      * `LineNumberTable`/`LocalVariableTable`/`LocalVariableTypeTable` actually live) rather than
      * skipped as an opaque blob.
      */
-    private fun walkAttributes(cursor: Cursor, utf8ByIndex: Map<Int, String>, excluded: MutableList<IntRange>) {
+    private fun walkAttributes(
+        cursor: Cursor,
+        utf8ByIndex: Map<Int, String>,
+        excluded: MutableList<IntRange>,
+        onAttribute: ((name: String?, payloadStart: Int, length: Int) -> Unit)? = null,
+    ) {
         val count = cursor.u2()
         repeat(count) {
             val nameIndex = cursor.u2()
             val length = cursor.u4()
             val headerStart = cursor.pos - 6
             val name = utf8ByIndex[nameIndex]
+            onAttribute?.invoke(name, cursor.pos, length)
             when {
                 name in STRIPPED_ATTRIBUTES -> {
                     excluded += headerStart until (cursor.pos + length)

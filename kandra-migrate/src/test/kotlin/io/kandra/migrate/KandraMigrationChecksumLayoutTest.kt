@@ -29,7 +29,7 @@ import java.nio.file.Path
  */
 class KandraMigrationChecksumLayoutTest {
 
-    private fun source(padding: String, cql: String = "CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY)") = """
+    private fun source(padding: String, cql: String = "CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY)", trailer: String = "") = """
         package gh191
         $padding
         import com.datastax.oss.driver.api.core.CqlSession
@@ -43,6 +43,7 @@ class KandraMigrationChecksumLayoutTest {
                 ).forEach { session.execute(it) }
             }
         }
+        $trailer
     """.trimIndent()
 
     /** Compiles [source] into [workDir] and returns the migration object's [KandraMigration.checksum]. */
@@ -85,6 +86,44 @@ class KandraMigrationChecksumLayoutTest {
         assertNotEquals(rawA.toList(), rawB.toList(), "the raw class files should differ after moving the lines")
 
         assertEquals(before, after, "a layout-only change must not change the migration checksum")
+    }
+
+    @Test
+    fun `adding lines below the migration keeps its checksum`(@TempDir tmp: Path) {
+        // The SMAP also records the file's total line count, so lines added *after* the
+        // migration changed the checksum too (follow-up comment on GH #191).
+        val a = tmp.resolve("a").toFile()
+        val b = tmp.resolve("b").toFile()
+        val before = compileAndChecksum(source(padding = ""), a)
+        val after = compileAndChecksum(source(padding = "", trailer = "\n".repeat(20) + "// trailing comment\nprivate val unrelated = 42"), b)
+        assertNotEquals(classFileOf(a).toList(), classFileOf(b).toList(), "the raw class files should differ")
+        assertEquals(before, after)
+    }
+
+    @Test
+    fun `every string of the SourceDebugExtension annotation is excluded`(@TempDir tmp: Path) {
+        compileAndChecksum(source(padding = ""), tmp.resolve("a").toFile())
+        val bytes = classFileOf(tmp.resolve("a").toFile())
+        val normalized = String(BytecodeNormalizer.normalize(bytes), Charsets.ISO_8859_1)
+        assertTrue(String(bytes, Charsets.ISO_8859_1).contains("SMAP\n"))
+        assertTrue(!normalized.contains("SMAP\n"), "no SMAP text may survive normalization")
+        // The annotation itself (its type descriptor) is kept; only its line-dependent strings go.
+        assertTrue(normalized.contains("Lkotlin/jvm/internal/SourceDebugExtension;"))
+    }
+
+    @Test
+    fun `an annotation string that does not start with SMAP is still excluded`(@TempDir tmp: Path) {
+        // Stands in for a long SMAP split across several annotation strings, where only the
+        // first chunk starts with "SMAP": rename the prefix so only the annotation path can match.
+        compileAndChecksum(source(padding = ""), tmp.resolve("a").toFile())
+        val original = classFileOf(tmp.resolve("a").toFile())
+        val at = String(original, Charsets.ISO_8859_1).indexOf("SMAP\n")
+        val chunk = original.copyOf().also { it[at] = 'X'.code.toByte() }        // "XMAP\n...": no longer prefixed
+        val chunkEdited = chunk.copyOf().also { it[at + 10] = (it[at + 10] + 1).toByte() } // line-number-like edit inside it
+        assertEquals(
+            BytecodeNormalizer.normalize(chunk).toList(), BytecodeNormalizer.normalize(chunkEdited).toList(),
+            "a change inside a SourceDebugExtension string must not reach the hash"
+        )
     }
 
     @Test
