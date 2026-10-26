@@ -7,7 +7,6 @@ import io.kandra.core.annotations.PartitionKey
 import io.kandra.test.KandraCloud
 import io.kandra.test.KandraTestcontainers
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -46,7 +45,7 @@ class SimpleStrategyTabletsIntegrationTest {
         val trust = KandraCloud.tempTruststore()
         try {
             SchemaRegistry.clear()
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         contactPoints = KandraCloud.contactPointsCsv()

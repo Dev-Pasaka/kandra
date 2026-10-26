@@ -146,12 +146,16 @@ class KandraMigrationChecksumLayoutTest {
                     val legacy = migration.legacyChecksum()
                     assertNotEquals(legacy, migration.checksum(), "an inline-calling migration's legacy checksum differs")
 
-                    // Simulate a row written by Kandra <= 0.5.1: APPLIED with the legacy checksum.
+                    // Simulate a row written by Kandra <= 0.5.1: APPLIED with the legacy checksum. Written
+                    // with an LWT, as 0.5.1's claim() wrote it: its cells then carry a Paxos-ballot timestamp
+                    // like the runner's conditional checksum upgrade, so the two order by ballot. A plain
+                    // INSERT carries this JVM's clock and, when the database's clock trails it, outranks the
+                    // upgrade's cell even though the CAS applied (the #203 ordering, seen on Docker).
                     val runner = KandraMigrationRunner(session)
                     session.execute(
                         session.prepare(
                             "INSERT INTO kandra_migrations (version, name, status, applied_at, checksum) " +
-                                "VALUES (?, ?, 'APPLIED', toTimestamp(now()), ?)"
+                                "VALUES (?, ?, 'APPLIED', toTimestamp(now()), ?) IF NOT EXISTS"
                         ).bind(migration.version, migration.name, legacy)
                     )
 

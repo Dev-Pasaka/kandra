@@ -1,6 +1,8 @@
 package io.kandra.ktor
 
 import com.datastax.oss.driver.api.core.CqlSession
+import com.datastax.oss.driver.api.core.cql.Row
+import com.datastax.oss.driver.api.core.servererrors.WriteTimeoutException
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.kandra.core.CqlNaming
 import io.kandra.core.DdlGenerator
@@ -588,6 +590,13 @@ internal fun claimAndRunDdlBootstrap(
             continue
         }
 
+        if (row.getString("holder") == holder && row.getString("status") == "CLAIMED") {
+            // GH #205: this instance's own claim timed out on the wire but had committed.
+            logger.info { "Kandra: DDL bootstrap lock '$lockName' is held by this instance after a timed-out claim -- running schema DDL." }
+            runClaimedDdlAction(session, table, lockName, holder, action)
+            return
+        }
+
         if (row.getString("status") == "DONE") {
             logger.info { "Kandra: DDL bootstrap lock '$lockName' was completed by another instance -- skipping DDL here." }
             return
@@ -680,8 +689,26 @@ private fun tryClaimDdlLock(session: CqlSession, table: String, lockName: String
         "INSERT INTO $table (lock_name, holder, status, claimed_at) " +
         "VALUES (?, ?, 'CLAIMED', toTimestamp(now())) IF NOT EXISTS"
     )
-    return session.execute(prepared.bind(lockName, holder)).wasApplied()
+    return try {
+        session.execute(prepared.bind(lockName, holder)).wasApplied()
+    } catch (e: WriteTimeoutException) {
+        // GH #205: a CAS timeout under Paxos contention (N replicas starting together) leaves the
+        // outcome unknown, and the driver's default policy rethrows it. Report "not won"; the wait
+        // loop in claimAndRunDdlBootstrap re-reads the row and recognises this holder if it did land.
+        logger.warn { "Kandra: claiming DDL bootstrap lock '$lockName' timed out under LWT contention; re-reading the row." }
+        false
+    }
 }
+
+/** How many times a CAS write that timed out under contention is retried, each after re-reading the row (GH #205). */
+private const val LWT_CONTENTION_RETRIES = 5
+
+private fun lwtBackoffMillis(attempt: Int): Long =
+    100L * attempt + java.util.concurrent.ThreadLocalRandom.current().nextLong(0, 150)
+
+/** The lock row for [lockName], or `null` when there is none. */
+private fun readDdlLock(session: CqlSession, table: String, lockName: String): Row? =
+    session.execute(session.prepare("SELECT holder, status, claimed_at FROM $table WHERE lock_name = ?").bind(lockName)).one()
 
 /**
  * Reclaims a stale claim via compare-and-set on its previously-observed `claimed_at`, so that if
@@ -692,7 +719,11 @@ private fun reclaimStaleDdlLock(session: CqlSession, table: String, lockName: St
         "UPDATE $table SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) " +
         "WHERE lock_name = ? IF claimed_at = ?"
     )
-    return session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
+    return try {
+        session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
+    } catch (e: WriteTimeoutException) {
+        false // GH #205: unknown outcome; the wait loop re-reads and recognises this holder if it won.
+    }
 }
 
 /**
@@ -706,7 +737,19 @@ private fun markDdlLockDone(session: CqlSession, table: String, lockName: String
     val prepared = session.prepare(
         "UPDATE $table SET status = 'DONE' WHERE lock_name = ? IF holder = ?"
     )
-    return session.execute(prepared.bind(lockName, holder)).wasApplied()
+    var attempt = 0
+    while (true) {
+        try {
+            return session.execute(prepared.bind(lockName, holder)).wasApplied()
+        } catch (e: WriteTimeoutException) {
+            // GH #205: unknown outcome; the row tells. Only this holder writes DONE under its own name.
+            val row = readDdlLock(session, table, lockName)
+            val ours = row?.getString("holder") == holder
+            if (ours && row?.getString("status") == "DONE") return true
+            if (ours && ++attempt <= LWT_CONTENTION_RETRIES) { Thread.sleep(lwtBackoffMillis(attempt)); continue }
+            return false
+        }
+    }
 }
 
 /**
@@ -718,7 +761,18 @@ private fun markDdlLockDone(session: CqlSession, table: String, lockName: String
  */
 private fun releaseDdlLock(session: CqlSession, table: String, lockName: String, holder: String): Boolean {
     val prepared = session.prepare("DELETE FROM $table WHERE lock_name = ? IF holder = ?")
-    return session.execute(prepared.bind(lockName, holder)).wasApplied()
+    var attempt = 0
+    while (true) {
+        try {
+            return session.execute(prepared.bind(lockName, holder)).wasApplied()
+        } catch (e: WriteTimeoutException) {
+            // GH #205: unknown outcome; the row tells.
+            val row = readDdlLock(session, table, lockName)
+            if (row == null) return true
+            if (row.getString("holder") == holder && ++attempt <= LWT_CONTENTION_RETRIES) { Thread.sleep(lwtBackoffMillis(attempt)); continue }
+            return false
+        }
+    }
 }
 
 /**

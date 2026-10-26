@@ -23,6 +23,7 @@ datastax-driver = { module = "com.datastax.oss:java-driver-core", version.ref = 
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktor-server-host-common = { module = "io.ktor:ktor-server-host-common", version.ref = "ktor" }
 ktor-server-test = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
+ktor-test-dispatcher = { module = "io.ktor:ktor-test-dispatcher", version.ref = "ktor" }
 ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
 ktor-metrics-micrometer = { module = "io.ktor:ktor-server-metrics-micrometer", version.ref = "ktor" }
 ktor-health = { module = "io.ktor:ktor-server-health-checks", version.ref = "ktor" }

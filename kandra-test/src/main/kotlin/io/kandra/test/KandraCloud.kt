@@ -136,6 +136,9 @@ object KandraCloud {
                     .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(30))
                     .withDuration(DefaultDriverOption.METADATA_SCHEMA_REQUEST_TIMEOUT, Duration.ofSeconds(30))
                     .withDuration(DefaultDriverOption.CONTROL_CONNECTION_AGREEMENT_TIMEOUT, Duration.ofSeconds(30))
+                    // Also the connection-init/control-connection queries (5 s by default): a loaded cloud
+                    // cluster failed session setup on 'SELECT * FROM system.peers' (GH #205).
+                    .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofSeconds(30))
                     .build()
             )
         val user = env("KANDRA_CLOUD_USERNAME")

@@ -1,6 +1,8 @@
 package io.kandra.migrate
 
 import com.datastax.oss.driver.api.core.CqlSession
+import com.datastax.oss.driver.api.core.cql.Row
+import com.datastax.oss.driver.api.core.servererrors.WriteTimeoutException
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.kandra.core.CqlNaming
 import io.kandra.core.exception.KandraMigrationException
@@ -32,6 +34,18 @@ private val DDL_BOOTSTRAP_STALE_THRESHOLD: Duration = Duration.ofMinutes(2)
 
 /** How long to sleep between polls while waiting for another instance's DDL claim to resolve. */
 private const val DDL_BOOTSTRAP_POLL_MS = 200L
+
+/**
+ * How many times a CAS (LWT) write that timed out under Paxos contention is retried before giving
+ * up (GH #205). Several instances starting together -- a rolling deploy -- all race the same
+ * claim row; the server times a round out rather than queueing, and the driver's default retry
+ * policy rethrows CAS timeouts (it only retries BATCH_LOG). A timeout means "outcome unknown", so
+ * every retry here is preceded by a read of the row.
+ */
+private const val LWT_CONTENTION_RETRIES = 5
+
+private fun lwtBackoffMillis(attempt: Int): Long =
+    100L * attempt + java.util.concurrent.ThreadLocalRandom.current().nextLong(0, 150)
 
 /**
  * Applies versioned [KandraMigration]s to a ScyllaDB keyspace.
@@ -155,6 +169,9 @@ class KandraMigrationRunner @JvmOverloads constructor(
     private val releaseClaimStatement by lazy {
         session.prepare("DELETE FROM $migrationsTable WHERE version = ? IF status = ?")
     }
+    private val readVersionStatement by lazy {
+        session.prepare("SELECT version, name, status, claimed_at, applied_at, checksum FROM $migrationsTable WHERE version = ?")
+    }
     private val serverNowStatement by lazy {
         session.prepare("SELECT toTimestamp(now()) AS server_now FROM $migrationsTable WHERE version = ?")
     }
@@ -265,8 +282,12 @@ class KandraMigrationRunner @JvmOverloads constructor(
             // still in. If the stored value matches that legacy hash, the migration is unchanged;
             // store the new checksum so later layout-only edits verify too.
             if (existing.checksum == migration.legacyChecksum()) {
-                // Not applied only if another instance upgraded the same row first, to the same value.
-                session.execute(updateChecksumStatement.bind(checksum, migration.version, existing.checksum))
+                val upgraded = session.execute(updateChecksumStatement.bind(checksum, migration.version, existing.checksum)).wasApplied()
+                if (!upgraded) {
+                    // Another instance upgraded the same row first, to the same value.
+                    logger.info { "Migration v${migration.version}: stored checksum was already upgraded by another instance." }
+                    return
+                }
                 logger.info {
                     "Migration v${migration.version} ('${migration.name}'): stored checksum upgraded to the " +
                     "line-number-independent form (GH #191)."
@@ -380,35 +401,86 @@ class KandraMigrationRunner @JvmOverloads constructor(
      * includes the current values of that row on failure, so no extra read is needed.
      */
     private fun claim(migration: KandraMigration, checksum: String): MigrationHistory? {
-        val rs = session.execute(
-            claimStatement.bind(
-                migration.version,
-                migration.name,
-                MigrationRowStatus.CLAIMED.name,
-                checksum
-            )
-        )
-        if (rs.wasApplied()) return null
-
-        val row = rs.one() ?: return null
-        return MigrationHistory(
-            version = row.getInt("version"),
-            name = row.getString("name") ?: migration.name,
-            appliedAt = row.getInstant("applied_at") ?: Instant.EPOCH,
-            checksum = row.getString("checksum") ?: "",
-            status = row.getString("status")?.let { runCatching { MigrationRowStatus.valueOf(it) }.getOrNull() }
-                ?: MigrationRowStatus.APPLIED,
-            claimedAt = row.getInstant("claimed_at")
-        )
+        var attempt = 0
+        while (true) {
+            val rs = try {
+                session.execute(
+                    claimStatement.bind(
+                        migration.version,
+                        migration.name,
+                        MigrationRowStatus.CLAIMED.name,
+                        checksum
+                    )
+                )
+            } catch (e: WriteTimeoutException) {
+                // GH #205: the Paxos round timed out under contention, so the outcome is unknown.
+                // Read the row instead of guessing. A row means someone holds this version -- which
+                // can be this very call, if its claim landed but the response was lost; the lost-race
+                // path then treats it like any other fresh CLAIMED row (halt with a WARN; it becomes
+                // reclaimable once stale). No row means the claim did not land, so try again.
+                readVersion(migration.version)?.let { return it }
+                if (++attempt > LWT_CONTENTION_RETRIES) {
+                    throw KandraMigrationException(
+                        "Migration v${migration.version} ('${migration.name}'): claiming it timed out $attempt times " +
+                        "under LWT contention (${e.message}). Other instances are probably starting at the same time; " +
+                        "rerun once they have settled.", e
+                    )
+                }
+                logger.warn { "Migration v${migration.version}: claim timed out under LWT contention (attempt $attempt), retrying." }
+                Thread.sleep(lwtBackoffMillis(attempt))
+                continue
+            }
+            if (rs.wasApplied()) return null
+            val row = rs.one() ?: return null
+            return row.toHistory(migration.name)
+        }
     }
+
+    /** The `kandra_migrations` row for [version], or `null` when there is none. */
+    private fun readVersion(version: Int): MigrationHistory? =
+        session.execute(readVersionStatement.bind(version)).one()?.toHistory(defaultName = "")
+
+    private fun Row.toHistory(defaultName: String) = MigrationHistory(
+        version = getInt("version"),
+        name = getString("name") ?: defaultName,
+        appliedAt = getInstant("applied_at") ?: Instant.EPOCH,
+        checksum = getString("checksum") ?: "",
+        status = getString("status")?.let { runCatching { MigrationRowStatus.valueOf(it) }.getOrNull() }
+            ?: MigrationRowStatus.APPLIED,
+        claimedAt = getInstant("claimed_at")
+    )
 
     /** Marks a claimed migration as confirmed complete. Only called after `up()` returns successfully. */
     private fun markApplied(migration: KandraMigration) {
-        val rs = session.execute(
-            markAppliedStatement.bind(
-                MigrationRowStatus.APPLIED.name, Instant.now(), migration.version, MigrationRowStatus.CLAIMED.name
-            )
-        )
+        var attempt = 0
+        val rs = run {
+            while (true) {
+                try {
+                    return@run session.execute(
+                        markAppliedStatement.bind(
+                            MigrationRowStatus.APPLIED.name, Instant.now(), migration.version, MigrationRowStatus.CLAIMED.name
+                        )
+                    )
+                } catch (e: WriteTimeoutException) {
+                    // GH #205: outcome unknown; the row tells. Only the claimant ever writes APPLIED, so
+                    // an APPLIED row means this write landed. Still CLAIMED: the CAS did not apply, retry.
+                    val current = readVersion(migration.version)
+                    if (current?.status == MigrationRowStatus.APPLIED) return
+                    if (current?.status == MigrationRowStatus.CLAIMED && ++attempt <= LWT_CONTENTION_RETRIES) {
+                        logger.warn { "Migration v${migration.version}: marking it APPLIED timed out under LWT contention (attempt $attempt), retrying." }
+                        Thread.sleep(lwtBackoffMillis(attempt))
+                        continue
+                    }
+                    throw KandraMigrationException(
+                        "Migration v${migration.version} ('${migration.name}') ran, but recording it as APPLIED timed out " +
+                        "under LWT contention (current status: ${current?.status ?: "row missing"}). Check the schema it " +
+                        "creates, then set the row's status to 'APPLIED' (UPDATE kandra_migrations SET status = 'APPLIED' " +
+                        "WHERE version = ${migration.version}).", e
+                    )
+                }
+            }
+            @Suppress("UNREACHABLE_CODE") throw IllegalStateException()
+        }
         if (!rs.wasApplied()) {
             throw KandraMigrationException(
                 "Migration v${migration.version} ('${migration.name}') ran, but its kandra_migrations row was no " +
@@ -505,6 +577,13 @@ internal fun claimAndRunDdlBootstrap(
                 return
             }
             continue
+        }
+
+        if (row.getString("holder") == holder && row.getString("status") == "CLAIMED") {
+            // GH #205: this instance's own claim timed out on the wire but had committed.
+            logger.info { "Kandra: DDL bootstrap lock '$lockName' is held by this instance after a timed-out claim -- running schema DDL." }
+            runClaimedDdlAction(session, locks, lockName, holder, action)
+            return
         }
 
         if (row.getString("status") == "DONE") {
@@ -618,8 +697,19 @@ private fun tryClaimDdlLock(session: CqlSession, locks: String, lockName: String
         "INSERT INTO $locks (lock_name, holder, status, claimed_at) " +
         "VALUES (?, ?, 'CLAIMED', toTimestamp(now())) IF NOT EXISTS"
     )
-    return session.execute(prepared.bind(lockName, holder)).wasApplied()
+    return try {
+        session.execute(prepared.bind(lockName, holder)).wasApplied()
+    } catch (e: WriteTimeoutException) {
+        // GH #205: unknown outcome. Report "not won"; the caller's wait loop re-reads the row and
+        // recognises this holder if the claim did land.
+        logger.warn { "Kandra: claiming DDL bootstrap lock '$lockName' timed out under LWT contention; re-reading the row." }
+        false
+    }
 }
+
+/** The lock row for [lockName], or `null` when there is none. */
+private fun readDdlLock(session: CqlSession, locks: String, lockName: String): Row? =
+    session.execute(session.prepare("SELECT holder, status, claimed_at FROM $locks WHERE lock_name = ?").bind(lockName)).one()
 
 /**
  * Reclaims a stale claim via compare-and-set on its previously-observed `claimed_at`, so that if
@@ -630,7 +720,11 @@ private fun reclaimStaleDdlLock(session: CqlSession, locks: String, lockName: St
         "UPDATE $locks SET holder = ?, status = 'CLAIMED', claimed_at = toTimestamp(now()) " +
         "WHERE lock_name = ? IF claimed_at = ?"
     )
-    return session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
+    return try {
+        session.execute(prepared.bind(holder, lockName, previousClaimedAt)).wasApplied()
+    } catch (e: WriteTimeoutException) {
+        false // GH #205: unknown outcome; the wait loop re-reads and recognises this holder if it won.
+    }
 }
 
 /**
@@ -644,7 +738,19 @@ private fun markDdlLockDone(session: CqlSession, locks: String, lockName: String
     val prepared = session.prepare(
         "UPDATE $locks SET status = 'DONE' WHERE lock_name = ? IF holder = ?"
     )
-    return session.execute(prepared.bind(lockName, holder)).wasApplied()
+    var attempt = 0
+    while (true) {
+        try {
+            return session.execute(prepared.bind(lockName, holder)).wasApplied()
+        } catch (e: WriteTimeoutException) {
+            // GH #205: unknown outcome; the row tells. Only this holder writes DONE under its own name.
+            val row = readDdlLock(session, locks, lockName)
+            val ours = row?.getString("holder") == holder
+            if (ours && row?.getString("status") == "DONE") return true
+            if (ours && ++attempt <= LWT_CONTENTION_RETRIES) { Thread.sleep(lwtBackoffMillis(attempt)); continue }
+            return false
+        }
+    }
 }
 
 /**
@@ -656,7 +762,18 @@ private fun markDdlLockDone(session: CqlSession, locks: String, lockName: String
  */
 private fun releaseDdlLock(session: CqlSession, locks: String, lockName: String, holder: String): Boolean {
     val prepared = session.prepare("DELETE FROM $locks WHERE lock_name = ? IF holder = ?")
-    return session.execute(prepared.bind(lockName, holder)).wasApplied()
+    var attempt = 0
+    while (true) {
+        try {
+            return session.execute(prepared.bind(lockName, holder)).wasApplied()
+        } catch (e: WriteTimeoutException) {
+            // GH #205: unknown outcome; the row tells.
+            val row = readDdlLock(session, locks, lockName)
+            if (row == null) return true
+            if (row.getString("holder") == holder && ++attempt <= LWT_CONTENTION_RETRIES) { Thread.sleep(lwtBackoffMillis(attempt)); continue }
+            return false
+        }
+    }
 }
 
 /**

@@ -7,7 +7,6 @@ import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.test.KandraCloud
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -91,7 +90,7 @@ class SimpleStrategyMultiKeyspaceCloudTest {
         }
         SchemaRegistry.clear()
         val built = cqlSessionsBuilt.get()
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     contactPoints = KandraCloud.contactPointsCsv()

@@ -480,4 +480,15 @@ class CqlSessionBuilderTest {
             "Should not warn about no-auth when a real username was supplied, got: $output"
         )
     }
+
+    // ── GH #205: connection-init query timeout follows requestTimeoutMillis ───────────────
+
+    @Test
+    fun `init-query timeout scales with requestTimeoutMillis and never drops below the driver default`() {
+        fun initQueryTimeout(requestTimeoutMillis: Long) =
+            buildDriverConfig(KandraConfig().apply { pool { this.requestTimeoutMillis = requestTimeoutMillis } })
+                .initialConfig.defaultProfile.getDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT)
+        assertEquals(java.time.Duration.ofSeconds(30), initQueryTimeout(30_000))
+        assertEquals(java.time.Duration.ofSeconds(5), initQueryTimeout(1_000), "the driver's 5 s default is the floor")
+    }
 }

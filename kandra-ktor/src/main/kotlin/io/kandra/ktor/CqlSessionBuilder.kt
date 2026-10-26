@@ -357,6 +357,11 @@ internal fun buildDriverConfig(config: KandraConfig): DriverConfigLoader {
     val builder = DriverConfigLoader.programmaticBuilder()
         .withInt(DefaultDriverOption.CONNECTION_MAX_REQUESTS, config.pool.maxRequestsPerConnection)
         .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofMillis(config.pool.requestTimeoutMillis))
+        // GH #205: the driver's connection-init and control-connection queries (system.peers, schema
+        // refresh, USE keyspace) have their own timeout, 5 s by default, that requestTimeoutMillis never
+        // reached -- a loaded or distant cluster failed session setup with "query 'SELECT * FROM
+        // system.peers' timed out after PT5S". Scale it with the request timeout, never below the default.
+        .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofMillis(maxOf(5_000L, config.pool.requestTimeoutMillis)))
         .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, Duration.ofMillis(config.pool.connectionTimeoutMillis))
         .withDuration(DefaultDriverOption.HEARTBEAT_INTERVAL, Duration.ofSeconds(config.pool.heartbeatIntervalSeconds.toLong()))
         // GH #80 / ISS-072: pool *size* (distinct from per-connection request limits above), still

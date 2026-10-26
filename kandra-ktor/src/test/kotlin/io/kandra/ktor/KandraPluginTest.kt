@@ -20,7 +20,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
@@ -78,7 +77,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `plugin installs without error`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -94,7 +93,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `kandraSession is accessible after install`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -119,7 +118,7 @@ class KandraPluginTest {
      */
     @Test
     fun `strictMode and allowedRemoteDcs can be set together without breaking real query execution`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -162,7 +161,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `graceful shutdown drain exits promptly once in-flight queries finish`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -205,7 +204,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `graceful shutdown forces close after drainTimeoutMs when in-flight queries never finish`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -287,7 +286,12 @@ class KandraPluginTest {
     @Test
     fun `kandra health debounces repeated hits within the cache TTL and re-probes after it elapses`() {
         lateinit var cache: HealthCheckCache
-        testApplication {
+        // The TTL must comfortably exceed one health probe (a cluster round trip), or the second of
+        // the "rapid" hits re-probes and the count below reads 2. 400 ms was not enough: a ~250 ms
+        // WAN probe with jitter overran it on ScyllaDB Cloud, and so did a Docker probe on a loaded
+        // machine (load average 17). The test only needs "well inside" and "well past" the TTL.
+        val ttlMs = if (KandraTestBackend.isCloud) 5_000L else 2_000L
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -295,7 +299,7 @@ class KandraPluginTest {
                     autoCreateKeyspace = true
                     schemaMode = SchemaMode.NONE
                     healthCheck = true
-                    healthCheckCacheTtlMs = 400
+                    healthCheckCacheTtlMs = ttlMs
                 }
                 cache = attributes[KandraHealthCheckCacheKey]
             }
@@ -307,7 +311,7 @@ class KandraPluginTest {
             }
             assertEquals(1, cache.probeCount.get(), "5 rapid hits within the TTL should trigger only one real cluster query")
 
-            delay(500) // past healthCheckCacheTtlMs = 400
+            delay(ttlMs + 100) // past healthCheckCacheTtlMs
             val response = client.get("/kandra/health")
             assertEquals(HttpStatusCode.OK, response.status)
             assertEquals(2, cache.probeCount.get(), "a hit after the TTL elapsed should trigger a fresh cluster query")
@@ -322,7 +326,7 @@ class KandraPluginTest {
     @Test
     fun `install throws when keyspace is not a valid CQL identifier`() {
         val ex = assertThrows(KandraSchemaException::class.java) {
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         contactPoints = "localhost:19999"
@@ -343,7 +347,7 @@ class KandraPluginTest {
     @Test
     fun `install throws when a NetworkTopologyStrategy DC name is not a valid CQL identifier`() {
         val ex = assertThrows(KandraSchemaException::class.java) {
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         contactPoints = "localhost:19999"
@@ -370,7 +374,7 @@ class KandraPluginTest {
     @Test
     fun `install throws when consistency defaultRead is EACH_QUORUM`() {
         val ex = assertThrows(KandraSchemaException::class.java) {
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         contactPoints = "localhost:19999"
@@ -393,7 +397,7 @@ class KandraPluginTest {
     fun `install throws when consistency defaultWrite is SERIAL or LOCAL_SERIAL`() {
         for (level in listOf(KandraConsistency.SERIAL, KandraConsistency.LOCAL_SERIAL)) {
             val ex = assertThrows(KandraSchemaException::class.java) {
-                testApplication {
+                kandraTestApplication {
                     application {
                         install(Kandra) {
                             contactPoints = "localhost:19999"
@@ -420,7 +424,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `install succeeds and queries work with a valid non-default read consistency`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -448,7 +452,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `install succeeds and queries work with a valid keyspace name`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -479,7 +483,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `dcAwareFailover with RETRY_REMOTE_DC wires the driver's native DC-failover options`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -524,7 +528,7 @@ class KandraPluginTest {
     @OptIn(ExperimentalKandraApi::class)
     @Test
     fun `dcAwareFailover without RETRY_REMOTE_DC leaves the driver's DC-failover options inert`() {
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -574,7 +578,7 @@ class KandraPluginTest {
             }
         }
 
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()
@@ -622,7 +626,7 @@ class KandraPluginTest {
             }
         }
 
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     useTestBackend()

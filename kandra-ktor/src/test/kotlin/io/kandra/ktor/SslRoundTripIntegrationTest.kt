@@ -5,7 +5,6 @@ import io.kandra.core.ExperimentalKandraApi
 import io.kandra.core.KandraAuth
 import io.kandra.core.SchemaRegistry
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -200,7 +199,7 @@ class SslRoundTripIntegrationTest {
 
         val testKeyspace = "kandra_ssl_${UUID.randomUUID().toString().replace("-", "")}"
 
-        testApplication {
+        kandraTestApplication {
             application {
                 install(Kandra) {
                     contactPoints = "${cassandra.host}:${cassandra.getMappedPort(9042)}"
@@ -274,7 +273,7 @@ class SslRoundTripIntegrationTest {
 
         var thrown: Throwable? = null
         try {
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         contactPoints = "${cassandra.host}:${cassandra.getMappedPort(9042)}"

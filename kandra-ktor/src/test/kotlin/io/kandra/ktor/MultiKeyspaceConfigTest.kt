@@ -5,7 +5,6 @@ import io.kandra.core.annotations.PartitionKey
 import io.kandra.core.annotations.ScyllaTable
 import io.kandra.core.exception.KandraSchemaException
 import io.ktor.server.application.install
-import io.ktor.server.testing.testApplication
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -143,7 +142,7 @@ class MultiKeyspaceConfigTest {
     fun `install fails fast on an undeclared entity keyspace without connecting`() {
         val before = cqlSessionsBuilt.get()
         val ex = assertThrows(Exception::class.java) {
-            testApplication {
+            kandraTestApplication {
                 application {
                     install(Kandra) {
                         contactPoints = "127.0.0.1:1" // unreachable: must never be dialed

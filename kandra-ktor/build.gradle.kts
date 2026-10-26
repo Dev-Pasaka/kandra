@@ -24,6 +24,7 @@ dependencies {
     testImplementation(project(":kandra-test"))
     testImplementation(project(":kandra-migrate"))
     testImplementation(libs.ktor.server.test)
+    testImplementation(libs.ktor.test.dispatcher) // kandraTestApplication: runTestWithRealTime with a real budget
     testImplementation(libs.ktor.server.netty)
     testImplementation(libs.junit)
     testImplementation(libs.testcontainers.cassandra)
