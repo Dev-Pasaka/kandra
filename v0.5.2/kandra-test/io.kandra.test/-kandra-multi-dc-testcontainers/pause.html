@@ -1,0 +1,76 @@
+<!doctype html>
+<html class="no-js">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <title>pause</title>
+<link href="../../../images/logo-icon.svg" rel="icon" type="image/svg">    <script>var pathToRoot = "../../../";</script>
+    <script>document.documentElement.classList.replace("no-js","js");</script>
+    <script>const storage = localStorage.getItem("dokka-dark-mode")
+    if (storage == null) {
+        const osDarkSchemePreferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (osDarkSchemePreferred === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    } else {
+        const savedDarkMode = JSON.parse(storage)
+        if(savedDarkMode === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    }
+    </script>
+<script type="text/javascript" src="https://unpkg.com/kotlin-playground@1/dist/playground.min.js" async></script>
+<script type="text/javascript" src="../../../scripts/sourceset_dependencies.js" async></script>
+<link href="../../../styles/style.css" rel="Stylesheet">
+<link href="../../../styles/main.css" rel="Stylesheet">
+<link href="../../../styles/prism.css" rel="Stylesheet">
+<link href="../../../styles/logo-styles.css" rel="Stylesheet">
+<link href="../../../styles/font-jb-sans-auto.css" rel="Stylesheet">
+<script type="text/javascript" src="../../../scripts/clipboard.js" async></script>
+<script type="text/javascript" src="../../../scripts/navigation-loader.js" async></script>
+<script type="text/javascript" src="../../../scripts/platform-content-handler.js" async></script>
+<script type="text/javascript" src="../../../scripts/main.js" defer></script>
+<script type="text/javascript" src="../../../scripts/prism.js" async></script>
+<script type="text/javascript" src="../../../scripts/symbol-parameters-wrapper_deferred.js" defer></script></head>
+<body>
+    <div class="root">
+<nav class="navigation" id="navigation-wrapper">
+    <div class="navigation--inner">
+        <div class="navigation-title">
+            <button class="menu-toggle" id="menu-toggle" type="button">toggle menu</button>
+            <div class="library-name">
+<a class="library-name--link" href="../../../index.html">
+                            kandra
+                    </a>            </div>
+            <div class="library-version">0.5.2
+            </div>
+        </div>
+        <div class="filter-section" id="filter-section">
+                <button class="platform-tag platform-selector jvm-like" data-active="" data-filter=":kandra-test:dokkaHtmlPartial/main">jvm</button>
+        </div>
+    </div>
+    <div class="navigation-controls">
+        <button class="navigation-controls--btn navigation-controls--theme" id="theme-toggle-button" type="button">switch theme</button>
+        <div class="navigation-controls--btn navigation-controls--search" id="searchBar" role="button">search in API</div>
+    </div>
+</nav>
+        <div id="container">
+            <div class="sidebar" id="leftColumn">
+                <div class="sidebar--inner" id="sideMenu"></div>
+            </div>
+            <div id="main">
+<div class="main-content" data-page-type="member" id="content" pageids="kandra-test::io.kandra.test/KandraMultiDcTestcontainers/pause/#kotlin.String/PointingToDeclaration//1710684214">
+  <div class="breadcrumbs"><a href="../../index.html">kandra-test</a><span class="delimiter">/</span><a href="../index.html">io.kandra.test</a><span class="delimiter">/</span><a href="index.html">KandraMultiDcTestcontainers</a><span class="delimiter">/</span><span class="current">pause</span></div>
+  <div class="cover ">
+    <h1 class="cover"><span><span>pause</span></span></h1>
+  </div>
+  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-test:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="pause.html"><span class="token function">pause</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">dc<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a></span></span><span class="token punctuation">)</span></div><p class="paragraph">Pauses the container backing <a href="pause.html">dc</a> via the Docker API (<code class="lang-kotlin">docker pause</code>), simulating "this datacenter is unreachable" for failover tests without tearing down and losing the ability to bring it back.</p><h3 class="">What this actually simulates -- and what it doesn't (GH #108 / ISS-095)</h3><p class="paragraph">Docker <code class="lang-kotlin">pause</code> freezes the container's userspace processes via the Linux cgroup freezer. It does <strong>not</strong> sever the container's network namespace or stop the host kernel's TCP stack for it -- any TCP connection already established to this node stays alive at the socket level, simply going quiet because nothing on the far end is scheduled to read or write it anymore. That's closer to "the Cassandra process hung" than "the network link went down": a real network partition (a severed link, a firewall rule, an unplugged cable) typically produces immediate TCP RSTs or ICMP host/port-unreachable on new connection attempts, and can also kill already-established connections outright -- neither of which <code class="lang-kotlin">pause</code> produces. No RST, no ICMP unreachable, and existing sockets are never actively torn down by this call.</p><p class="paragraph">The tests in io.kandra.multidc.MultiDcFailoverTest that use this are built around bounded retry loops tolerant of either failure mode (both eventually manifest as the driver giving up on the node), so this distinction hasn't been observed to change their outcome -- but don't read a passing failover test here as proof of behavior under a <i>severed link</i>, only under an unresponsive/hung node. Always pair with <a href="unpause.html">unpause</a> (or <a href="unpause-all.html">unpauseAll</a>) in <code class="lang-kotlin">@AfterEach</code> -- a paused container left paused breaks every later test sharing this JVM-wide topology.</p><h3 class="">If the JVM dies between <a href="pause.html">pause</a> and cleanup</h3><p class="paragraph"><code class="lang-kotlin">@AfterEach</code>/<code class="lang-kotlin">try-finally</code> cleanup only runs if the JVM is alive to run it. If the JVM itself dies mid-test (a crash, an OOM, <code class="lang-kotlin">System.exit</code>, a killed build daemon) after <a href="pause.html">pause</a> but before <a href="unpause.html">unpause</a>/<a href="unpause-all.html">unpauseAll</a> runs, <code class="lang-kotlin">dc1</code>/<code class="lang-kotlin">dc2</code> is left frozen with nothing left in this process to unpause it. The actual backstop in that scenario is Testcontainers' own Ryuk resource-reaper sidecar, which force-removes every container/network this JVM started once it detects the JVM is gone -- a <i>removed</i> container rather than an indefinitely frozen one, but not an immediate/synchronous guarantee. This reliance is implicit rather than something the fixture enforces itself; there is no JVM-shutdown-hook-based unpause here.</p></div></div>
+</div>
+      <div class="footer">
+        <span class="go-to-top-icon"><a href="#content" id="go-to-top-link"></a></span><span>© 2026 Copyright</span><span class="pull-right"><span>Generated by </span><a href="https://github.com/Kotlin/dokka"><span>dokka</span><span class="padded-icon"></span></a></span>
+      </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

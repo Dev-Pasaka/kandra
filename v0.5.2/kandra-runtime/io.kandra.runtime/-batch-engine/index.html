@@ -1,0 +1,693 @@
+<!doctype html>
+<html class="no-js">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <title>BatchEngine</title>
+<link href="../../../images/logo-icon.svg" rel="icon" type="image/svg">    <script>var pathToRoot = "../../../";</script>
+    <script>document.documentElement.classList.replace("no-js","js");</script>
+    <script>const storage = localStorage.getItem("dokka-dark-mode")
+    if (storage == null) {
+        const osDarkSchemePreferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        if (osDarkSchemePreferred === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    } else {
+        const savedDarkMode = JSON.parse(storage)
+        if(savedDarkMode === true) {
+            document.getElementsByTagName("html")[0].classList.add("theme-dark")
+        }
+    }
+    </script>
+<script type="text/javascript" src="https://unpkg.com/kotlin-playground@1/dist/playground.min.js" async></script>
+<script type="text/javascript" src="../../../scripts/sourceset_dependencies.js" async></script>
+<link href="../../../styles/style.css" rel="Stylesheet">
+<link href="../../../styles/main.css" rel="Stylesheet">
+<link href="../../../styles/prism.css" rel="Stylesheet">
+<link href="../../../styles/logo-styles.css" rel="Stylesheet">
+<link href="../../../styles/font-jb-sans-auto.css" rel="Stylesheet">
+<script type="text/javascript" src="../../../scripts/clipboard.js" async></script>
+<script type="text/javascript" src="../../../scripts/navigation-loader.js" async></script>
+<script type="text/javascript" src="../../../scripts/platform-content-handler.js" async></script>
+<script type="text/javascript" src="../../../scripts/main.js" defer></script>
+<script type="text/javascript" src="../../../scripts/prism.js" async></script>
+<script type="text/javascript" src="../../../scripts/symbol-parameters-wrapper_deferred.js" defer></script></head>
+<body>
+    <div class="root">
+<nav class="navigation" id="navigation-wrapper">
+    <div class="navigation--inner">
+        <div class="navigation-title">
+            <button class="menu-toggle" id="menu-toggle" type="button">toggle menu</button>
+            <div class="library-name">
+<a class="library-name--link" href="../../../index.html">
+                            kandra
+                    </a>            </div>
+            <div class="library-version">0.5.2
+            </div>
+        </div>
+        <div class="filter-section" id="filter-section">
+                <button class="platform-tag platform-selector jvm-like" data-active="" data-filter=":kandra-runtime:dokkaHtmlPartial/main">jvm</button>
+        </div>
+    </div>
+    <div class="navigation-controls">
+        <button class="navigation-controls--btn navigation-controls--theme" id="theme-toggle-button" type="button">switch theme</button>
+        <div class="navigation-controls--btn navigation-controls--search" id="searchBar" role="button">search in API</div>
+    </div>
+</nav>
+        <div id="container">
+            <div class="sidebar" id="leftColumn">
+                <div class="sidebar--inner" id="sideMenu"></div>
+            </div>
+            <div id="main">
+<div class="main-content" data-page-type="classlike" id="content" pageids="kandra-runtime::io.kandra.runtime/BatchEngine///PointingToDeclaration//851772994">
+  <div class="breadcrumbs"><a href="../../index.html">kandra-runtime</a><span class="delimiter">/</span><a href="../index.html">io.kandra.runtime</a><span class="delimiter">/</span><span class="current">BatchEngine</span></div>
+  <div class="cover ">
+    <h1 class="cover"><span>Batch</span><wbr><span><span>Engine</span></span></h1>
+    <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">class </span><a href="index.html">BatchEngine</a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">session<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core/CqlSession///PointingToDeclaration/">CqlSession</span><span class="token punctuation">, </span></span><span class="parameter ">statementBuilder<span class="token operator">: </span><a href="../-statement-builder/index.html">StatementBuilder</a><span class="token punctuation">, </span></span><span class="parameter ">scope<span class="token operator">: </span><span data-unresolved-link="kotlinx.coroutines/CoroutineScope///PointingToDeclaration/">CoroutineScope</span><span class="token punctuation">, </span></span><span class="parameter ">eventListener<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-event-listener/index.html">KandraEventListener</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">retryConfig<span class="token operator">: </span><a href="../-retry-config/index.html">RetryConfig</a><span class="token operator"> = </span>RetryConfig()<span class="token punctuation">, </span></span><span class="parameter ">debugConfig<span class="token operator">: </span><a href="../-debug-config/index.html">DebugConfig</a><span class="token operator"> = </span>DebugConfig()<span class="token punctuation">, </span></span><span class="parameter ">codec<span class="token operator">: </span><a href="../../io.kandra.runtime.codec/-kandra-codec/index.html">KandraCodec</a><span class="token operator"> = </span>KandraCodec.default</span></span><span class="token punctuation">)</span></div><p class="paragraph">Executes save, update, delete, and saveAll operations using LOGGED batch statements.</p><p class="paragraph">BATCH-consistency lookups are included in the atomic batch. EVENTUAL-consistency lookups fire asynchronously via <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/scope.html">scope</a> after the batch commits, but are routed through the same <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/execute-with-retry.html">executeWithRetry</a>/<a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/execute-with-retry-suspend.html">executeWithRetrySuspend</a> path as every other write: they retry on transient failures per retryConfig.retryOn, are counted in <a href="in-flight-count.html">inFlightCount</a> so graceful shutdown drains them before closing the session, and are rejected once <a href="is-shutting-down.html">isShuttingDown</a> is set — same as any synchronous query. Failures (including "rejected due to shutdown") are forwarded to <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/event-listener.html">eventListener</a> (if set) then logged.</p><p class="paragraph">Transient failures listed in retryConfig.retryOn are retried with linear backoff — except the <code class="lang-kotlin">@Version</code> LWT update statement (see <a href="update.html">update</a>/<a href="update-suspend.html">updateSuspend</a>), which is executed exactly once via <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/execute-once.html">executeOnce</a>/<a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/execute-once-suspend.html">executeOnceSuspend</a> to avoid a blind retry masking a real success as a spurious <a href="../../../kandra-core/io.kandra.core.exception/-kandra-optimistic-lock-exception/index.html">KandraOptimisticLockException</a>. When <a href="is-shutting-down.html">isShuttingDown</a> is set, all new queries — eventual lookups included — are rejected with <a href="../../../kandra-core/io.kandra.core.exception/-kandra-query-exception/index.html">KandraQueryException</a>.</p></div></div>
+  </div>
+  <div class="tabbedcontent">
+    <div class="tabs-section" tabs-section="tabs-section"><button class="section-tab" data-active="" data-togglable="CONSTRUCTOR,TYPE,PROPERTY,FUNCTION">Members</button></div>
+    <div class="tabs-section-body">
+      <div data-togglable="CONSTRUCTOR">
+        <h2 class="">Constructors</h2>
+        <div class="table"><a data-name="-1811554759%2FConstructors%2F851772994" anchor-label="BatchEngine" id="-1811554759%2FConstructors%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-togglable="CONSTRUCTOR" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="-batch-engine.html"><span>Batch</span><wbr><span><span>Engine</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1811554759%2FConstructors%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">constructor</span><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">session<span class="token operator">: </span><span data-unresolved-link="com.datastax.oss.driver.api.core/CqlSession///PointingToDeclaration/">CqlSession</span><span class="token punctuation">, </span></span><span class="parameter ">statementBuilder<span class="token operator">: </span><a href="../-statement-builder/index.html">StatementBuilder</a><span class="token punctuation">, </span></span><span class="parameter ">scope<span class="token operator">: </span><span data-unresolved-link="kotlinx.coroutines/CoroutineScope///PointingToDeclaration/">CoroutineScope</span><span class="token punctuation">, </span></span><span class="parameter ">eventListener<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-event-listener/index.html">KandraEventListener</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">retryConfig<span class="token operator">: </span><a href="../-retry-config/index.html">RetryConfig</a><span class="token operator"> = </span>RetryConfig()<span class="token punctuation">, </span></span><span class="parameter ">debugConfig<span class="token operator">: </span><a href="../-debug-config/index.html">DebugConfig</a><span class="token operator"> = </span>DebugConfig()<span class="token punctuation">, </span></span><span class="parameter ">codec<span class="token operator">: </span><a href="../../io.kandra.runtime.codec/-kandra-codec/index.html">KandraCodec</a><span class="token operator"> = </span>KandraCodec.default</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="PROPERTY">
+        <h2 class="">Properties</h2>
+        <div class="table"><a data-name="-735811016%2FProperties%2F851772994" anchor-label="inFlightCount" id="-735811016%2FProperties%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="in-flight-count.html"><span>in</span><wbr><span>Flight</span><wbr><span><span>Count</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-735811016%2FProperties%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="in-flight-count.html">inFlightCount</a><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/atomic/AtomicInteger.html">AtomicInteger</a></div><div class="brief "><p class="paragraph">Tracks queries currently executing — used by graceful shutdown drain.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1151931930%2FProperties%2F851772994" anchor-label="isShuttingDown" id="1151931930%2FProperties%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="is-shutting-down.html"><span>is</span><wbr><span>Shutting</span><wbr><span><span>Down</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1151931930%2FProperties%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">val </span><a href="is-shutting-down.html">isShuttingDown</a><span class="token operator">: </span><a href="https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/atomic/AtomicBoolean.html">AtomicBoolean</a></div><div class="brief "><p class="paragraph">Set to true by the shutdown hook to stop accepting new queries.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-togglable="FUNCTION">
+        <h2 class="">Functions</h2>
+        <div class="table"><a data-name="387891310%2FFunctions%2F851772994" anchor-label="append" id="387891310%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="append.html"><span><span>append</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="387891310%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="append.html"><span class="token function">append</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">keyValues<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">values<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="2047144400%2FFunctions%2F851772994" anchor-label="appendSuspend" id="2047144400%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="append-suspend.html"><span>append</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="2047144400%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="append-suspend.html"><span class="token function">appendSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">keyValues<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">values<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Uses <a href="../-statement-builder/append-to-collection-suspend.html">StatementBuilder.appendToCollectionSuspend</a> (async prepare) — see GH #27 / ISS-049.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-986250500%2FFunctions%2F851772994" anchor-label="configureBatchLimits" id="-986250500%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="configure-batch-limits.html"><span>configure</span><wbr><span>Batch</span><wbr><span><span>Limits</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-986250500%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="configure-batch-limits.html"><span class="token function">configureBatchLimits</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">warnThresholdKb<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token punctuation">, </span></span><span class="parameter ">maxChunkSize<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token punctuation">, </span></span><span class="parameter ">autoChunk<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a><span class="token punctuation">, </span></span><span class="parameter ">tombstoneWarnThreshold<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator"> = </span><span class="token constant">1000</span></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1392740087%2FFunctions%2F851772994" anchor-label="decrement" id="-1392740087%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="decrement.html"><span><span>decrement</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1392740087%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="decrement.html"><span class="token function">decrement</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">partitionKeys<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-map/index.html">Map</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">by<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1987854103%2FFunctions%2F851772994" anchor-label="decrementSuspend" id="-1987854103%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="decrement-suspend.html"><span>decrement</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1987854103%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="decrement-suspend.html"><span class="token function">decrementSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">partitionKeys<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-map/index.html">Map</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">by<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Uses <a href="../-statement-builder/counter-update-suspend.html">StatementBuilder.counterUpdateSuspend</a> (async prepare) — see GH #27 / ISS-049.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-135247455%2FFunctions%2F851772994" anchor-label="delete" id="-135247455%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="delete.html"><span><span>delete</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-135247455%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="delete.html"><span class="token function">delete</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-84537188%2FFunctions%2F851772994" anchor-label="deleteAll" id="-84537188%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="delete-all.html"><span>delete</span><wbr><span><span>All</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-84537188%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="delete-all.html"><span class="token function">deleteAll</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entities<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="229263126%2FFunctions%2F851772994" anchor-label="deleteAllSuspend" id="229263126%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="delete-all-suspend.html"><span>delete</span><wbr><span>All</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="229263126%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="delete-all-suspend.html"><span class="token function">deleteAllSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entities<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="789475551%2FFunctions%2F851772994" anchor-label="deleteById" id="789475551%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="delete-by-id.html"><span>delete</span><wbr><span>By</span><wbr><span><span>Id</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="789475551%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="delete-by-id.html"><span class="token function">deleteById</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">vararg </span>keyValues<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Deletes a row by full primary key without looking up the entity first — used by <a href="../../io.kandra.runtime.repository/-kandra-repository/delete-by-id.html">io.kandra.runtime.repository.KandraRepository.deleteById</a>'s "not found" branch (nothing to diff against, so there's no lookup-table cleanup possible here; unlike <a href="delete.html">delete</a> this never touches lookup rows). Routed through <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/execute-with-retry.html">executeWithRetry</a> so it gets the same shutdown gate, retry-on-transient-error, and <a href="in-flight-count.html">inFlightCount</a> tracking as every other write.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-213721113%2FFunctions%2F851772994" anchor-label="deleteByIdSuspend" id="-213721113%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="delete-by-id-suspend.html"><span>delete</span><wbr><span>By</span><wbr><span>Id</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-213721113%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="delete-by-id-suspend.html"><span class="token function">deleteByIdSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter "><span class="token keyword">vararg </span>keyValues<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Suspend counterpart of <a href="delete-by-id.html">deleteById</a> — see its doc. Uses <a href="../-statement-builder/delete-by-id-suspend.html">StatementBuilder.deleteByIdSuspend</a> (async prepare) rather than the blocking <a href="../-statement-builder/delete-by-id.html">StatementBuilder.deleteById</a> (GH #27 / ISS-049).</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-102553339%2FFunctions%2F851772994" anchor-label="deleteSuspend" id="-102553339%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="delete-suspend.html"><span>delete</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-102553339%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="delete-suspend.html"><span class="token function">deleteSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="209631917%2FFunctions%2F851772994" anchor-label="increment" id="209631917%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="increment.html"><span><span>increment</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="209631917%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="increment.html"><span class="token function">increment</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">partitionKeys<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-map/index.html">Map</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">by<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-865657147%2FFunctions%2F851772994" anchor-label="incrementSuspend" id="-865657147%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="increment-suspend.html"><span>increment</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-865657147%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="increment-suspend.html"><span class="token function">incrementSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">partitionKeys<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-map/index.html">Map</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">by<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Uses <a href="../-statement-builder/counter-update-suspend.html">StatementBuilder.counterUpdateSuspend</a> (async prepare) — see GH #27 / ISS-049.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1710473885%2FFunctions%2F851772994" anchor-label="put" id="-1710473885%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="put.html"><span><span>put</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1710473885%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="put.html"><span class="token function">put</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">keyValues<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">entries<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Despite the name, this is a map merge/overwrite-by-key (<code class="lang-kotlin">col = col + ?</code>) — see <a href="../-statement-builder/append-to-collection.html">StatementBuilder.appendToCollection</a>'s doc.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1095506117%2FFunctions%2F851772994" anchor-label="putSuspend" id="-1095506117%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="put-suspend.html"><span>put</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1095506117%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="put-suspend.html"><span class="token function">putSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">keyValues<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">entries<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Uses <a href="../-statement-builder/append-to-collection-suspend.html">StatementBuilder.appendToCollectionSuspend</a> (async prepare) — see GH #27 / ISS-049.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="395596888%2FFunctions%2F851772994" anchor-label="registerValidator" id="395596888%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="register-validator.html"><span>register</span><wbr><span><span>Validator</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="395596888%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><span class="token operator">&lt;</span><a href="register-validator.html">T</a><span class="token operator"> : </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt; </span><a href="register-validator.html"><span class="token function">registerValidator</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">klass<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.reflect/-k-class/index.html">KClass</a><span class="token operator">&lt;</span><a href="register-validator.html">T</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">validator<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-validator/index.html">KandraValidator</a><span class="token operator">&lt;</span><a href="register-validator.html">T</a><span class="token operator">&gt;</span></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-2041462204%2FFunctions%2F851772994" anchor-label="remove" id="-2041462204%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="remove.html"><span><span>remove</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-2041462204%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="remove.html"><span class="token function">remove</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">keyValues<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">values<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-757443782%2FFunctions%2F851772994" anchor-label="removeSuspend" id="-757443782%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="remove-suspend.html"><span>remove</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-757443782%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="remove-suspend.html"><span class="token function">removeSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">keyValues<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">columnName<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-string/index.html">String</a><span class="token punctuation">, </span></span><span class="parameter ">values<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div><div class="brief "><p class="paragraph">Uses <a href="../-statement-builder/remove-from-collection-suspend.html">StatementBuilder.removeFromCollectionSuspend</a> (async prepare) — see GH #27 / ISS-049.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-797161423%2FFunctions%2F851772994" anchor-label="save" id="-797161423%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save.html"><span><span>save</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-797161423%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="save.html"><span class="token function">save</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">timestampMicros<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-827373743%2FFunctions%2F851772994" anchor-label="saveAll" id="-827373743%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-all.html"><span>save</span><wbr><span><span>All</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-827373743%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="save-all.html"><span class="token function">saveAll</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entities<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">useBatch<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a><span class="token operator"> = </span><span class="token boolean">true</span><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="285407155%2FFunctions%2F851772994" anchor-label="saveAllSuspend" id="285407155%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-all-suspend.html"><span>save</span><wbr><span>All</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="285407155%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="save-all-suspend.html"><span class="token function">saveAllSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entities<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin.collections/-list/index.html">List</a><span class="token operator">&lt;</span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">&gt;</span><span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">useBatch<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a><span class="token operator"> = </span><span class="token boolean">true</span><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-546625328%2FFunctions%2F851772994" anchor-label="saveAndGet" id="-546625328%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-and-get.html"><span>save</span><wbr><span>And</span><wbr><span><span>Get</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-546625328%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="save-and-get.html"><span class="token function">saveAndGet</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">timestampMicros<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></div><div class="brief "><p class="paragraph">Same write path as <a href="save.html">save</a>, but returns the entity actually persisted — with any <code class="lang-kotlin">@GeneratedUuid</code>/<code class="lang-kotlin">@CreatedAt</code>/<code class="lang-kotlin">@UpdatedAt</code>/<code class="lang-kotlin">@Version</code> values <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/inject-timestamps.html">injectTimestamps</a>/ <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/inject-initial-version.html">injectInitialVersion</a> generated before the write, instead of discarding that copy the way <a href="save.html">save</a> does. See GH #132 / ISS-096: callers who relied on <code class="lang-kotlin">save()</code>'s <code class="lang-kotlin">Unit</code> return and then reused their original entity (e.g. to build an HTTP response) were silently working with placeholder values — <code class="lang-kotlin">UUID(0, 0)</code>, <code class="lang-kotlin">Instant.EPOCH</code> — while the row that actually landed in Scylla carried the real generated ones.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1797989994%2FFunctions%2F851772994" anchor-label="saveAndGetSuspend" id="1797989994%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-and-get-suspend.html"><span>save</span><wbr><span>And</span><wbr><span>Get</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1797989994%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="save-and-get-suspend.html"><span class="token function">saveAndGetSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">timestampMicros<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></div><div class="brief "><p class="paragraph">Suspend counterpart of <a href="save-and-get.html">saveAndGet</a> — see its doc for why this exists (GH #132 / ISS-096).</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1871798629%2FFunctions%2F851772994" anchor-label="saveIfNotExists" id="1871798629%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-if-not-exists.html"><span>save</span><wbr><span>If</span><wbr><span>Not</span><wbr><span><span>Exists</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1871798629%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="save-if-not-exists.html"><span class="token function">saveIfNotExists</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">serialConsistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator"> = </span>KandraConsistency.LOCAL_SERIAL</span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-341950396%2FFunctions%2F851772994" anchor-label="saveIfNotExistsAndGet" id="-341950396%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-if-not-exists-and-get.html"><span>save</span><wbr><span>If</span><wbr><span>Not</span><wbr><span>Exists</span><wbr><span>And</span><wbr><span><span>Get</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-341950396%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="save-if-not-exists-and-get.html"><span class="token function">saveIfNotExistsAndGet</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">serialConsistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator"> = </span>KandraConsistency.LOCAL_SERIAL</span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">?</span></div><div class="brief "><p class="paragraph">Same LWT write path as <a href="save-if-not-exists.html">saveIfNotExists</a>, but returns the entity actually persisted — with any <code class="lang-kotlin">@GeneratedUuid</code>/<code class="lang-kotlin">@CreatedAt</code>/<code class="lang-kotlin">@UpdatedAt</code> values <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/inject-timestamps.html">injectTimestamps</a> computed before the write — instead of discarding that copy behind a bare <code class="lang-kotlin">Boolean</code> the way <a href="save-if-not-exists.html">saveIfNotExists</a> does. Returns <code class="lang-kotlin">null</code> when the <code class="lang-kotlin">IF NOT EXISTS</code> check did not apply (a row already existed under this key) — the same "nothing was written" signal <a href="save-if-not-exists.html">saveIfNotExists</a> reports as <code class="lang-kotlin">false</code>. See GH #138: same root-cause shape as GH #132 (<code class="lang-kotlin">save()</code>, fixed by <code class="lang-kotlin">saveAndGet()</code>) and GH #136 (<code class="lang-kotlin">update()</code>, fixed by <code class="lang-kotlin">updateAndGet()</code>) — a third instance of the same gap in this file.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-711474494%2FFunctions%2F851772994" anchor-label="saveIfNotExistsAndGetSuspend" id="-711474494%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-if-not-exists-and-get-suspend.html"><span>save</span><wbr><span>If</span><wbr><span>Not</span><wbr><span>Exists</span><wbr><span>And</span><wbr><span>Get</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-711474494%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="save-if-not-exists-and-get-suspend.html"><span class="token function">saveIfNotExistsAndGetSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">serialConsistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator"> = </span>KandraConsistency.LOCAL_SERIAL</span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token operator">?</span></div><div class="brief "><p class="paragraph">Suspend counterpart of <a href="save-if-not-exists-and-get.html">saveIfNotExistsAndGet</a> — see its doc for why this exists (GH #138).</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-183219583%2FFunctions%2F851772994" anchor-label="saveIfNotExistsSuspend" id="-183219583%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-if-not-exists-suspend.html"><span>save</span><wbr><span>If</span><wbr><span>Not</span><wbr><span>Exists</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-183219583%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="save-if-not-exists-suspend.html"><span class="token function">saveIfNotExistsSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">serialConsistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator"> = </span>KandraConsistency.LOCAL_SERIAL</span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-172283927%2FFunctions%2F851772994" anchor-label="saveSuspend" id="-172283927%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-suspend.html"><span>save</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-172283927%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="save-suspend.html"><span class="token function">saveSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">timestampMicros<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-long/index.html">Long</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1592328720%2FFunctions%2F851772994" anchor-label="saveWithNulls" id="1592328720%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-with-nulls.html"><span>save</span><wbr><span>With</span><wbr><span><span>Nulls</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1592328720%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="save-with-nulls.html"><span class="token function">saveWithNulls</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1567863460%2FFunctions%2F851772994" anchor-label="saveWithNullsSuspend" id="-1567863460%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="save-with-nulls-suspend.html"><span>save</span><wbr><span>With</span><wbr><span>Nulls</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1567863460%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="save-with-nulls-suspend.html"><span class="token function">saveWithNullsSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="1840881027%2FFunctions%2F851772994" anchor-label="setMetrics" id="1840881027%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="set-metrics.html"><span>set</span><wbr><span><span>Metrics</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="1840881027%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="set-metrics.html"><span class="token function">setMetrics</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">recorder<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-metrics/index.html">KandraMetrics</a></span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-340831834%2FFunctions%2F851772994" anchor-label="update" id="-340831834%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="update.html"><span><span>update</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-340831834%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="update.html"><span class="token function">update</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">old<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">new<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">serialConsistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator"> = </span>KandraConsistency.LOCAL_SERIAL</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-2099402115%2FFunctions%2F851772994" anchor-label="updateAndGet" id="-2099402115%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="update-and-get.html"><span>update</span><wbr><span>And</span><wbr><span><span>Get</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-2099402115%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="update-and-get.html"><span class="token function">updateAndGet</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">old<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">new<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">serialConsistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator"> = </span>KandraConsistency.LOCAL_SERIAL<span class="token punctuation">, </span></span><span class="parameter ">writeNulls<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a><span class="token operator"> = </span><span class="token boolean">false</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></div><div class="brief "><p class="paragraph">Same write path as <a href="update.html">update</a>, but returns the entity actually persisted — with the post-update <code class="lang-kotlin">@Version</code> (and <code class="lang-kotlin">@UpdatedAt</code>) <a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/inject-version.html">injectVersion</a>/<a href="../../../kandra-runtime/io.kandra.runtime/-batch-engine/inject-timestamps.html">injectTimestamps</a> computed for the write, instead of discarding that copy the way <a href="update.html">update</a> does. See GH #136: a caller who relied on <code class="lang-kotlin">update()</code>'s <code class="lang-kotlin">Unit</code> return and then reused the pre-update version it already had for a subsequent optimistic-locked update got a spurious <a href="../../../kandra-core/io.kandra.core.exception/-kandra-optimistic-lock-exception/index.html">KandraOptimisticLockException</a> against a write that had actually succeeded — it never learned its own prior write's resulting version.</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-657353473%2FFunctions%2F851772994" anchor-label="updateAndGetSuspend" id="-657353473%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="update-and-get-suspend.html"><span>update</span><wbr><span>And</span><wbr><span>Get</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-657353473%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="update-and-get-suspend.html"><span class="token function">updateAndGetSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">old<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">new<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">serialConsistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator"> = </span>KandraConsistency.LOCAL_SERIAL<span class="token punctuation">, </span></span><span class="parameter ">writeNulls<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-boolean/index.html">Boolean</a><span class="token operator"> = </span><span class="token boolean">false</span></span></span><span class="token punctuation">)</span><span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a></div><div class="brief "><p class="paragraph">Suspend counterpart of <a href="update-and-get.html">updateAndGet</a> — see its doc for why this exists (GH #136).</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1599197423%2FFunctions%2F851772994" anchor-label="updateForce" id="-1599197423%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="update-force.html"><span>update</span><wbr><span><span>Force</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1599197423%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">fun </span><a href="update-force.html"><span class="token function">updateForce</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="-1354504145%2FFunctions%2F851772994" anchor-label="updateForceSuspend" id="-1354504145%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="update-force-suspend.html"><span>update</span><wbr><span>Force</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="-1354504145%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="update-force-suspend.html"><span class="token function">updateForceSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">entity<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+<a data-name="577511302%2FFunctions%2F851772994" anchor-label="updateSuspend" id="577511302%2FFunctions%2F851772994" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main"></a>
+          <div class="table-row" data-filterable-current=":kandra-runtime:dokkaHtmlPartial/main" data-filterable-set=":kandra-runtime:dokkaHtmlPartial/main">
+            <div class="main-subrow keyValue ">
+              <div class=""><span class="inline-flex">
+                  <div><a href="update-suspend.html"><span>update</span><wbr><span><span>Suspend</span></span></a></div>
+<span class="anchor-wrapper"><span class="anchor-icon" pointing-to="577511302%2FFunctions%2F851772994"></span>
+                    <div class="copy-popup-wrapper "><span class="copy-popup-icon"></span><span>Link copied to clipboard</span></div>
+                  </span></span></div>
+              <div>
+                <div class="title">
+                  <div class="platform-hinted " data-platform-hinted="data-platform-hinted"><div class="content sourceset-dependent-content" data-active="" data-togglable=":kandra-runtime:dokkaHtmlPartial/main"><div class="symbol monospace"><span class="token keyword">suspend </span><span class="token keyword">fun </span><a href="update-suspend.html"><span class="token function">updateSuspend</span></a><span class="token punctuation">(</span><span class="parameters "><span class="parameter ">schema<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core.schema/-table-schema/index.html">TableSchema</a><span class="token punctuation">, </span></span><span class="parameter ">old<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">new<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-any/index.html">Any</a><span class="token punctuation">, </span></span><span class="parameter ">consistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">ttlSeconds<span class="token operator">: </span><a href="https://kotlinlang.org/api/latest/jvm/stdlib/kotlin-stdlib/kotlin/-int/index.html">Int</a><span class="token operator">?</span><span class="token operator"> = </span>null<span class="token punctuation">, </span></span><span class="parameter ">serialConsistency<span class="token operator">: </span><a href="../../../kandra-core/io.kandra.core/-kandra-consistency/index.html">KandraConsistency</a><span class="token operator"> = </span>KandraConsistency.LOCAL_SERIAL</span></span><span class="token punctuation">)</span></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      <div class="footer">
+        <span class="go-to-top-icon"><a href="#content" id="go-to-top-link"></a></span><span>© 2026 Copyright</span><span class="pull-right"><span>Generated by </span><a href="https://github.com/Kotlin/dokka"><span>dokka</span><span class="padded-icon"></span></a></span>
+      </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
