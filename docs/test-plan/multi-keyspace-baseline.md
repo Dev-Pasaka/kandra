@@ -101,7 +101,7 @@ Remaining gaps / by design Docker-only:
 `KANDRA_TEST_BACKEND=cloud ./gradlew test --continue` on `main` after #187-#191/#194/#198/#203: 646 tests, 19 failures, 1 h 31 m.
 Measured per statement from here (RTT 245 ms): `CREATE KEYSPACE` ~5 s, `CREATE TABLE` 1-2 s, `CREATE INDEX` ~3 s, `DROP KEYSPACE` ~8 s,
 LWT ~0.4 s. One-keyspace `install(Kandra)` takes 30-65 s, three keyspaces 140-197 s. The coordinator's clock is ~120-250 ms ahead of
-this Mac. Failure classes and what was done (#205, PR pending):
+this Mac. Failure classes and what was done (#205, PR #206):
 
 | Failures | Cause | Fix |
 |---|---|---|

@@ -12,7 +12,7 @@
   *(`reset()`, `closeAndReset()`, the captured-statement views and the `api` driver dependency arrived in 0.5.1 — see the
   [0.5.1 changelog](../changelog/0.5.1.md). On 0.5.0, add `java-driver-core` yourself and use `@OptIn(InternalKandraApi::class)` around `SchemaRegistry.clear()`.)*
 - Setup your test module needs (JUnit does not come transitively): `org.junit.jupiter:junit-jupiter` with `tasks.test { useJUnitPlatform() }`, and Testcontainers
-  `1.21.4`+ for `KandraTestcontainers` (1.20.x cannot connect to current Docker). From the next release *(unreleased, next: 0.5.2 — GH #190)*
+  `1.21.4`+ for `KandraTestcontainers` (1.20.x cannot connect to current Docker). Since 0.5.2 (GH #190)
   `kandra-test` brings `org.testcontainers:cassandra` and `org.testcontainers:testcontainers` 1.21.4 itself; on 0.5.1 add
   `testImplementation("org.testcontainers:cassandra:1.21.4")`, or `KandraTestcontainers.freshKeyspace()` fails with `NoClassDefFoundError`. Calling `SchemaRegistry.clear()` directly still needs
   `@OptIn(InternalKandraApi::class)` — prefer `KandraTestUtils.reset()`.

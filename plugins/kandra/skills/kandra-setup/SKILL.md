@@ -5,7 +5,7 @@ description: How to add Kandra (ScyllaDB/Cassandra ORM for Ktor) to a new or exi
 
 # Setting up Kandra in a project
 
-Group id: `com.kandraorm.kandra` (Maven Central). Current release: **0.5.1** (check Maven Central or the repo's
+Group id: `com.kandraorm.kandra` (Maven Central). Current release: **0.5.2** (check Maven Central or the repo's
 `gradle.properties` for newer). Built and tested against **Ktor 3.6.x / Kotlin 2.3.x**; Ktor 2.x is unsupported and
 Ktor 4.x is not covered.
 
@@ -31,7 +31,7 @@ plugins {
 }
 
 dependencies {
-    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.1"))
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.2"))
     implementation("com.kandraorm.kandra:kandra-ktor")
     implementation("com.kandraorm.kandra:kandra-koin")        // or kandra-kodein
     ksp("com.kandraorm.kandra:kandra-codegen")                 // optional

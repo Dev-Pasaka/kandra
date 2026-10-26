@@ -26,7 +26,7 @@ For those, use `KandraTestcontainers`.
 add `com.datastax.oss:java-driver-core:4.17.0` yourself and wrap `SchemaRegistry.clear()` in `@OptIn(io.kandra.core.InternalKandraApi::class)`. For `KandraTestcontainers` use Testcontainers
 `1.21.4`+ — 1.20.x cannot connect to current Docker releases ("Could not find a valid Docker environment").
 
-**Testcontainers comes with `kandra-test` (unreleased, next: 0.5.2, GH #190).** `org.testcontainers:cassandra` and
+**Testcontainers comes with `kandra-test` (0.5.2, GH #190).** `org.testcontainers:cassandra` and
 `org.testcontainers:testcontainers` are `api` dependencies of `kandra-test` at the version it was built against (1.21.4).
 On 0.5.1 and earlier they were `compileOnly`, so `KandraTestcontainers.freshKeyspace()` failed with
 `NoClassDefFoundError: org/testcontainers/containers/CassandraContainer` unless you added

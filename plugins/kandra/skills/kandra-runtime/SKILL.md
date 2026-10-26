@@ -129,8 +129,8 @@ userRepo.saveAll(users, useBatch = true)                   // chunks at 100 by d
 fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL)
 fun updateForce(entity: T, consistency: KandraConsistency? = null)
 fun updateAndGet(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T
-fun updateWithNulls(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL)      // unreleased (next: 0.5.2)
-fun updateWithNullsAndGet(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T // unreleased (next: 0.5.2)
+fun updateWithNulls(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL)      // 0.5.2
+fun updateWithNullsAndGet(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T // 0.5.2
 ```
 
 **Nulls in `update()`.** Like `save()`, every `update()` leaves a `null` nullable column **UNSET**: the stored value stays and no tombstone is written. That holds for both shapes, including a `@Version` entity, which before the fix for GH #189 bound `NULL` for every null column on every versioned update. To clear columns, use **`updateWithNulls`/`updateWithNullsAndGet`** (GH #189): the same write as `update`/`updateAndGet` (same version check, lookup maintenance and return value), but a `null` property is bound as `NULL`.
@@ -695,7 +695,7 @@ class RetryConfig {
 class KandraBatchScope internal constructor(session: CqlSession, batchEngine: BatchEngine) {
     suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null)
     suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatchAndGet(entity: T, ttlSeconds: Int? = null): T   // entity with generated values resolved
-    suspend fun <T : Any> KandraSuspendRepository<T>.saveWithNullsInBatch(entity: T, ttlSeconds: Int? = null)    // unreleased (next: 0.5.2), GH #189
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveWithNullsInBatch(entity: T, ttlSeconds: Int? = null)    // 0.5.2, GH #189
     suspend fun <T : Any> KandraSuspendRepository<T>.saveWithNullsInBatchAndGet(entity: T, ttlSeconds: Int? = null): T
     suspend fun <T : Any> KandraSuspendRepository<T>.deleteInBatch(entity: T)
     fun <T : Any> KandraSuspendRepository<T>.saveIfNotExistsInBatch(entity: T): Boolean   // always throws

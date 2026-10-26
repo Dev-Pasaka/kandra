@@ -2,7 +2,7 @@
 
 Kandra is a Kotlin ORM for ScyllaDB/Cassandra, shipped as a Ktor `ApplicationPlugin`. It maps Kotlin data classes to ScyllaDB tables and provides type-safe repositories, automatic schema management, optimistic locking, soft delete, query caching, and more.
 
-> **Version:** 0.5.1 · **Kotlin:** 2.3.21 · **Ktor:** 3.6 · **Driver:** DataStax Java Driver 4.17.0
+> **Version:** 0.5.2 · **Kotlin:** 2.3.21 · **Ktor:** 3.6 · **Driver:** DataStax Java Driver 4.17.0
 
 ---
 
@@ -79,7 +79,7 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.1"))
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.2"))
     implementation("com.kandraorm.kandra:kandra-ktor")       // Ktor plugin (required)
     implementation("com.kandraorm.kandra:kandra-runtime")    // repositories and batch engine
     implementation("com.kandraorm.kandra:kandra-core")       // annotations and schema model
@@ -204,7 +204,7 @@ data class User(
 ```
 
 Column names that are reserved CQL words (`token`, `order`, `from`, `default`, `select`, …) are quoted automatically
-in all generated CQL, so `@PartitionKey val token: String` just works *(unreleased, next: 0.5.2 — GH #188; on 0.5.1 it fails
+in all generated CQL, so `@PartitionKey val token: String` just works *(0.5.2 — GH #188; on 0.5.1 it fails
 `CREATE TABLE` with `no viable alternative at input 'token'`, so rename it, e.g. `@Column(name = "invite_token")`)*. Only words
 Cassandra or ScyllaDB actually reject are quoted; `timestamp`, `type`, `key`, `ttl` and the like stay as they are. A reserved
 **table or keyspace** name is rejected when the entity is registered, with a clear message.
@@ -333,7 +333,7 @@ data class User(
 `users_by_email` and `users_by_phone`.
 
 `@LookupIndex` can also go on a `@ClusteringKey` or `@PartitionKey` property, e.g. to find a row of a
-`(userId, requestId)` table by `requestId` alone *(unreleased, next: 0.5.2 — GH #187; on 0.5.1 the generated lookup table
+`(userId, requestId)` table by `requestId` alone *(0.5.2 — GH #187; on 0.5.1 the generated lookup table
 declared the column twice and `CREATE TABLE` failed with `Duplicate column ... declaration`)*.
 
 | Parameter | Type | Default | Description |
@@ -1308,7 +1308,7 @@ When you intentionally want to overwrite an existing value with `NULL` (writing 
 repo.saveWithNulls(user.copy(phone = null))
 ```
 
-The same pair exists for updates and batches *(unreleased, next: 0.5.2 — GH #189)*:
+The same pair exists for updates and batches *(0.5.2 — GH #189)*:
 
 ```kotlin
 repo.update(old, old.copy(phone = null))           // phone keeps its stored value (UNSET)
@@ -1323,7 +1323,7 @@ kandra.batch {
 
 `updateWithNullsAndGet` and `saveWithNullsInBatchAndGet` return the persisted entity, like `updateAndGet` / `saveInBatchAndGet`.
 
-> **Versioned `update()` and nulls.** From the next release, `update()` on a `@Version` entity leaves a `null` column UNSET, like every other
+> **Versioned `update()` and nulls.** From 0.5.2, `update()` on a `@Version` entity leaves a `null` column UNSET, like every other
 > write. Through 0.5.1 it bound `NULL` for every null column, writing a tombstone per null column on every versioned update. If you relied on
 > that to clear a column, call `updateWithNulls()`.
 
@@ -1583,7 +1583,7 @@ Add the dependency:
 testImplementation("com.kandraorm.kandra:kandra-test")
 // kandra-test does not bring JUnit: also add org.junit.jupiter:junit-jupiter (+ tasks.test { useJUnitPlatform() }), and Testcontainers 1.21.4+
 // if you use KandraTestcontainers (1.20.x cannot connect to current Docker). On 0.5.0 also add com.datastax.oss:java-driver-core.
-testImplementation("org.testcontainers:cassandra:1.21.4")   // needed on 0.5.1 and earlier; kandra-test brings it from the next release (GH #190)
+testImplementation("org.testcontainers:cassandra:1.21.4")   // needed on 0.5.1 and earlier; kandra-test brings it since 0.5.2 (GH #190)
 testImplementation("org.testcontainers:junit-jupiter:1.21.4") // only if you use the @Testcontainers JUnit extension
 ```
 
