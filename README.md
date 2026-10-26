@@ -934,7 +934,7 @@ Use `@LookupIndex` instead for high-cardinality columns — it creates a proper 
 ```kotlin
 // Add to build.gradle.kts:
 // testImplementation("com.kandraorm.kandra:kandra-test")
-// testImplementation("org.testcontainers:cassandra:1.21.4")
+// testImplementation("org.testcontainers:cassandra:1.21.4")   // 0.5.1 and earlier only — kandra-test brings it from the next release (GH #190)
 
 class UserRepositoryTest {
     private lateinit var db: KandraRuntimeHandle
@@ -1019,6 +1019,10 @@ userRepo.save(user.copy(middleName = null))
 
 userRepo.saveWithNulls(user.copy(middleName = null))
 // ↑ writes an explicit NULL — use only when you intend to tombstone the column
+
+// Unreleased (next: 0.5.2, GH #189): the same choice for updates and batches
+userRepo.updateWithNulls(old, old.copy(middleName = null))            // clears it, with the @Version check
+kandra.batch { userRepo.saveWithNullsInBatch(user.copy(middleName = null)) }
 ```
 
 ---

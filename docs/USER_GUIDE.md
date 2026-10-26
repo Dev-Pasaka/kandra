@@ -203,6 +203,12 @@ data class User(
 )
 ```
 
+Column names that are reserved CQL words (`token`, `order`, `from`, `default`, `select`, …) are quoted automatically
+in all generated CQL, so `@PartitionKey val token: String` just works *(unreleased, next: 0.5.2 — GH #188; on 0.5.1 it fails
+`CREATE TABLE` with `no viable alternative at input 'token'`, so rename it, e.g. `@Column(name = "invite_token")`)*. Only words
+Cassandra or ScyllaDB actually reject are quoted; `timestamp`, `type`, `key`, `ttl` and the like stay as they are. A reserved
+**table or keyspace** name is rejected when the entity is registered, with a clear message.
+
 ---
 
 ### `@Transient`
@@ -325,6 +331,10 @@ data class User(
 
 `tableSuffix` is appended to the primary table's name — the example above generates
 `users_by_email` and `users_by_phone`.
+
+`@LookupIndex` can also go on a `@ClusteringKey` or `@PartitionKey` property, e.g. to find a row of a
+`(userId, requestId)` table by `requestId` alone *(unreleased, next: 0.5.2 — GH #187; on 0.5.1 the generated lookup table
+declared the column twice and `CREATE TABLE` failed with `Duplicate column ... declaration`)*.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -1298,6 +1308,25 @@ When you intentionally want to overwrite an existing value with `NULL` (writing 
 repo.saveWithNulls(user.copy(phone = null))
 ```
 
+The same pair exists for updates and batches *(unreleased, next: 0.5.2 — GH #189)*:
+
+```kotlin
+repo.update(old, old.copy(phone = null))           // phone keeps its stored value (UNSET)
+repo.updateWithNulls(old, old.copy(phone = null))  // phone is cleared (NULL), with the same @Version check as update()
+
+kandra.batch {
+    users.saveInBatch(user.copy(phone = null))          // phone untouched
+    users.saveWithNullsInBatch(user.copy(phone = null)) // phone cleared, atomically with the batch's other writes
+    audit.saveInBatch(AuditRow(user.id, "phone removed"))
+}
+```
+
+`updateWithNullsAndGet` and `saveWithNullsInBatchAndGet` return the persisted entity, like `updateAndGet` / `saveInBatchAndGet`.
+
+> **Versioned `update()` and nulls.** From the next release, `update()` on a `@Version` entity leaves a `null` column UNSET, like every other
+> write. Through 0.5.1 it bound `NULL` for every null column, writing a tombstone per null column on every versioned update. If you relied on
+> that to clear a column, call `updateWithNulls()`.
+
 > **Use sparingly.** Each `NULL` write creates a tombstone that persists for `gc_grace_seconds`. Excessive tombstones degrade read performance and compaction.
 
 ---
@@ -1554,8 +1583,8 @@ Add the dependency:
 testImplementation("com.kandraorm.kandra:kandra-test")
 // kandra-test does not bring JUnit: also add org.junit.jupiter:junit-jupiter (+ tasks.test { useJUnitPlatform() }), and Testcontainers 1.21.4+
 // if you use KandraTestcontainers (1.20.x cannot connect to current Docker). On 0.5.0 also add com.datastax.oss:java-driver-core.
-testImplementation("org.testcontainers:cassandra:1.21.4")
-testImplementation("org.testcontainers:junit-jupiter:1.21.4")
+testImplementation("org.testcontainers:cassandra:1.21.4")   // needed on 0.5.1 and earlier; kandra-test brings it from the next release (GH #190)
+testImplementation("org.testcontainers:junit-jupiter:1.21.4") // only if you use the @Testcontainers JUnit extension
 ```
 
 ---

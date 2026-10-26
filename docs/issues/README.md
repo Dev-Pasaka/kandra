@@ -8,10 +8,18 @@ policy; nothing was lost, they're just not represented here.
 
 ## Open
 
-No ISS entry is open as of 2026-10-20, and no GitHub issue is open. GH #160 (Ktor 3.x compatibility and CI coverage, split out of
+No ISS entry is open as of 2026-10-25. GH #160 (Ktor 3.x compatibility and CI coverage, split out of
 [ISS-101](ISS-101-ktor-version-range-undocumented.md)) shipped in 0.5.0. Four later fixes are tracked on GitHub only and shipped in 0.5.1:
 GH #178 (`@CacheResult` key normalization) and GH #179–#181 (`kandra-test` usability) — see the
 [0.5.1 changelog](../changelog/0.5.1.md).
+
+GitHub-only, fixed on `main` and not yet released (next: 0.5.2), each with a live Testcontainers test — see the
+[unreleased changelog](../changelog/unreleased.md): GH #187 (`@LookupIndex` on a key column), #188 (reserved-word column names),
+#189 (writing nulls in batches/updates), #190 (Testcontainers as `kandra-test` `api` deps), #191 (migration checksum vs. source
+layout), #194 (migration-runner startup cost), #198 (soft-delete codec), #203 (migration claim writes lost under clock skew), #205 (LWT timeouts under contention crashed startup).
+
+Open on GitHub: **#199** — runtime performance findings from the 2026-10-25 code review (statement-cache locking, literal
+`TTL`/`TIMESTAMP` in CQL, single-statement `LOGGED` batches, per-call repository/cache construction, and more).
 
 (The 2026-09-09 post-fix critical-audit batch, ISS-080–ISS-096, sat in this section listed as
 "Open" for over a month after every one of its GH issues had actually been closed — caught and

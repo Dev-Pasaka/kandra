@@ -129,6 +129,15 @@ userRepo.saveAll(users, useBatch = true)                   // chunks at 100 by d
 fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL)
 fun updateForce(entity: T, consistency: KandraConsistency? = null)
 fun updateAndGet(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T
+fun updateWithNulls(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL)      // unreleased (next: 0.5.2)
+fun updateWithNullsAndGet(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null, serialConsistency: KandraConsistency = KandraConsistency.LOCAL_SERIAL): T // unreleased (next: 0.5.2)
+```
+
+**Nulls in `update()`.** Like `save()`, every `update()` leaves a `null` nullable column **UNSET**: the stored value stays and no tombstone is written. That holds for both shapes, including a `@Version` entity, which before the fix for GH #189 bound `NULL` for every null column on every versioned update. To clear columns, use **`updateWithNulls`/`updateWithNullsAndGet`** (GH #189): the same write as `update`/`updateAndGet` (same version check, lookup maintenance and return value), but a `null` property is bound as `NULL`.
+
+```kotlin
+claims.update(existing, existing.copy(releasedAt = null))           // releasedAt keeps its stored value
+claims.updateWithNulls(existing, existing.copy(releasedAt = null))  // releasedAt is cleared (tombstone)
 ```
 
 **`updateAndGet`** — same write as `update`, but returns the entity as persisted, including the post-update `@Version`/`@UpdatedAt`. Chain it for repeated optimistic-locked updates of one row: reusing the stale pre-update object in a second `update()` throws `KandraOptimisticLockException`. GH #136.
@@ -211,10 +220,13 @@ fun deleteBy(block: QueryContext.() -> Unit)
 - **`delete(entity)`** — extracts partition key values from `entity` via reflection (throws
   `KandraQueryException` if any is `null`). If `schema.isSoftDelete && schema.softDeleteTtlSeconds !=
   null`: instead of `DELETE`, issues `UPDATE <table> USING TTL <ttl> SET col1=?, col2=?, ... WHERE
-  pk=?` covering every non-transient, non-counter column (so all values are rewritten with a fresh
-  TTL — the whole row, not just a marker column), then separately deletes any lookup-table rows for
-  this entity (outside the batch, via plain `session.execute`/`executeSuspend`, one statement per
-  lookup — **not retried**, since it bypasses `executeWithRetry`). Otherwise: builds a `LOGGED BATCH`
+  pk=?` covering every non-transient, non-counter, non-marker column (so all values are rewritten with
+  a fresh TTL), then, when a `markerProperty` is configured, `INSERT`s the key columns plus
+  `marker = true` `USING TTL <markerTtlSeconds>` (a fresh row marker that expires too, GH #154). Values
+  are encoded through `KandraCodec` like every other write (enum and custom-encoded columns work; before
+  the GH #198 fix they failed with `CodecNotFoundException`); a `null` column is bound as `NULL` so no
+  stale cell outlives the TTL. Lookup-table rows are **left in place** (ISS-030): a soft-deleted row
+  stays resolvable through its `@LookupIndex` until it expires. Otherwise: builds a `LOGGED BATCH`
   of `DELETE FROM <table> WHERE pk=...` plus one `DELETE` per lookup table (using each lookup's index
   value read off the entity; if that value is `null` on the entity, that lookup's delete is silently
   skipped).
@@ -683,14 +695,18 @@ class RetryConfig {
 class KandraBatchScope internal constructor(session: CqlSession, batchEngine: BatchEngine) {
     suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatch(entity: T, ttlSeconds: Int? = null)
     suspend fun <T : Any> KandraSuspendRepository<T>.saveInBatchAndGet(entity: T, ttlSeconds: Int? = null): T   // entity with generated values resolved
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveWithNullsInBatch(entity: T, ttlSeconds: Int? = null)    // unreleased (next: 0.5.2), GH #189
+    suspend fun <T : Any> KandraSuspendRepository<T>.saveWithNullsInBatchAndGet(entity: T, ttlSeconds: Int? = null): T
     suspend fun <T : Any> KandraSuspendRepository<T>.deleteInBatch(entity: T)
     fun <T : Any> KandraSuspendRepository<T>.saveIfNotExistsInBatch(entity: T): Boolean   // always throws
 }
 ```
 
-Reachable only via the suspend `KandraRuntime.batch { }`. The blocking `batchBlocking { }` takes a separate `KandraBlockingBatchScope` (`@ExperimentalKandraApi`) with the same `saveInBatch`/`saveInBatchAndGet`/`deleteInBatch`/`saveIfNotExistsInBatch` extensions on the blocking `KandraRepository<T>` (non-suspend) — they are distinct types so each overload set resolves unambiguously (GH #99). Collects statements from
+Reachable only via the suspend `KandraRuntime.batch { }`. The blocking `batchBlocking { }` takes a separate `KandraBlockingBatchScope` (`@ExperimentalKandraApi`) with the same `saveInBatch`/`saveInBatchAndGet`/`saveWithNullsInBatch`/`saveWithNullsInBatchAndGet`/`deleteInBatch`/`saveIfNotExistsInBatch` extensions on the blocking `KandraRepository<T>` (non-suspend) — they are distinct types so each overload set resolves unambiguously (GH #99). Collects statements from
 `saveInBatch`/`deleteInBatch` calls (via `BatchEngine.collectSave`/`collectDelete` — same primary-row +
-`BATCH`-lookup statement building as the standalone methods, `EVENTUAL` lookups are **not** included)
+`BATCH`-lookup statement building as the standalone methods, `EVENTUAL` lookups are **not** included;
+`saveWithNullsInBatch` builds the primary row like `saveWithNulls`, binding a `null` property as `NULL`
+so a column can be cleared atomically with the batch's other writes, while `saveInBatch` leaves it UNSET)
 into one list, then on scope exit executes them as a single `LOGGED BATCH` via
 `BatchEngine.executeBatchScopeSuspend` (suspend `batch { }`: commit uses `session.executeSuspend`, so it does not block the
 coroutine's thread) or the blocking `session.execute(batch)` (`batchBlocking { }`), both with the same shutdown gate / retry /

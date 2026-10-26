@@ -36,6 +36,12 @@ val createdAt: Instant
 ### `@Column`
 Optional rename: `@Column(name = "cql_name")`.
 
+Column names that are reserved CQL words (`token`, `order`, `from`, `default`, `select`, …) are quoted automatically
+in all generated CQL, so `@PartitionKey val token: String` just works *(unreleased, next: 0.5.2 — GH #188; on 0.5.1 it fails
+`CREATE TABLE` with `no viable alternative at input 'token'`, so rename it, e.g. `@Column(name = "invite_token")`)*. Only words
+Cassandra or ScyllaDB actually reject are quoted; `timestamp`, `type`, `key`, `ttl` and the like stay as they are. A reserved
+**table or keyspace** name is rejected when the entity is registered, with a clear message.
+
 ### `@Version`
 Enables optimistic locking via Lightweight Transactions (LWT).
 
@@ -199,6 +205,9 @@ data class User(
 example above generates `users_by_email` and `users_by_phone`, each `PRIMARY KEY` on the annotated
 column, storing just enough of the primary key to resolve back to the primary row (see
 `repositories.md` for how `findAll { UserTable.email eq "..." }` resolves through it).
+
+The annotated property may itself be a `@ClusteringKey` or `@PartitionKey`; the lookup table then holds it once, plus the
+remaining key columns *(unreleased, next: 0.5.2 — GH #187)*.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|

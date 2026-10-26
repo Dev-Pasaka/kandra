@@ -119,6 +119,14 @@ application.kandra.batch {
 
 By default Kandra uses `UNSET` binding for nullable `null` fields — no tombstone is written. Use `saveWithNulls()` to intentionally write `NULL` (e.g. to overwrite a previously set value with empty).
 
+| Leaves a `null` column unchanged (UNSET) | Clears a `null` column (writes `NULL`) |
+|---|---|
+| `save()` | `saveWithNulls()` |
+| `update()` / `updateAndGet()` (plain and `@Version`) | `updateWithNulls()` / `updateWithNullsAndGet()` *(unreleased, GH #189)* |
+| `saveInBatch()` / `saveInBatchAndGet()` | `saveWithNullsInBatch()` / `saveWithNullsInBatchAndGet()` *(unreleased, GH #189)* |
+
+Through 0.5.1 a versioned (`@Version`) `update()` wrote `NULL` for every null column; from the next release it leaves them UNSET like the other writes.
+
 ## Raw queries (injection-safe)
 
 ```kotlin
