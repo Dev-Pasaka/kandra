@@ -137,14 +137,23 @@ class KandraMigrationRunner @JvmOverloads constructor(
             "VALUES (?, ?, ?, toTimestamp(now()), ?) IF NOT EXISTS"
         )
     }
+    // Every write to a row that claim() created is itself conditional (an LWT). The claim is an
+    // `IF NOT EXISTS` Paxos write, timestamped by the coordinator's ballot; a plain UPDATE/DELETE
+    // after it is timestamped by this JVM's clock instead. When that clock lags the cluster's,
+    // the later plain write carries an *older* timestamp and silently loses -- markApplied's
+    // `status = APPLIED` vanished and the row stayed CLAIMED (seen in a full test run against a
+    // Docker container whose clock had drifted ahead). Conditional writes are ordered by Paxos
+    // ballots, not by clocks, so they always land after the claim.
     private val markAppliedStatement by lazy {
-        session.prepare("UPDATE $migrationsTable SET status = ?, applied_at = ? WHERE version = ?")
+        session.prepare(
+            "UPDATE $migrationsTable SET status = ?, applied_at = ? WHERE version = ? IF status = ?"
+        )
     }
     private val updateChecksumStatement by lazy {
-        session.prepare("UPDATE $migrationsTable SET checksum = ? WHERE version = ?")
+        session.prepare("UPDATE $migrationsTable SET checksum = ? WHERE version = ? IF checksum = ?")
     }
     private val releaseClaimStatement by lazy {
-        session.prepare("DELETE FROM $migrationsTable WHERE version = ?")
+        session.prepare("DELETE FROM $migrationsTable WHERE version = ? IF status = ?")
     }
     private val serverNowStatement by lazy {
         session.prepare("SELECT toTimestamp(now()) AS server_now FROM $migrationsTable WHERE version = ?")
@@ -235,7 +244,7 @@ class KandraMigrationRunner @JvmOverloads constructor(
                 // (An Error, e.g. from a crashed/killed process, is NOT caught here on purpose --
                 // that's exactly the case handleUnresolvedClaim exists to surface loudly instead
                 // of silently trusting or silently retrying.)
-                session.execute(releaseClaimStatement.bind(migration.version))
+                session.execute(releaseClaimStatement.bind(migration.version, MigrationRowStatus.CLAIMED.name))
                 throw KandraMigrationException("Migration v${migration.version} ('${migration.name}') failed: ${e.message}", e)
             }
             markApplied(migration)
@@ -256,7 +265,8 @@ class KandraMigrationRunner @JvmOverloads constructor(
             // still in. If the stored value matches that legacy hash, the migration is unchanged;
             // store the new checksum so later layout-only edits verify too.
             if (existing.checksum == migration.legacyChecksum()) {
-                session.execute(updateChecksumStatement.bind(checksum, migration.version))
+                // Not applied only if another instance upgraded the same row first, to the same value.
+                session.execute(updateChecksumStatement.bind(checksum, migration.version, existing.checksum))
                 logger.info {
                     "Migration v${migration.version} ('${migration.name}'): stored checksum upgraded to the " +
                     "line-number-independent form (GH #191)."
@@ -394,7 +404,20 @@ class KandraMigrationRunner @JvmOverloads constructor(
 
     /** Marks a claimed migration as confirmed complete. Only called after `up()` returns successfully. */
     private fun markApplied(migration: KandraMigration) {
-        session.execute(markAppliedStatement.bind(MigrationRowStatus.APPLIED.name, Instant.now(), migration.version))
+        val rs = session.execute(
+            markAppliedStatement.bind(
+                MigrationRowStatus.APPLIED.name, Instant.now(), migration.version, MigrationRowStatus.CLAIMED.name
+            )
+        )
+        if (!rs.wasApplied()) {
+            throw KandraMigrationException(
+                "Migration v${migration.version} ('${migration.name}') ran, but its kandra_migrations row was no " +
+                "longer CLAIMED by this run when it was to be marked APPLIED (current status: " +
+                "${rs.one()?.getString("status") ?: "row missing"}). Another process changed or removed the row " +
+                "while up() was running. Check the schema it creates, then set the row's status to 'APPLIED' " +
+                "(or delete it to rerun the migration)."
+            )
+        }
     }
 }
 
