@@ -13,8 +13,8 @@ No ISS entry is open as of 2026-10-25. GH #160 (Ktor 3.x compatibility and CI co
 GH #178 (`@CacheResult` key normalization) and GH #179–#181 (`kandra-test` usability) — see the
 [0.5.1 changelog](../changelog/0.5.1.md).
 
-GitHub-only, fixed on `main` and not yet released (next: 0.5.2), each with a live Testcontainers test — see the
-[unreleased changelog](../changelog/unreleased.md): GH #187 (`@LookupIndex` on a key column), #188 (reserved-word column names),
+GitHub-only, shipped in 0.5.2 (2026-10-26), each with a live Testcontainers test — see the
+[0.5.2 changelog](../changelog/0.5.2.md): GH #187 (`@LookupIndex` on a key column), #188 (reserved-word column names),
 #189 (writing nulls in batches/updates), #190 (Testcontainers as `kandra-test` `api` deps), #191 (migration checksum vs. source
 layout), #194 (migration-runner startup cost), #198 (soft-delete codec), #203 (migration claim writes lost under clock skew), #205 (LWT timeouts under contention crashed startup).
 

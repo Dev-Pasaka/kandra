@@ -73,7 +73,7 @@ fun Application.module() {
         autoCreateKeyspace = true
         schemaMode = SchemaMode.AUTO_CREATE
         register(User::class, Wallet::class)
-        pool { requestTimeoutMillis = 10_000 }   // also sets the driver's connection-init/control-connection query timeout to max(5 s, this) -- GH #205, unreleased
+        pool { requestTimeoutMillis = 10_000 }   // also sets the driver's connection-init/control-connection query timeout to max(5 s, this) -- GH #205, 0.5.2
         auth { provider = KandraAuth.fromEnv() }
         debug { logQueries = true; logSlowQueriesMs = 500 }
     }

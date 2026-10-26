@@ -1,7 +1,7 @@
 # Kandra — Feature Reference
 
 One file per feature area. Start here, follow the links. Describes the current branch: the released version
-is 0.5.1 (see [changelog 0.5.1](../changelog/0.5.1.md)).
+is 0.5.2 (see [changelog 0.5.2](../changelog/0.5.2.md)).
 
 | Area | File |
 |---|---|

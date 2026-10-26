@@ -101,7 +101,7 @@ against Ktor 3 in CI, and the Ktor-facing modules are also re-tested in a CI mat
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.1"))
+    implementation(platform("com.kandraorm.kandra:kandra-bom:0.5.2"))
     implementation("com.kandraorm.kandra:kandra-ktor")
     implementation("com.kandraorm.kandra:kandra-koin")   // or kandra-kodein
     ksp("com.kandraorm.kandra:kandra-codegen")           // optional — type-safe table objects
@@ -934,7 +934,7 @@ Use `@LookupIndex` instead for high-cardinality columns — it creates a proper 
 ```kotlin
 // Add to build.gradle.kts:
 // testImplementation("com.kandraorm.kandra:kandra-test")
-// testImplementation("org.testcontainers:cassandra:1.21.4")   // 0.5.1 and earlier only — kandra-test brings it from the next release (GH #190)
+// testImplementation("org.testcontainers:cassandra:1.21.4")   // 0.5.1 and earlier only — kandra-test brings it since 0.5.2 (GH #190)
 
 class UserRepositoryTest {
     private lateinit var db: KandraRuntimeHandle
@@ -1020,7 +1020,7 @@ userRepo.save(user.copy(middleName = null))
 userRepo.saveWithNulls(user.copy(middleName = null))
 // ↑ writes an explicit NULL — use only when you intend to tombstone the column
 
-// Unreleased (next: 0.5.2, GH #189): the same choice for updates and batches
+// Since 0.5.2 (GH #189): the same choice for updates and batches
 userRepo.updateWithNulls(old, old.copy(middleName = null))            // clears it, with the @Version check
 kandra.batch { userRepo.saveWithNullsInBatch(user.copy(middleName = null)) }
 ```

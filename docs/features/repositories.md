@@ -122,10 +122,10 @@ By default Kandra uses `UNSET` binding for nullable `null` fields — no tombsto
 | Leaves a `null` column unchanged (UNSET) | Clears a `null` column (writes `NULL`) |
 |---|---|
 | `save()` | `saveWithNulls()` |
-| `update()` / `updateAndGet()` (plain and `@Version`) | `updateWithNulls()` / `updateWithNullsAndGet()` *(unreleased, GH #189)* |
-| `saveInBatch()` / `saveInBatchAndGet()` | `saveWithNullsInBatch()` / `saveWithNullsInBatchAndGet()` *(unreleased, GH #189)* |
+| `update()` / `updateAndGet()` (plain and `@Version`) | `updateWithNulls()` / `updateWithNullsAndGet()` *(0.5.2, GH #189)* |
+| `saveInBatch()` / `saveInBatchAndGet()` | `saveWithNullsInBatch()` / `saveWithNullsInBatchAndGet()` *(0.5.2, GH #189)* |
 
-Through 0.5.1 a versioned (`@Version`) `update()` wrote `NULL` for every null column; from the next release it leaves them UNSET like the other writes.
+Through 0.5.1 a versioned (`@Version`) `update()` wrote `NULL` for every null column; from 0.5.2 it leaves them UNSET like the other writes.
 
 ## Raw queries (injection-safe)
 

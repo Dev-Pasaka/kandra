@@ -39,7 +39,7 @@ names — when in doubt, they say so explicitly rather than guessing.
 | `@PartitionKey(index = 0)` | Property | Use `index` for composite partition keys — multiple fields share the same tuple. |
 | `@ClusteringKey(order = ASC, index = 0)` | Property | Clustering column. |
 | `@LookupIndex(tableSuffix, consistency = BATCH)` | Property | Generates a denormalized `{table}_{suffix}` lookup table. `BATCH` = atomic with the primary write; `EVENTUAL` = fire-and-forget after commit. High-cardinality query fields (email, phone) should use this, not `@SecondaryIndex`. |
-| `@Column(name)` | Property | Overrides the CQL column name. A reserved CQL word as a column name (`token`, `order`, `from`, ...) is quoted automatically in generated CQL (GH #188, unreleased — on 0.5.1 rename it with `@Column`). A reserved table/keyspace name is rejected at registration. |
+| `@Column(name)` | Property | Overrides the CQL column name. A reserved CQL word as a column name (`token`, `order`, `from`, ...) is quoted automatically in generated CQL (GH #188, 0.5.2 — on 0.5.1 rename it with `@Column`). A reserved table/keyspace name is rejected at registration. |
 | `@Transient` | Property | Excluded from all CQL operations. |
 | `@Ttl(seconds)` | Class | Default TTL for the primary table (not inherited by lookup tables). |
 | `@Counter` | Property | ScyllaDB `COUNTER` column. **Every** non-key column in a counter table must be `@Counter` — mix with regular columns and DDL fails. |
@@ -65,7 +65,7 @@ fun saveIfNotExistsAndGet(entity: T, serialConsistency: KandraConsistency = LOCA
 fun saveAll(entities: List<T>, useBatch: Boolean = true, consistency: KandraConsistency? = null)   // auto-chunks per batchMaxChunkSize/batchAutoChunk
 
 fun update(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null)     // ⚠️ TWO entity args — not update(new). LWT IF version=? when @Version present; ttlSeconds re-applies USING TTL or the row's TTL silently clears (ISS-058)
-fun updateWithNulls(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null)   // like update(), but a null property is written as NULL (clears it) — GH #189, unreleased
+fun updateWithNulls(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null)   // like update(), but a null property is written as NULL (clears it) — GH #189, 0.5.2
 fun updateForce(entity: T, consistency: KandraConsistency? = null)     // bypasses the @Version check entirely
 fun updateAndGet(old: T, new: T, consistency: KandraConsistency? = null, ttlSeconds: Int? = null): T   // returns the post-update @Version — use for chained optimistic updates
 
@@ -131,7 +131,7 @@ KandraMigrationRunner(session).run(V2_AddPhoneIndex)   // call BEFORE install(Ka
 Migrations are `object`s (singletons), checksummed from `(version, name, class)` plus the migration's normalized
 compiled bytecode (its own class file and its synthetic siblings) — never edit an applied migration's body, or
 `KandraMigrationRunner` throws `KandraMigrationException` on the checksum mismatch. Debug data (line numbers, the
-Kotlin inline source map) is excluded, so reformatting the file is safe (GH #191, unreleased — on 0.5.1 avoid inline
+Kotlin inline source map) is excluded, so reformatting the file is safe (GH #191, 0.5.2 — on 0.5.1 avoid inline
 calls such as `forEach` inside `up()`).
 
 ## Exceptions
@@ -162,4 +162,4 @@ All extend `KandraException(message, cause)`:
 - Counter tables can't use `save()` — only `increment()`/`decrement()`.
 - `@SecondaryIndex` queries scatter-gather the whole cluster; reach for `@LookupIndex` for anything on a hot path or high-cardinality field.
 - `IN` queries only work on single-column partition keys — composite PK tables throw `KandraQueryException`.
-- `saveWithNulls()` vs `save()` — using the wrong one either leaves stale data (should've nulled it) or writes unwanted tombstones (should've used UNSET). The same pair exists for updates (`update()` vs `updateWithNulls()`) and inside `batch { }` (`saveInBatch()` vs `saveWithNullsInBatch()`) — GH #189, unreleased (next: 0.5.2). A versioned `update()` leaves nulls UNSET too, as of that release.
+- `saveWithNulls()` vs `save()` — using the wrong one either leaves stale data (should've nulled it) or writes unwanted tombstones (should've used UNSET). The same pair exists for updates (`update()` vs `updateWithNulls()`) and inside `batch { }` (`saveInBatch()` vs `saveWithNullsInBatch()`) — GH #189, 0.5.2 (next: 0.5.2). A versioned `update()` leaves nulls UNSET too, as of 0.5.2.
